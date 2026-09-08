@@ -137,4 +137,3 @@ El backend está en fase inicial de desarrollo. La base de la arquitectura y el 
 - [Prisma](https://www.prisma.io/)
 - [Supabase](https://supabase.com/)
 - [Gemini API](https://ai.google.dev/)
-

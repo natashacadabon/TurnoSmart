@@ -12,11 +12,26 @@
     "dev:backend": "npm run dev --workspace=apps/backend",
     "docker:dev": "docker compose -f infra/docker/compose.dev.yml up --build",
     "docker:down": "docker compose -f infra/docker/compose.dev.yml down",
+    "lint": "eslint --no-config-lookup --config eslint.config.mjs \"apps/backend/**/*.{js,mjs,cjs,ts,tsx}\" \"packages/shared/**/*.{js,mjs,cjs,ts,tsx}\"",
+    "lint:frontend": "eslint --no-config-lookup --config apps/frontend/eslint.config.mjs \"apps/frontend/src/**/*.{js,jsx,mjs,cjs,ts,tsx}\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build": "echo \"Pendiente: configurar build del monorepo\"",
-    "test": "echo \"Pendiente: configurar tests\""
+    "test": "echo \"Pendiente: configurar tests\"",
+    "prepare": "husky"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "eslint": "^9.36.0",
+    "eslint-config-next": "^16.3.4",
+    "eslint-config-prettier": "^10.0.2",
+    "globals": "^16.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.46.0"
   }
 }
-

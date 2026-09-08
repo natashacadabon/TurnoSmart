@@ -1,11 +1,3 @@
-export type AppointmentStatus =
-  | "PENDING"
-  | "CONFIRMED"
-  | "COMPLETED"
-  | "CANCELLED"
-  | "NO_SHOW";
+export type AppointmentStatus = 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
 
-export type RiskLevel =
-  | "LOW"
-  | "MEDIUM"
-  | "HIGH";
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
