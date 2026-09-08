@@ -8,9 +8,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "echo \"Pendiente: configurar frontend y backend\"",
-    "dev:frontend": "echo \"Pendiente: crear app Next.js en apps/frontend\"",
-    "dev:backend": "echo \"Pendiente: crear API Express en apps/backend\"",
+    "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "dev:backend": "npm run dev --workspace=apps/backend",
+    "docker:dev": "docker compose -f infra/docker/compose.dev.yml up --build",
+    "docker:down": "docker compose -f infra/docker/compose.dev.yml down",
     "build": "echo \"Pendiente: configurar build del monorepo\"",
     "test": "echo \"Pendiente: configurar tests\""
   },

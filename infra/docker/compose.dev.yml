@@ -1,0 +1,53 @@
+services:
+  frontend:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.dev
+
+    container_name: turnosmart-frontend
+
+    command: >
+      npm run dev --workspace=apps/frontend --
+      --hostname 0.0.0.0
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+
+    volumes:
+      - ../..:/workspace
+      - node_modules:/workspace/node_modules
+      - next_cache:/workspace/apps/frontend/.next
+
+    depends_on:
+      - backend
+
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.dev
+
+    container_name: turnosmart-backend
+
+    command: npm run dev --workspace=apps/backend
+
+    ports:
+      - "4000:4000"
+
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+
+    volumes:
+      - ../..:/workspace
+      - node_modules:/workspace/node_modules
+
+
+volumes:
+  node_modules:
+  next_cache:
