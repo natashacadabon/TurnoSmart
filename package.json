@@ -8,16 +8,17 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "npm run dev:frontend",
     "dev:frontend": "npm run dev --workspace=apps/frontend",
     "dev:backend": "npm run dev --workspace=apps/backend",
-    "docker:dev": "docker compose -f infra/docker/compose.dev.yml up --build",
-    "docker:down": "docker compose -f infra/docker/compose.dev.yml down",
-    "lint": "eslint --no-config-lookup --config eslint.config.mjs \"apps/backend/**/*.{js,mjs,cjs,ts,tsx}\" \"packages/shared/**/*.{js,mjs,cjs,ts,tsx}\"",
-    "lint:frontend": "eslint --no-config-lookup --config apps/frontend/eslint.config.mjs \"apps/frontend/src/**/*.{js,jsx,mjs,cjs,ts,tsx}\"",
+    "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "echo \"Pendiente: configurar build del monorepo\"",
-    "test": "echo \"Pendiente: configurar tests\"",
+    "typecheck": "npm run typecheck --workspace=apps/frontend && npm run typecheck --workspace=apps/backend && npm run typecheck --workspace=packages/shared",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "docker:dev": "docker compose -f infra/docker/compose.dev.yml up --build",
+    "docker:down": "docker compose -f infra/docker/compose.dev.yml down",
     "prepare": "husky"
   },
   "engines": {

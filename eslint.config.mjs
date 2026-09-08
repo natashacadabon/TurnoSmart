@@ -3,10 +3,24 @@ import globals from 'globals';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
+import nextTypescript from 'eslint-config-next/typescript';
 
 const tsConfigs = tseslint.configs.recommended.map((config) => ({
   ...config,
   files: ['apps/backend/**/*.{ts,tsx,mts,cts}', 'packages/shared/**/*.{ts,tsx,mts,cts}'],
+}));
+
+const frontendConfigs = [...nextCoreWebVitals, ...nextTypescript].map((config) => ({
+  ...config,
+  files: ['apps/frontend/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'],
+  settings: {
+    ...config.settings,
+    next: {
+      ...config.settings?.next,
+      rootDir: 'apps/frontend',
+    },
+  },
 }));
 
 export default defineConfig([
@@ -19,8 +33,9 @@ export default defineConfig([
     '**/coverage/**',
     '**/out/**',
     '**/next-env.d.ts',
-    'apps/frontend/**',
   ]),
+
+  ...frontendConfigs,
 
   {
     files: ['apps/backend/**/*.js', 'packages/shared/**/*.js'],
