@@ -1,0 +1,21 @@
+{
+  "name": "turnosmart",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SaaS para gestion inteligente de turnos con prediccion de no-show.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "echo \"Pendiente: configurar frontend y backend\"",
+    "dev:frontend": "echo \"Pendiente: crear app Next.js en apps/frontend\"",
+    "dev:backend": "echo \"Pendiente: crear API Express en apps/backend\"",
+    "build": "echo \"Pendiente: configurar build del monorepo\"",
+    "test": "echo \"Pendiente: configurar tests\""
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+
