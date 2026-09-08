@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'TurnoSmart',
-  description: 'Agenda inteligente con prediccion de no-show para negocios con turnos.',
+  description: 'Agenda inteligente con predicción de no-show para negocios con turnos.',
 };
 
 export default function RootLayout({ children }: { children: import('react').ReactNode }) {
