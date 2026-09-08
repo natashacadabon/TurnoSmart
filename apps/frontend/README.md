@@ -128,4 +128,3 @@ Para contribuir al proyecto:
 - [Documentación de Next.js](https://nextjs.org/docs)
 - [Next.js App Router](https://nextjs.org/docs/app)
 - [TypeScript](https://www.typescriptlang.org/)
-

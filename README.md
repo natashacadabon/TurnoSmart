@@ -169,19 +169,19 @@ Niveles previstos:
 
 La identidad visual propuesta es SaaS profesional, moderna y limpia, apta para rubros como estetica, salud, consultoria y servicios profesionales.
 
-| Uso | Color | Hex |
-| --- | --- | --- |
-| Primario | Indigo | `#4F46E5` |
-| Primario hover | Indigo oscuro | `#4338CA` |
-| Secundario / IA | Violeta | `#8B5CF6` |
-| Exito / confirmado | Verde | `#22C55E` |
-| Advertencia / riesgo medio | Ambar | `#F59E0B` |
-| Error / riesgo alto | Rojo | `#EF4444` |
-| Fondo | Gris muy claro | `#F8FAFC` |
-| Cards | Blanco | `#FFFFFF` |
-| Texto principal | Slate | `#0F172A` |
-| Texto secundario | Slate gris | `#64748B` |
-| Bordes | Gris | `#E2E8F0` |
+| Uso                        | Color          | Hex       |
+| -------------------------- | -------------- | --------- |
+| Primario                   | Indigo         | `#4F46E5` |
+| Primario hover             | Indigo oscuro  | `#4338CA` |
+| Secundario / IA            | Violeta        | `#8B5CF6` |
+| Exito / confirmado         | Verde          | `#22C55E` |
+| Advertencia / riesgo medio | Ambar          | `#F59E0B` |
+| Error / riesgo alto        | Rojo           | `#EF4444` |
+| Fondo                      | Gris muy claro | `#F8FAFC` |
+| Cards                      | Blanco         | `#FFFFFF` |
+| Texto principal            | Slate          | `#0F172A` |
+| Texto secundario           | Slate gris     | `#64748B` |
+| Bordes                     | Gris           | `#E2E8F0` |
 
 ## Plan de desarrollo
 
@@ -234,6 +234,33 @@ Pulido de UX, manejo de errores, metricas piloto, pruebas end-to-end, documentac
 - Los turnos de riesgo medio o alto tienen recomendaciones accionables.
 - El sistema permite enviar recordatorios por email.
 - El frontend y el backend pueden desplegarse de forma independiente.
+
+## Calidad de codigo y automatizacion
+
+El monorepo incluye configuracion base de calidad para mantener un flujo de desarrollo consistente y evitar errores comunes antes de hacer commit.
+
+### ESLint
+
+- Se usa ESLint para detectar errores de codigo y malas practicas.
+- La configuracion principal vive en `eslint.config.mjs`.
+- Se excluyen carpetas generadas como `.next`, `dist`, `build`, `coverage`, `out` y `node_modules`.
+- El frontend usa la configuracion oficial de Next.js para mantener reglas recomendadas de rendimiento y compatibilidad.
+
+### Prettier
+
+- Se usa Prettier para estandarizar formato de archivos JS, TS, JSON, Markdown, CSS y YAML.
+- La configuracion base esta en `.prettierrc`.
+- Los archivos generados y de build quedan excluidos mediante `.prettierignore`.
+
+### Husky y lint-staged
+
+- Husky se encarga de ejecutar hooks de Git.
+- El hook `pre-commit` corre `npx lint-staged`.
+- `lint-staged` aplica automaticamente:
+  - `eslint --fix` sobre archivos JS/TS/TSX modificados.
+  - `prettier --write` sobre archivos formateables.
+
+Esto permite que antes de cada commit el repositorio valide y corrija automaticamente formato y calidad del codigo.
 
 ## Estado del proyecto
 

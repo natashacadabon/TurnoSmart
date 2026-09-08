@@ -9,4 +9,3 @@ Contenido previsto:
 - Niveles de riesgo.
 - Validaciones compartidas.
 - Logica pura para el score inicial de no-show.
-

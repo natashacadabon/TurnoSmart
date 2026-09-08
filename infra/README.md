@@ -10,4 +10,3 @@ Contenido previsto:
 - Configuracion de Vercel.
 - Variables de entorno por ambiente.
 - Documentacion de monitoreo con Azure Monitor / Application Insights.
-
