@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   description: 'Agenda inteligente con prediccion de no-show para negocios con turnos.',
 };
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+export default function RootLayout({ children }: { children: import('react').ReactNode }) {
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
