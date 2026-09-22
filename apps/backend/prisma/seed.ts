@@ -7,8 +7,13 @@ import {
   ReminderStatus,
   RiskLevel,
 } from '@prisma/client';
+import { config } from 'dotenv';
+import { fileURLToPath } from 'node:url';
+
+config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 
 const prisma = new PrismaClient();
+const DEMO_TIME_ZONE = 'America/Argentina/Buenos_Aires';
 
 const ids = {
   business: '10000000-0000-4000-8000-000000000001',
@@ -29,17 +34,74 @@ const ids = {
   },
 };
 
+function dateTimeParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+
+  return {
+    year: value('year'),
+    month: value('month'),
+    day: value('day'),
+    hour: value('hour'),
+    minute: value('minute'),
+    second: value('second'),
+  };
+}
+
+function dateAtTimeZone(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string,
+) {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+  let result = new Date(utcGuess);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = dateTimeParts(result, timeZone);
+    const representedAsUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+    result = new Date(result.getTime() + utcGuess - representedAsUtc);
+  }
+
+  return result;
+}
+
 function nextBusinessDayAt(hour: number, minute = 0) {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() + 1);
+  const today = dateTimeParts(new Date(), DEMO_TIME_ZONE);
+  const date = new Date(Date.UTC(today.year, today.month - 1, today.day + 1));
 
   while (date.getUTCDay() === 0 || date.getUTCDay() === 6) {
     date.setUTCDate(date.getUTCDate() + 1);
   }
 
-  // Demo business uses America/Argentina/Buenos_Aires (UTC-3).
-  date.setUTCHours(hour + 3, minute, 0, 0);
-  return date;
+  return dateAtTimeZone(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    hour,
+    minute,
+    DEMO_TIME_ZONE,
+  );
 }
 
 function addMinutes(date: Date, minutes: number) {
@@ -78,12 +140,12 @@ async function seedBusiness() {
     where: { id: ids.business },
     update: {
       name: 'Estudio Aurora',
-      timezone: 'America/Argentina/Buenos_Aires',
+      timezone: DEMO_TIME_ZONE,
     },
     create: {
       id: ids.business,
       name: 'Estudio Aurora',
-      timezone: 'America/Argentina/Buenos_Aires',
+      timezone: DEMO_TIME_ZONE,
     },
   });
 }
