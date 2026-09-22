@@ -78,6 +78,30 @@ Decision implementada en `infra/docker`. La configuracion de secretos y las imag
 
 ---
 
+## 2026-09-22 - Persistencia multi-tenant con Prisma y Supabase
+
+**Problema abordado**
+
+Definir una base de datos versionada para el MVP y proteger el aislamiento entre negocios sin inventar un flujo de autenticacion todavia inexistente.
+
+**Prompt / herramienta utilizada**
+
+ChatGPT/Codex. Se solicito auditar y completar exclusivamente Prisma, PostgreSQL, Supabase, migraciones, seed y politicas RLS para el Checkpoint 1.
+
+**Codigo / arquitectura propuesta por IA**
+
+Schema Prisma con `Business` como raiz del tenant, `businessId` en las entidades operativas, relaciones compuestas para impedir referencias cruzadas, migracion inicial separada de la migracion RLS y un seed idempotente. `DATABASE_URL` se reserva para runtime y `DIRECT_URL` para migraciones.
+
+**Validacion y correccion humana**
+
+El equipo aprobo no crear usuarios ficticios de Supabase Auth. `Profile.id` debe corresponder a un usuario real de `auth.users`; el seed solo crea el perfil cuando recibe `SEED_AUTH_USER_ID`. Se verificaron las dos migraciones aplicadas, RLS activo en las nueve tablas y los datos demo cargados en Supabase.
+
+**Resultado**
+
+Decision implementada y validada. El aislamiento esta protegido en la base para accesos autenticados, pero el futuro backend tambien debera filtrar por `businessId` porque una conexion propietaria de Prisma puede omitir RLS.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ### YYYY-MM-DD - Titulo de la decision

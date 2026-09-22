@@ -1,11 +1,15 @@
 # Shared
 
-Paquete para tipos, constantes y reglas compartidas entre frontend y backend.
+Paquete inicial para tipos y logica compartida.
 
-Contenido previsto:
+Actualmente exporta `AppointmentStatus` y `RiskLevel`. Las constantes, validaciones y reglas del score todavia no estan implementadas.
 
-- Tipos de dominio.
-- Estados de turno.
-- Niveles de riesgo.
-- Validaciones compartidas.
-- Logica pura para el score inicial de no-show.
+Antes de consumir los estados en funcionalidades reales se debe alinear `PENDING` del paquete con `SCHEDULED` del enum de Prisma.
+
+## Contenido planificado
+
+- tipos de request y response;
+- constantes de estados y riesgo;
+- schemas de validacion reutilizables;
+- reglas puras del score heuristico;
+- utilidades sin dependencias de navegador o base de datos.
