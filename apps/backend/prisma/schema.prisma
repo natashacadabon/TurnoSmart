@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ProfileRole {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum AppointmentEventType {
+  CREATED
+  RESCHEDULED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  MARKED_NO_SHOW
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ReminderChannel {
+  EMAIL
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+model Business {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  timezone          String             @default("America/Argentina/Buenos_Aires")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  profiles          Profile[]
+  customers         Customer[]
+  services          Service[]
+  availabilityRules AvailabilityRule[]
+  appointments      Appointment[]
+  appointmentEvents AppointmentEvent[]
+  riskScores        RiskScore[]
+  reminders         Reminder[]
+
+  @@map("businesses")
+}
+
+model Profile {
+  // Same UUID as auth.users.id. Creation is handled by trusted backend code.
+  id         String      @id @db.Uuid
+  businessId String      @map("business_id") @db.Uuid
+  email      String
+  fullName   String?     @map("full_name")
+  role       ProfileRole @default(STAFF)
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, email])
+  @@index([businessId])
+  @@map("profiles")
+}
+
+model Customer {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId   String        @map("business_id") @db.Uuid
+  fullName     String        @map("full_name")
+  email        String?
+  phone        String?
+  notes        String?
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@unique([id, businessId])
+  @@index([businessId, fullName])
+  @@index([businessId, email])
+  @@map("customers")
+}
+
+model Service {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId      String        @map("business_id") @db.Uuid
+  name            String
+  description     String?
+  durationMinutes Int           @map("duration_minutes")
+  priceCents      Int?          @map("price_cents")
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+
+  @@unique([businessId, name])
+  @@unique([id, businessId])
+  @@index([businessId, active])
+  @@map("services")
+}
+
+model AvailabilityRule {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId String   @map("business_id") @db.Uuid
+  dayOfWeek  Int      @map("day_of_week") @db.SmallInt
+  startTime  DateTime @map("start_time") @db.Time(0)
+  endTime    DateTime @map("end_time") @db.Time(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, dayOfWeek, startTime, endTime])
+  @@index([businessId, dayOfWeek, active])
+  @@map("availability_rules")
+}
+
+model Appointment {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId String             @map("business_id") @db.Uuid
+  customerId String             @map("customer_id") @db.Uuid
+  serviceId  String             @map("service_id") @db.Uuid
+  startsAt   DateTime           @map("starts_at") @db.Timestamptz(3)
+  endsAt     DateTime           @map("ends_at") @db.Timestamptz(3)
+  status     AppointmentStatus  @default(SCHEDULED)
+  notes      String?
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer           @relation(fields: [customerId, businessId], references: [id, businessId], onDelete: Restrict)
+  service    Service            @relation(fields: [serviceId, businessId], references: [id, businessId], onDelete: Restrict)
+  events     AppointmentEvent[]
+  riskScore  RiskScore?
+  reminders  Reminder[]
+
+  @@unique([id, businessId])
+  @@index([businessId, startsAt])
+  @@index([businessId, status, startsAt])
+  @@index([customerId, startsAt])
+  @@map("appointments")
+}
+
+model AppointmentEvent {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId    String               @map("business_id") @db.Uuid
+  appointmentId String               @map("appointment_id") @db.Uuid
+  type          AppointmentEventType
+  metadata      Json?
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  business      Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment   Appointment          @relation(fields: [appointmentId, businessId], references: [id, businessId], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([appointmentId, createdAt])
+  @@map("appointment_events")
+}
+
+model RiskScore {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId    String      @map("business_id") @db.Uuid
+  appointmentId String      @map("appointment_id") @db.Uuid
+  score         Int
+  level         RiskLevel
+  factors       Json
+  calculatedAt  DateTime    @default(now()) @map("calculated_at") @db.Timestamptz(3)
+  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment   Appointment @relation(fields: [appointmentId, businessId], references: [id, businessId], onDelete: Cascade)
+
+  @@unique([appointmentId, businessId])
+  @@index([businessId, level])
+  @@map("risk_scores")
+}
+
+model Reminder {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId    String          @map("business_id") @db.Uuid
+  appointmentId String          @map("appointment_id") @db.Uuid
+  channel       ReminderChannel @default(EMAIL)
+  status        ReminderStatus  @default(PENDING)
+  scheduledAt   DateTime        @map("scheduled_at") @db.Timestamptz(3)
+  sentAt        DateTime?       @map("sent_at") @db.Timestamptz(3)
+  providerId    String?         @map("provider_id")
+  errorMessage  String?         @map("error_message")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business      Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment   Appointment     @relation(fields: [appointmentId, businessId], references: [id, businessId], onDelete: Cascade)
+
+  @@index([businessId, status, scheduledAt])
+  @@index([appointmentId])
+  @@map("reminders")
+}
