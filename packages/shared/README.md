@@ -2,9 +2,7 @@
 
 Paquete inicial para tipos y logica compartida.
 
-Actualmente exporta `AppointmentStatus` y `RiskLevel`. Las constantes, validaciones y reglas del score todavia no estan implementadas.
-
-Antes de consumir los estados en funcionalidades reales se debe alinear `PENDING` del paquete con `SCHEDULED` del enum de Prisma.
+Actualmente exporta `AppointmentStatus` y `RiskLevel`. `AppointmentStatus` usa `SCHEDULED`, igual que el enum persistido por Prisma. Las constantes, validaciones y reglas del score todavia no estan implementadas.
 
 ## Contenido planificado
 
