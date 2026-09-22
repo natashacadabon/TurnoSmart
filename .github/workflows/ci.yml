@@ -43,6 +43,18 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+      - name: Validate Prisma schema
+        run: npm run prisma:validate --workspace=apps/backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace=apps/backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+
       - name: Type check
         run: npm run typecheck
 
