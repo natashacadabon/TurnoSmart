@@ -26,144 +26,139 @@ Con esta informacion, el negocio puede:
 - Personal administrativo que organiza agenda, clientes, servicios y recordatorios.
 - Clientes finales que necesitan reservar, cancelar o reprogramar de forma simple.
 
-## Funcionalidades principales
+## Estado actual
 
-### MVP
+El proyecto se encuentra en la etapa de arquitectura y preparacion tecnica del piloto.
 
-- Autenticacion de usuarios.
-- Alta y configuracion de negocio.
-- Gestion de servicios.
-- Gestion de clientes.
-- Agenda diaria y semanal.
-- Creacion, reprogramacion y cancelacion de turnos.
-- Estados de turno: programado, confirmado, cancelado, completado y no-show.
-- Calculo de riesgo de no-show.
-- Visualizacion del riesgo en la agenda.
+### Implementado
+
+- Monorepo con npm workspaces.
+- Frontend Next.js, React, TypeScript y Material UI con un dashboard demostrativo.
+- Backend Express y TypeScript con endpoint `GET /health`.
+- Modelo PostgreSQL multi-tenant con Prisma.
+- Migraciones iniciales y politicas RLS para Supabase.
+- Seeder idempotente con datos demostrativos.
+- Docker Compose de desarrollo para frontend y backend.
+- CI con formato, lint, typecheck y build.
+- Git hooks con Husky, lint-staged y Commitlint.
+
+### Configurado, sin flujo funcional completo
+
+- Supabase PostgreSQL como base remota.
+- Aislamiento por `businessId`, claves foraneas compuestas y RLS.
+- Variables para Supabase Auth, Gemini y email.
+
+### Planificado
+
+- Autenticacion y onboarding con Supabase Auth.
+- API REST de negocios, clientes, servicios, disponibilidad y turnos.
+- Integracion entre frontend y backend.
+- Calculo de riesgo y recomendaciones con Gemini.
 - Recordatorios por email.
-- Historial basico de turnos y eventos.
+- Despliegue del frontend en Vercel y del backend en Azure App Service.
+- Observabilidad con Azure Monitor o Application Insights.
 
-### Evoluciones futuras
+No existe evidencia versionada de despliegues en Vercel o Azure. Esos servicios forman parte de la arquitectura objetivo, no del estado implementado.
 
-- Lista de espera para cubrir horarios liberados.
-- Sugerencias automaticas de clientes para ocupar huecos.
-- Recordatorios por WhatsApp.
-- Pagos o senas para confirmar turnos.
-- Dashboard avanzado de ocupacion, ausencias y cancelaciones.
-- Configuracion personalizada de umbrales de riesgo.
+## Stack real
 
-## Stack tecnologico
+| Capa            | Implementado                                               | Planificado                        |
+| --------------- | ---------------------------------------------------------- | ---------------------------------- |
+| Frontend        | Next.js 16, React 19, TypeScript, Material UI, CSS Modules | Formularios, fetching y calendario |
+| Backend         | Node.js, Express, TypeScript                               | API REST modular y validacion      |
+| Datos           | Supabase PostgreSQL, Prisma, migraciones, seed y RLS       | Pruebas de aislamiento             |
+| IA              | Modelo de scores                                           | Gemini para explicaciones          |
+| Infraestructura | Docker, Compose y GitHub Actions                           | Vercel, Azure y observabilidad     |
 
-El proyecto se organiza como monorepo para separar frontend, backend y codigo compartido sin perder una estructura simple para el TP.
+## Stack objetivo del piloto
 
-### Frontend
+Ademas de lo ya instalado, el plan contempla React Hook Form y Zod para formularios, TanStack Query para estado remoto, FullCalendar para la agenda, Supabase Auth, Gemini API, email, Vercel, Azure App Service y observabilidad con Azure Monitor o Application Insights.
 
-- Next.js
-- React
-- TypeScript
-- Material UI
-- CSS Modules
-- React Hook Form
-- Zod
-- TanStack Query
-- FullCalendar
+Estas tecnologias forman parte de la direccion aprobada, pero se incorporaran solo cuando el sprint correspondiente las necesite.
 
-### Backend
-
-- Node.js
-- Express
-- TypeScript
-- Prisma ORM
-- Zod
-- API REST
-
-### Base de datos y autenticacion
-
-- PostgreSQL
-- Supabase
-- Supabase Auth
-
-### Inteligencia artificial
-
-- Gemini API
-
-La IA se usa como soporte explicativo y operativo. El score inicial de riesgo se basa en heuristicas auditables, y Gemini se utiliza para generar explicaciones y recomendaciones claras para el usuario.
-
-### Infraestructura
-
-- Docker
-- Docker Compose
-- GitHub Actions
-- Vercel para frontend
-- Azure App Service para backend
-- Azure Monitor / Application Insights para logs y monitoreo
-
-## Estructura del proyecto
+## Estructura
 
 ```text
-TurnoSmart/
-|-- apps/
-|   |-- frontend/        Aplicacion web Next.js
-|   `-- backend/         API REST Node.js + Express
-|-- packages/
-|   `-- shared/          Tipos y logica compartida
-|-- docs/                Documentacion funcional y tecnica
-|-- infra/               Docker, deploy y cloud
-|-- tests/               Pruebas de integracion y end-to-end
-|-- .env.example         Variables de entorno de referencia
-|-- .gitignore
-|-- package.json
-`-- README.md
+apps/frontend/       Aplicacion Next.js
+apps/backend/        API Express y Prisma
+packages/shared/     Tipos compartidos iniciales
+docs/                Arquitectura y backlog
+infra/docker/        Docker de desarrollo
+tests/               Estrategia de pruebas pendiente
+.github/workflows/   Integracion continua
+AI-DECISIONS.md      Decisiones asistidas por IA
 ```
 
-## Arquitectura general
+## Requisitos y configuracion
 
-```text
-Frontend
-Next.js + TypeScript + Material UI
-        |
-        | REST API
-        v
-Backend
-Node.js + Express + TypeScript
-        |
-        |-- Supabase PostgreSQL
-        |-- Supabase Auth
-        |-- Gemini API
-        |-- Email provider
+- Node.js 24 recomendado.
+- npm.
+- Docker Desktop, opcional.
+- Proyecto de Supabase.
+
+```bash
+npm ci
 ```
 
-El frontend se despliega de forma independiente en Vercel. El backend expone una API REST desplegable en Azure App Service. Supabase centraliza la base de datos PostgreSQL y la autenticacion.
+Crear `apps/backend/.env` usando `.env.example`. Para Prisma se requieren `DATABASE_URL` en runtime y `DIRECT_URL` para migraciones. Los `.env` estan ignorados por Git. `SUPABASE_SERVICE_ROLE_KEY` es exclusiva del backend.
 
-## Modelo de datos inicial
+```bash
+npm run prisma:validate --workspace=@turnosmart/backend
+npm run prisma:generate --workspace=@turnosmart/backend
+npm run prisma:migrate --workspace=@turnosmart/backend
+npm run prisma:seed --workspace=@turnosmart/backend
+```
 
-Entidades principales:
+El seed no crea usuarios ficticios. Para asociarlo con Supabase Auth se configura `SEED_AUTH_USER_ID` con un usuario existente.
 
-- `businesses`: negocios registrados en la plataforma.
-- `profiles`: usuarios asociados a un negocio.
-- `services`: servicios ofrecidos por el negocio.
-- `customers`: clientes finales.
-- `availability_rules`: reglas de disponibilidad horaria.
-- `appointments`: turnos agendados.
-- `appointment_events`: historial de cambios de cada turno.
-- `risk_scores`: resultado del analisis de riesgo de no-show.
-- `reminders`: recordatorios enviados.
+## Desarrollo
 
-## Riesgo de no-show
+```bash
+npm run dev:frontend
+npm run dev:backend
+```
 
-El score de riesgo se calcula con una primera version heuristica basada en:
+Frontend: `http://localhost:3000`
 
-- historial de ausencias del cliente;
-- cancelaciones tardias;
-- anticipacion con la que se hizo la reserva;
-- dia y horario del turno;
-- primera visita del cliente;
-- cantidad de reprogramaciones recientes.
+Backend: `http://localhost:4000/health`
 
-Niveles previstos:
+Con Docker:
 
-- Bajo: recordatorio estandar.
-- Medio: recordatorio anticipado y confirmacion sugerida.
-- Alto: recordatorio reforzado y preparacion de alternativa para cubrir el horario.
+```bash
+npm run docker:dev
+```
+
+Compose no crea PostgreSQL local: utiliza Supabase cloud.
+
+## Calidad y CI
+
+```bash
+npm run format:check
+npm run lint
+npm run typecheck
+npm run build
+```
+
+GitHub Actions ejecuta estos controles en pushes y pull requests hacia `dev` y `main`. No existe CD configurado.
+
+## Datos y multi-tenancy
+
+El esquema incluye `Business`, `Profile`, `Customer`, `Service`, `AvailabilityRule`, `Appointment`, `AppointmentEvent`, `RiskScore` y `Reminder`.
+
+Las entidades operativas incluyen `businessId`. Las relaciones compuestas evitan referencias entre tenants y RLS protege el acceso desde Supabase. Como una conexion Prisma propietaria puede omitir RLS, el backend tambien debera filtrar por negocio.
+
+## Alcance planificado del MVP
+
+- Autenticacion, perfiles y alta de negocio.
+- CRUD de servicios y clientes.
+- Reglas de disponibilidad y agenda diaria/semanal.
+- Creacion, reprogramacion y cancelacion de turnos.
+- Historial de eventos y estados.
+- Score heuristico de riesgo de no-show.
+- Recordatorios por email segun riesgo.
+- Explicaciones y recomendaciones asistidas por Gemini.
+
+Lista de espera, WhatsApp, pagos o senas y analitica avanzada quedan fuera del MVP inicial.
 
 ## Identidad visual
 
@@ -185,83 +180,23 @@ La identidad visual propuesta es SaaS profesional, moderna y limpia, apta para r
 
 ## Plan de desarrollo
 
-El piloto se planifica en 8 semanas.
+1. **Sprint 0:** setup, CI, entornos, arquitectura y datos.
+2. **Sprint 1:** autenticacion, onboarding, perfiles y layout.
+3. **Sprint 2:** servicios, clientes y disponibilidad.
+4. **Sprint 3:** agenda, turnos y eventos.
+5. **Sprint 4:** calculo y visualizacion del riesgo.
+6. **Sprint 5:** recordatorios y trazabilidad.
+7. **Sprint 6:** explicaciones y recomendaciones con Gemini.
+8. **Sprint 7:** UX, errores, metricas, pruebas, documentacion y despliegue.
 
-### Sprint 0
+El detalle de prioridades se mantiene en [docs/backlog.md](docs/backlog.md).
 
-Setup tecnico, repositorio, CI basico, entornos, Supabase, arquitectura, diseno de datos y convenciones.
+## Documentacion
 
-### Sprint 1
-
-Autenticacion, onboarding de negocio, layout principal, perfiles y configuracion inicial.
-
-### Sprint 2
-
-CRUD de servicios, clientes y reglas de disponibilidad.
-
-### Sprint 3
-
-Agenda visual, creacion, reprogramacion, cancelacion de turnos y registro de eventos.
-
-### Sprint 4
-
-Calculo de riesgo de no-show, persistencia del score y visualizacion clara en la agenda.
-
-### Sprint 5
-
-Recordatorios por email segun riesgo, plantillas basicas y trazabilidad de envios.
-
-### Sprint 6
-
-Integracion con Gemini para explicacion del riesgo y recomendaciones de accion.
-
-### Sprint 7
-
-Pulido de UX, manejo de errores, metricas piloto, pruebas end-to-end, documentacion y despliegue.
-
-## Testing
-
-- Tests unitarios para calculo de riesgo, validaciones de turnos y reglas de estado.
-- Tests de integracion para endpoints principales de la API.
-- Tests end-to-end para flujos criticos: registro, creacion de servicio, alta de cliente, reserva de turno, cancelacion, envio de recordatorio y visualizacion de riesgo.
-- Pruebas manuales con escenarios de peluqueria, consultorio y servicio profesional.
-
-## Criterios de aceptacion del piloto
-
-- Un negocio puede operar una agenda real de punta a punta.
-- El personal puede crear servicios, clientes y turnos.
-- Cada turno muestra un nivel de riesgo de no-show.
-- Los turnos de riesgo medio o alto tienen recomendaciones accionables.
-- El sistema permite enviar recordatorios por email.
-- El frontend y el backend pueden desplegarse de forma independiente.
-
-## Calidad de codigo y automatizacion
-
-El monorepo incluye configuracion base de calidad para mantener un flujo de desarrollo consistente y evitar errores comunes antes de hacer commit.
-
-### ESLint
-
-- Se usa ESLint para detectar errores de codigo y malas practicas.
-- La configuracion principal vive en `eslint.config.mjs`.
-- Se excluyen carpetas generadas como `.next`, `dist`, `build`, `coverage`, `out` y `node_modules`.
-- El frontend usa la configuracion oficial de Next.js para mantener reglas recomendadas de rendimiento y compatibilidad.
-
-### Prettier
-
-- Se usa Prettier para estandarizar formato de archivos JS, TS, JSON, Markdown, CSS y YAML.
-- La configuracion base esta en `.prettierrc`.
-- Los archivos generados y de build quedan excluidos mediante `.prettierignore`.
-
-### Husky y lint-staged
-
-- Husky se encarga de ejecutar hooks de Git.
-- El hook `pre-commit` corre `npx lint-staged`.
-- `lint-staged` aplica automaticamente:
-  - `eslint --fix` sobre archivos JS/TS/TSX modificados.
-  - `prettier --write` sobre archivos formateables.
-
-Esto permite que antes de cada commit el repositorio valide y corrija automaticamente formato y calidad del codigo.
-
-## Estado del proyecto
-
-Proyecto en etapa de planificacion y preparacion tecnica para el desarrollo del piloto.
+- [Arquitectura](docs/architecture.md)
+- [Backlog](docs/backlog.md)
+- [Decisiones de IA](AI-DECISIONS.md)
+- [Backend](apps/backend/README.md)
+- [Frontend](apps/frontend/README.md)
+- [Infraestructura](infra/README.md)
+- [Pruebas](tests/README.md)

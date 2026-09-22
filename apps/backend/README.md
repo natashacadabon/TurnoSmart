@@ -1,6 +1,7 @@
 # Backend - TurnoSmart
 
 API REST del sistema TurnoSmart, encargada de gestionar la lógica de negocio, la autenticación, la disponibilidad, los turnos y la integración con servicios externos.
+Backend construido con Node.js, Express y TypeScript.
 
 ## Descripción general
 
@@ -26,54 +27,66 @@ Este stack representa la arquitectura planeada para el proyecto en fases inicial
 - Supabase Auth
 - Gemini API
 
-> Algunos de estos elementos pueden estar pendientes de implementación inicial, pero se mantienen como referencia tecnológica del producto.
+## Estado actual
 
-## Objetivos principales
+Implementado:
 
-- Exponer una API REST segura y escalable
-- Centralizar la lógica de negocio
-- Gestionar reservas, disponibilidad y clientes
-- Mejorar la experiencia operativa con alertas y recomendaciones
-- Integrar servicios externos para autenticación, base de datos y IA
+- servidor Express y endpoint `GET /health`;
+- Prisma Client;
+- esquema PostgreSQL multi-tenant;
+- migraciones y RLS para Supabase;
+- seed idempotente de datos demo.
 
-## Requisitos previos
+Pendiente:
 
-Antes de iniciar el proyecto asegúrate de tener instalado:
+- rutas y controladores de negocio;
+- autenticacion y autorizacion;
+- validacion de entradas;
+- riesgo de no-show, Gemini, email y observabilidad.
 
-- Node.js 20+
-- npm
-- PostgreSQL o acceso a Supabase
-- Credenciales de Supabase y Gemini si se activan las integraciones
+Las carpetas de modulos y servicios son estructura preparada; no representan una API funcional completa.
 
-## Instalación
+## Variables
 
-```bash
-cd apps/backend
-npm install
-```
+El backend carga `apps/backend/.env`. Consultar `.env.example` en la raiz. `DATABASE_URL` se usa en runtime y `DIRECT_URL` en migraciones. La service role de Supabase es exclusiva del backend y nunca debe enviarse al navegador.
 
-## Scripts disponibles
+## Comandos
 
 ```bash
-npm run dev
-npm run build
-npm run start
-npm run lint
+npm run dev:backend
+npm run build --workspace=@turnosmart/backend
+npm run typecheck --workspace=@turnosmart/backend
+npm run prisma:validate --workspace=@turnosmart/backend
+npm run prisma:generate --workspace=@turnosmart/backend
+npm run prisma:migrate --workspace=@turnosmart/backend
+npm run prisma:seed --workspace=@turnosmart/backend
+npm run prisma:studio --workspace=@turnosmart/backend
 ```
 
-### Comandos principales
+`prisma:migrate` aplica migraciones existentes mediante `prisma migrate deploy`.
 
-- `npm run dev`: inicia el servidor en modo desarrollo
-- `npm run build`: compila la aplicación para producción
-- `npm run start`: ejecuta la versión compilada
-- `npm run lint`: valida el código con análisis estático
+## Modelo y seguridad
 
-## Ejecutar en local
+- `20260922000100_init_turnosmart`: tablas, enums, relaciones, indices y constraints.
+- `20260922000200_enable_rls`: permisos y politicas RLS.
 
-```bash
-cd apps/backend
-npm run dev
-```
+`Profile.id` debe coincidir con `auth.users.id`. El onboarding todavia no esta implementado y debera ejecutarse desde un backend confiable.
+
+El health check actual confirma el proceso HTTP, no la conectividad con la base o servicios externos.
+
+## Arquitectura planificada
+
+La API se organizara por modulos de autenticacion, negocios, servicios, clientes, disponibilidad, turnos, eventos, riesgo, recordatorios y reportes. Las entradas se validaran con Zod; las rutas delegaran en servicios de dominio y Prisma concentrara el acceso a datos. Toda operacion autenticada debera resolver y filtrar el `businessId`.
+
+## Integraciones planificadas
+
+- Supabase Auth para sesiones y asociacion con `Profile.id`.
+- Gemini para explicar factores calculados por reglas auditables.
+- Proveedor de email para recordatorios y trazabilidad.
+- Azure App Service para desplegar la API.
+- Application Insights o Azure Monitor para logs y metricas.
+
+Gemini no reemplazara el score heuristico ni tomara decisiones operativas por si solo.
 
 ## Estructura sugerida
 
@@ -106,10 +119,6 @@ apps/backend/
 - Centralizar configuración en variables de entorno
 - Documentar endpoints y respuestas según evolucione la API
 - Mantener la lógica de negocio limpia y reutilizable
-
-## Estado del proyecto
-
-El backend está en fase inicial de desarrollo. La base de la arquitectura y el stack previsto ya quedaron definidos, y se irá implementando la API con el enfoque de negocio de TurnoSmart.
 
 ## Roadmap sugerido
 

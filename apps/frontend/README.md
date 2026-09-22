@@ -2,6 +2,8 @@
 
 Aplicación web del cliente para la gestión operativa de TurnoSmart. Esta interfaz permite visualizar la agenda, gestionar reservas y colaborar con la operación diaria del negocio.
 
+Aplicacion construida con Next.js 16, React 19, TypeScript, Material UI y CSS Modules.
+
 ## Descripción general
 
 El frontend está construido con Next.js y TypeScript, y está orientado a ofrecer una experiencia rápida y clara para:
@@ -27,50 +29,52 @@ El frontend está construido con Next.js y TypeScript, y está orientado a ofrec
 - Zod
 - FullCalendar
 
-## Requisitos previos
+## Estado actual
 
-Antes de iniciar el proyecto asegúrate de tener instalado:
+Existe un dashboard demostrativo y responsive con navegacion, metricas, turnos priorizados, estados, riesgos y recomendaciones. Los datos son estaticos: no hay autenticacion, fetching de API, formularios CRUD ni calendario funcional.
 
-- Node.js 20+
-- npm, pnpm, yarn o bun
+## Dependencias implementadas
 
-## Instalación
+- Next.js y React;
+- TypeScript;
+- Material UI, MUI Icons y Emotion;
+- CSS Modules y ESLint.
 
-Desde la raíz del proyecto o dentro de la carpeta del frontend:
+TanStack Query, React Hook Form, Zod y FullCalendar pertenecen al stack previsto, pero no estan instalados.
 
-```bash
-cd apps/frontend
-npm install
-```
-
-## Scripts disponibles
+## Comandos
 
 ```bash
-npm run dev
-npm run build
-npm run start
-npm run lint
+npm run dev:frontend
+npm run build --workspace=@turnosmart/frontend
+npm run typecheck --workspace=@turnosmart/frontend
+npm run lint --workspace=@turnosmart/frontend
 ```
 
-### Comandos principales
+La app se sirve en `http://localhost:3000`. En Docker, `NEXT_PUBLIC_API_URL` apunta a `http://localhost:4000`; la integracion HTTP todavia no esta implementada.
 
-- `npm run dev`: inicia el servidor de desarrollo.
-- `npm run build`: compila la aplicación para producción.
-- `npm run start`: levanta la versión compilada.
-- `npm run lint`: ejecuta el análisis estático del código.
+Vercel es el destino previsto, pero no hay evidencia versionada de un despliegue activo.
 
-## Ejecutar en local
+## Funcionalidades planificadas
 
-```bash
-cd apps/frontend
-npm run dev
-```
+- login, logout y onboarding;
+- agenda diaria y semanal;
+- gestion de clientes y servicios;
+- creacion, reprogramacion y cancelacion de turnos;
+- filtros, historial y recordatorios;
+- dashboard de ocupacion y no-shows;
+- explicaciones de riesgo generadas por IA.
 
-Luego abre tu navegador en:
+## Evolucion tecnica prevista
 
-```text
-http://localhost:3000
-```
+- React Hook Form y Zod para formularios;
+- TanStack Query para consumir la API;
+- FullCalendar para la agenda;
+- cliente de Supabase con anon key para sesiones;
+- pruebas de componentes y flujos criticos;
+- despliegue independiente en Vercel.
+
+La service role de Supabase nunca se utilizara en el frontend.
 
 ## Estructura principal
 
