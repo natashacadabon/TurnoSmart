@@ -91,7 +91,7 @@ AI-DECISIONS.md      Decisiones asistidas por IA
 
 ## Requisitos y configuracion
 
-- Node.js 24 recomendado.
+- Node.js 22.
 - npm.
 - Docker Desktop, opcional.
 - Proyecto de Supabase.
