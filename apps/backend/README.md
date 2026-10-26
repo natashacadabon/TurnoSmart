@@ -5,7 +5,7 @@ Backend construido con Node.js, Express y TypeScript.
 
 ## Descripción general
 
-El backend será la capa central de la aplicación y tendrá como objetivo cubrir los procesos operativos del negocio, incluyendo:
+El backend es la capa central de la aplicación y cubre los procesos operativos del negocio:
 
 - Autenticación y perfiles de usuarios
 - Gestión de negocios, servicios y clientes
@@ -14,41 +14,38 @@ El backend será la capa central de la aplicación y tendrá como objetivo cubri
 - Recordatorios por email
 - Integración con Gemini para recomendaciones inteligentes
 
-## Stack previsto
+## Stack
 
-Este stack representa la arquitectura planeada para el proyecto en fases iniciales y futuras:
-
-- Node.js
-- Express
-- TypeScript
-- Prisma ORM
-- Zod
-- Supabase PostgreSQL
-- Supabase Auth
-- Gemini API
+- Node.js 22, Express 5 y TypeScript
+- Prisma ORM sobre Supabase PostgreSQL
+- Supabase Auth (validación de tokens)
+- Zod para entorno y entradas
+- Gemini API (`@google/genai`)
+- helmet y cors
+- Vitest y Supertest
 
 ## Estado actual
 
 Implementado:
 
-- servidor Express y endpoint `GET /health`;
-- Prisma Client;
-- esquema PostgreSQL multi-tenant;
-- migraciones y RLS para Supabase;
-- seed idempotente de datos demo.
+- app Express testeable (`src/app.ts`) separada del arranque (`src/index.ts`);
+- `GET /health` y `GET /ready` (este ultimo consulta PostgreSQL);
+- CORS por lista de origenes, helmet, `X-Request-Id`, logs JSON y errores uniformes sin stack;
+- validacion de entorno y de entradas con Zod (contratos en `@turnosmart/shared`);
+- autenticacion con Supabase Auth, contexto de negocio desde `Profile` y permisos por rol;
+- identidad: `GET /api/me`, `POST /api/onboarding`, `PATCH /api/business`;
+- clientes: `GET/POST /api/customers`, `GET/PATCH/DELETE /api/customers/:id` (la baja es solo para OWNER/ADMIN y responde 409 si el cliente tiene turnos);
+- historial: `GET /api/appointments/:id/events` (solo lectura);
+- explicacion de riesgo con Gemini: `POST /api/appointments/:id/risk/explanation`;
+- Prisma Client, esquema multi-tenant, migraciones, RLS y seed idempotente.
 
-Pendiente:
+Pendiente: servicios, disponibilidad, horarios libres, reservas, cálculo del score, email y observabilidad.
 
-- rutas y controladores de negocio;
-- autenticacion y autorizacion;
-- validacion de entradas;
-- riesgo de no-show, Gemini, email y observabilidad.
-
-Las carpetas de modulos y servicios son estructura preparada; no representan una API funcional completa.
+Contratos y codigos de error: [docs/contracts.md](../../docs/contracts.md).
 
 ## Variables
 
-El backend carga `apps/backend/.env`. Consultar `.env.example` en la raiz. `DATABASE_URL` se usa en runtime y `DIRECT_URL` en migraciones. La service role de Supabase es exclusiva del backend y nunca debe enviarse al navegador.
+El backend carga `apps/backend/.env` (plantilla: `.env.example` en la raíz; la tabla de variables está en el README de la raíz). `DATABASE_URL` se usa en runtime y `DIRECT_URL` en migraciones. Si falta una variable obligatoria, el proceso termina al arrancar sin mostrar valores.
 
 ## Comandos
 
@@ -56,6 +53,8 @@ El backend carga `apps/backend/.env`. Consultar `.env.example` en la raiz. `DATA
 npm run dev:backend
 npm run build --workspace=@turnosmart/backend
 npm run typecheck --workspace=@turnosmart/backend
+npm run test --workspace=@turnosmart/backend
+npm run test:integration --workspace=@turnosmart/backend
 npm run prisma:validate --workspace=@turnosmart/backend
 npm run prisma:generate --workspace=@turnosmart/backend
 npm run prisma:migrate --workspace=@turnosmart/backend
@@ -63,73 +62,73 @@ npm run prisma:seed --workspace=@turnosmart/backend
 npm run prisma:studio --workspace=@turnosmart/backend
 ```
 
-`prisma:migrate` aplica migraciones existentes mediante `prisma migrate deploy`.
+`prisma:migrate` aplica migraciones existentes mediante `prisma migrate deploy`. `build` y `typecheck` generan el cliente de Prisma antes de compilar solo si falta o si cambió el schema (`scripts/ensure-prisma-client.mjs`): funcionan después de un `npm ci` y también con `dev:backend` corriendo, que en Windows bloquea el motor de Prisma.
+
+`test` corre los tests unitarios (fakes en memoria, sin DB). `test:integration` necesita `DATABASE_URL` apuntando a una base con las migraciones aplicadas (Supabase local o una base descartable); crea negocios de prueba y los borra al terminar. Nunca correrlo contra la base del equipo ni la de la demo.
 
 ## Modelo y seguridad
 
 - `20260922000100_init_turnosmart`: tablas, enums, relaciones, indices y constraints.
 - `20260922000200_enable_rls`: permisos y politicas RLS.
 
-`Profile.id` debe coincidir con `auth.users.id`. El onboarding todavia no esta implementado y debera ejecutarse desde un backend confiable.
+`Profile.id` debe coincidir con `auth.users.id`. El onboarding crea `Business` y `Profile(OWNER)` en una transaccion desde el backend, con el email de Supabase Auth; repetirlo o enviarlo en paralelo no crea otro negocio.
 
-El health check actual confirma el proceso HTTP, no la conectividad con la base o servicios externos.
+Prisma se conecta con un rol que omite RLS: el aislamiento entre negocios lo garantiza el filtro por `businessId` en cada repositorio, cubierto por tests unitarios y de integracion.
 
-## Arquitectura planificada
+`/health` confirma el proceso HTTP; `/ready` ademas confirma la conexion con PostgreSQL.
 
-La API se organizara por modulos de autenticacion, negocios, servicios, clientes, disponibilidad, turnos, eventos, riesgo, recordatorios y reportes. Las entradas se validaran con Zod; las rutas delegaran en servicios de dominio y Prisma concentrara el acceso a datos. Toda operacion autenticada debera resolver y filtrar el `businessId`.
+## Arquitectura
 
-## Integraciones planificadas
+La API se organiza en módulos (`identity`, `customers`, `events`, `ai`), cada uno con sus rutas y un repositorio que concentra el acceso a datos con Prisma. `createApp` recibe las dependencias, por eso los tests reemplazan Supabase, la base y Gemini por fakes. Las entradas se validan con los schemas de `@turnosmart/shared`.
 
-- Supabase Auth para sesiones y asociacion con `Profile.id`.
-- Gemini para explicar factores calculados por reglas auditables.
-- Proveedor de email para recordatorios y trazabilidad.
-- Azure App Service para desplegar la API.
-- Application Insights o Azure Monitor para logs y metricas.
+Cada request autenticado pasa por `authenticate` (token de Supabase), `requireProfile` (negocio y rol desde `Profile`) y, según la ruta, `requirePermission`. El negocio nunca se toma del body: todas las consultas filtran por el `businessId` del perfil.
 
-Gemini no reemplazara el score heuristico ni tomara decisiones operativas por si solo.
+## Integraciones
 
-## Estructura sugerida
+- **Supabase Auth:** valida el token de cada request; `Profile.id` coincide con el usuario de Auth.
+- **Gemini:** explica el score de un turno a pedido. Solo recibe el score, el nivel y los factores, nunca nombres, emails, teléfonos ni notas. La respuesta se valida con Zod, tiene timeout y límite por usuario; si Gemini falla, la agenda y el score siguen funcionando.
+
+Previstas: proveedor de email para recordatorios, Azure App Service para desplegar la API y Application Insights o Azure Monitor para logs y métricas.
+
+Gemini no reemplaza el score heurístico ni toma decisiones operativas.
+
+## Estructura
 
 ```text
 apps/backend/
 ├── src/
-│   ├── app/              # Configuración y bootstrap
-│   ├── config/           # Variables de entorno y configuración
-│   ├── controllers/      # Controladores HTTP
-│   ├── routes/           # Rutas de la API
-│   ├── services/         # Lógica de negocio
-│   ├── modules/          # Módulos funcionales
-│   ├── middleware/       # Middleware de autenticación y validación
-│   ├── utils/            # Helpers y utilidades
-│   ├── validators/       # Validaciones con Zod
-│   └── types/            # Tipos compartidos
-├── prisma/               # Esquema y migraciones de Prisma
-├── .env.example          # Variables de entorno de ejemplo
-├── package.json
-├── tsconfig.json
-├── README.md
-└── .gitignore
+│   ├── index.ts          # Arranque: entorno, Prisma, listen y shutdown
+│   ├── app.ts            # createApp(deps): middlewares y rutas, sin listen
+│   ├── config/env.ts     # Validacion de variables con Zod
+│   ├── lib/              # Errores, helpers HTTP, logger, verificador de Supabase
+│   ├── middleware/       # requestId, errores, authenticate, requireProfile, permisos
+│   ├── modules/          # identity, customers, events, ai (routes + repository)
+│   └── types/            # Extension de Express.Request
+├── test/
+│   ├── fakes.ts          # Repositorios en memoria y verificador de tokens falso
+│   ├── unit/             # supertest contra createApp con fakes
+│   └── integration/      # Contra PostgreSQL real
+├── prisma/               # Schema, migraciones y seed
+├── tsconfig.json         # Typecheck de src y test
+└── tsconfig.build.json   # Build de src a dist/
 ```
 
 ## Convenciones esperadas
 
 - Usar TypeScript en toda la API
 - Validar entradas con Zod
-- Mantener separación entre rutas, controladores y servicios
+- Mantener separación entre rutas y repositorios por módulo
 - Centralizar configuración en variables de entorno
 - Documentar endpoints y respuestas según evolucione la API
 - Mantener la lógica de negocio limpia y reutilizable
 
-## Roadmap sugerido
+## Próximos pasos
 
-- Autenticación y perfiles
-- CRUD de clientes, servicios y negocios
-- Gestión de disponibilidad y horarios
-- Reservas, reprogramaciones y cancelaciones
-- Cálculo de riesgo de no-show
-- Recordatorios automáticos
-- Integración con IA para recomendaciones
-- Mejoras de observabilidad y monitoreo
+- Servicios, disponibilidad y horarios libres
+- Reservas, reprogramaciones y cancelaciones con prevención de solapamientos
+- Cálculo del score de riesgo de no-show
+- Recordatorios por email
+- Despliegue en Azure App Service y observabilidad
 
 ## Contribución
 

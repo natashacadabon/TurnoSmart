@@ -1,46 +1,35 @@
 # Frontend - TurnoSmart
 
-Aplicación web del cliente para la gestión operativa de TurnoSmart. Esta interfaz permite visualizar la agenda, gestionar reservas y colaborar con la operación diaria del negocio.
+Aplicación web de TurnoSmart para la operación diaria del negocio: agenda, clientes, configuración del negocio, historial de turnos y explicación del riesgo con IA.
 
-Aplicacion construida con Next.js 16, React 19, TypeScript, Material UI y CSS Modules.
+Construida con Next.js 16 (App Router), React 19, TypeScript, Material UI y CSS Modules.
 
-## Descripción general
+## Pantallas
 
-El frontend está construido con Next.js y TypeScript, y está orientado a ofrecer una experiencia rápida y clara para:
+| Ruta                 | Acceso             | Contenido                                                                                                                                                                          |
+| -------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                  | Sesión y negocio   | Agenda con el diseño del dashboard y datos reales: nombre del negocio, fecha y total de clientes. Turnos, riesgo y reportes aparecen vacíos hasta que exista la reserva de turnos. |
+| `/demo`              | Pública            | Dashboard con datos de ejemplo.                                                                                                                                                    |
+| `/login`             | Pública            | Inicio de sesión con Supabase Auth.                                                                                                                                                |
+| `/onboarding`        | Sesión sin negocio | Alta del negocio; la zona horaria se detecta del navegador.                                                                                                                        |
+| `/customers`         | Sesión y negocio   | Listado con búsqueda y paginación; alta y edición con errores de validación por campo; baja con confirmación (OWNER y ADMIN).                                                      |
+| `/settings`          | Sesión y negocio   | Nombre y zona horaria del negocio (editable por OWNER y ADMIN).                                                                                                                    |
+| `/appointments/[id]` | Sesión y negocio   | Historial del turno y explicación del riesgo con Gemini. Todavía no hay una agenda de turnos que enlace a esta página.                                                             |
 
-- Dashboard operativo
-- Agenda diaria y semanal
-- Gestión de clientes y servicios
-- Visualización del riesgo de no-show
-- Reservas, reprogramaciones y cancelaciones
-- Seguimiento del estado del negocio en tiempo real
+Las rutas de `src/app/(app)` comparten el sidebar del dashboard (`AppSidebar`), con la cuenta, el acceso a Negocio y "Cerrar sesión". Sin sesión redirigen a `/login` y sin negocio a `/onboarding`. Si la API no puede resolver la cuenta, muestran el error con "Reintentar" y "Cerrar sesión" en lugar de quedar cargando.
 
-## Stack tecnológico
+Supabase se usa solo para autenticación; las operaciones de negocio pasan por la API (`src/lib/api.ts`), que agrega el token y normaliza los errores. Los colores y la tipografía salen de `src/app/theme.ts`.
 
-- Next.js 16
-- React 19
-- TypeScript
-- CSS Modules
-- ESLint
-- App Router de Next.js
-- Material UI
-- TanStack Query
-- React Hook Form
-- Zod
-- FullCalendar
+## Stack
 
-## Estado actual
+- Next.js 16, React 19 y TypeScript.
+- Material UI, MUI Icons, Emotion y CSS Modules.
+- Supabase JS, solo para Auth.
+- `@turnosmart/shared`: contratos y validaciones compartidas con la API.
+- Playwright para pruebas end-to-end.
+- ESLint con las reglas de Next.js y React Compiler.
 
-Existe un dashboard demostrativo y responsive con navegacion, metricas, turnos priorizados, estados, riesgos y recomendaciones. Los datos son estaticos: no hay autenticacion, fetching de API, formularios CRUD ni calendario funcional.
-
-## Dependencias implementadas
-
-- Next.js y React;
-- TypeScript;
-- Material UI, MUI Icons y Emotion;
-- CSS Modules y ESLint.
-
-TanStack Query, React Hook Form, Zod y FullCalendar pertenecen al stack previsto, pero no estan instalados.
+Previsto: calendario para la agenda semanal.
 
 ## Comandos
 
@@ -49,78 +38,53 @@ npm run dev:frontend
 npm run build --workspace=@turnosmart/frontend
 npm run typecheck --workspace=@turnosmart/frontend
 npm run lint --workspace=@turnosmart/frontend
+npm run test:e2e --workspace=@turnosmart/frontend
 ```
 
-La app se sirve en `http://localhost:3000`. En Docker, `NEXT_PUBLIC_API_URL` apunta a `http://localhost:4000`; la integracion HTTP todavia no esta implementada.
+La app se sirve en `http://localhost:3000`. Next.js lee las variables desde `apps/frontend/.env.local` (plantilla: `apps/frontend/.env.example`), con los mismos valores de Supabase que `apps/backend/.env`. Sin las variables de Supabase solo funciona `/demo`. La guía completa para configurar y correr el proyecto está en el README de la raíz.
 
-Vercel es el destino previsto, pero no hay evidencia versionada de un despliegue activo.
+`test:e2e` corre el recorrido crítico sin mocks: requiere frontend, API y Supabase levantados, y una cuenta de prueba en `E2E_USER_EMAIL` / `E2E_USER_PASSWORD`. Una cuenta nueva pasa por el onboarding una sola vez.
 
-## Funcionalidades planificadas
+El despliegue en Vercel es manual, con el workflow **Frontend deploy (manual)**; los pasos están en el README de la raíz.
 
-- login, logout y onboarding;
-- agenda diaria y semanal;
-- gestion de clientes y servicios;
-- creacion, reprogramacion y cancelacion de turnos;
-- filtros, historial y recordatorios;
-- dashboard de ocupacion y no-shows;
-- explicaciones de riesgo generadas por IA.
-
-## Evolucion tecnica prevista
-
-- React Hook Form y Zod para formularios;
-- TanStack Query para consumir la API;
-- FullCalendar para la agenda;
-- cliente de Supabase con anon key para sesiones;
-- pruebas de componentes y flujos criticos;
-- despliegue independiente en Vercel.
-
-La service role de Supabase nunca se utilizara en el frontend.
-
-## Estructura principal
+## Estructura
 
 ```text
 apps/frontend/
-├── public/              # Archivos estáticos
+├── e2e/                     # Pruebas end-to-end (Playwright)
+├── public/                  # Archivos estáticos
 ├── src/
-│   ├── app/             # Rutas y layout principal de Next.js
-│   ├── components/      # Componentes reutilizables
-│   ├── features/        # Módulos funcionales del negocio
-│   ├── lib/             # Utilidades y helpers
-│   ├── styles/          # Estilos globales y temas
-│   └── types/           # Tipos compartidos
-├── eslint.config.mjs
+│   ├── app/
+│   │   ├── (app)/           # Pantallas con sesión: agenda, clientes, negocio y detalle de turno
+│   │   ├── demo/            # Dashboard con datos de ejemplo
+│   │   ├── login/
+│   │   ├── onboarding/
+│   │   ├── page.module.css  # Estilos del dashboard
+│   │   ├── providers.tsx    # Tema de MUI y sesión
+│   │   └── theme.ts
+│   ├── components/          # Sidebar, sesión, formularios, historial y panel de IA
+│   └── lib/                 # Cliente HTTP, Supabase y zonas horarias
 ├── next.config.ts
-├── package.json
-├── tsconfig.json
-└── README.md
+├── playwright.config.ts
+└── package.json
 ```
 
 ## Convenciones
 
-- Usar TypeScript para toda nueva lógica.
-- Mantener componentes pequeños y reutilizables.
-- Evitar lógica compleja dentro de páginas; preferir módulos y features.
-- Seguir la estructura del App Router de Next.js.
-- Mantener estilos consistentes con CSS Modules o estilos locales.
+- TypeScript en toda la lógica.
+- Componentes pequeños y reutilizables; la lógica de datos en `src/lib`.
+- Validaciones desde `@turnosmart/shared`, las mismas que usa la API.
+- Estilos con el tema de MUI y CSS Modules, siguiendo el diseño del dashboard.
+- La `service_role` de Supabase y la clave de Gemini nunca se usan en el frontend.
 
-## Estado del proyecto
+## Próximos pasos
 
-Este frontend está en fase inicial de desarrollo. La base del proyecto ya quedó configurada y está listo para comenzar a implementar las pantallas y flujos reales de negocio.
-
-## Roadmap sugerido
-
-- Dashboard principal
-- Calendario de agenda
-- Gestión de clientes
-- Gestión de servicios
-- Modales de reserva y cancelación
-- Integración con backend y APIs
-- Validación de formularios
-- Mejoras de UX y accesibilidad
+- Agenda real con turnos del día y enlace al detalle de cada turno.
+- Servicios y disponibilidad.
+- Reserva, reprogramación y cancelación de turnos.
+- Registro público y recuperación de contraseña.
 
 ## Contribución
-
-Para contribuir al proyecto:
 
 1. Crear una rama desde la rama principal.
 2. Desarrollar la funcionalidad con commits claros.

@@ -102,6 +102,130 @@ Decision implementada y validada. El aislamiento esta protegido en la base para 
 
 ---
 
+## 2026-10-21 - Backend de identidad, clientes e IA (Desarrollador A)
+
+**Problema abordado**
+
+Implementar el alcance P0 del Desarrollador A (A01-A08 y C07): contratos comunes, API testeable, autenticacion, onboarding, clientes, historial de eventos y explicacion de riesgo con Gemini.
+
+**Prompt / herramienta utilizada**
+
+Claude Code, a partir del plan del Checkpoint 2. Desarrollado primero en un repositorio de trabajo propio (`turnosmart11`) y portado a este repositorio el 2026-10-26.
+
+**Codigo / arquitectura propuesta por IA**
+
+- Tokens validados con `supabase.auth.getUser`. Alternativa descartada: verificar el JWT localmente con JWKS (menos latencia, pero no detecta usuarios eliminados).
+- Onboarding idempotente usando la PK de `Profile` y capturando `P2002`. Alternativa descartada: lock de fila con `SELECT ... FOR UPDATE`.
+- Gemini con salida JSON estructurada validada con Zod y un solo reintento por formato invalido. Alternativas descartadas: texto libre; reintentos con backoff (convierten una falla en mas consumo).
+- Solo factores agregados en el prompt (`sanitizeFactors`). Alternativa descartada: enviar contexto del turno.
+
+**Validacion y correccion humana**
+
+- Yael levanto el entorno local, inicio sesion, hizo el onboarding, cargo un cliente y verifico una explicacion real de `gemini-3.5-flash-lite` con una clave Free.
+- **Correccion del tono de Gemini:** la instruccion original pedia "espanol rioplatense" y el modelo respondio con lunfardo y expresiones despectivas sobre el cliente. Lo detecto Yael en la prueba real; se cambio por "espanol claro y profesional, tono cordial, voseo permitido, sin vulgaridades, numeros en cifras" y se valido con una nueva llamada real.
+- Revision de codigo por B pendiente.
+
+**Resultado**
+
+Implementado y probado con tests unitarios (fakes en memoria) y de integracion contra PostgreSQL real, incluido un onboarding con 5 requests concurrentes que crea un unico negocio.
+
+---
+
+## 2026-10-26 - Adaptacion del backend de A al schema del equipo
+
+**Problema abordado**
+
+El codigo de A se habia escrito contra un schema propio. Este repositorio ya tenia schema, migraciones con RLS y tooling (ESM, ESLint, Prettier, `exactOptionalPropertyTypes`), que son la fuente de verdad.
+
+**Prompt / herramienta utilizada**
+
+Claude Code. Se pidio portar el backend de A (A01-A08 y C07) adaptado al schema del equipo, conservando el frontend existente.
+
+**Codigo / arquitectura propuesta por IA**
+
+- Se conservaron el schema y las migraciones del equipo; no se agrego ninguna migracion.
+- `Profile.email` es obligatorio: el onboarding lo toma del usuario de Supabase Auth y responde 422 si la cuenta no tiene email.
+- `AppointmentEvent` no tiene `fromStatus`, `toStatus` ni `actorId`: se quitaron del DTO y `type` usa el enum `AppointmentEventType`. Esos datos, si C los registra, viajan en `metadata`.
+- `@turnosmart/shared` pasa a ESM con imports `.js`; los scripts raiz compilan `shared` antes que los workspaces que lo consumen.
+- Helper `omitUndefined` para PATCH parciales bajo `exactOptionalPropertyTypes`. Alternativa descartada: relajar la opcion del compilador.
+- El arranque sigue en `src/index.ts` para no cambiar los scripts `dev` y `start`.
+
+**Validacion y correccion humana**
+
+Yael decidio conservar por ahora el frontend del equipo y portar solo backend, workflow de deploy y documentacion. Verificado: lint, typecheck, build, tests unitarios y de integracion contra una base PostgreSQL local con las migraciones del equipo, y smoke del build compilado (`/health`, `/ready`, 401 en `/api/me` sin token).
+
+**Resultado**
+
+Backend de A disponible en este repositorio. Pendientes: frontend (login, onboarding, clientes, historial y panel de explicacion), E2E (A09) y revision de B.
+
+---
+
+## 2026-10-26 - Pantallas de A sobre el frontend del equipo
+
+**Problema abordado**
+
+Sumar las pantallas de A (login, onboarding, negocio, clientes, historial y explicacion de riesgo) sin reemplazar el frontend existente ni su tema.
+
+**Prompt / herramienta utilizada**
+
+Claude Code. Se pidio integrar las pantallas de A al frontend del equipo (opcion 1), usando su `providers.tsx` y `theme.ts`.
+
+**Codigo / arquitectura propuesta por IA**
+
+- El dashboard de `/` queda intacto. Las rutas de A viven en `src/app/(app)`, `login` y `onboarding`.
+- `AuthProvider` se monta en `providers.tsx` y tolera la falta de variables de Supabase, para que `/` siga funcionando sin configurarlas.
+- Se descarto el tema propio de A (verde, claro/oscuro) y su layout con drawer. Por pedido de Yael, toda la app usa el diseño del dashboard de `/`: su sidebar se extrajo a `components/AppSidebar.tsx` (mismo markup, estilos y secciones Agenda, Clientes, Predicciones IA y Reportes) y lo usan tanto `page.tsx` como el layout de las pantallas con sesion. Abajo del sidebar se agregaron la cuenta, "Negocio" y "Cerrar sesion" (o "Ingresar" sin sesion). Encabezados, tarjetas y botones siguen el mismo formato. El unico cambio en `page.tsx` es reemplazar su `<aside>` por ese componente. Despues, a pedido de Yael, el dashboard con datos de ejemplo se movio sin cambios a `/demo` (`app/demo/page.tsx`) y `/` paso a ser la agenda real (`app/(app)/page.tsx`): mismo diseño y clases CSS, pero solo datos reales y estados vacios donde todavia no hay turnos.
+- La configuracion de ESLint del equipo (React Compiler) marco `setState` dentro de efectos. Se corrigio en lugar de desactivar la regla: carga de datos con estado solo en callbacks, ajuste de estado durante el render, `useSyncExternalStore` para la zona horaria y el dialogo de cliente montado al abrirse.
+- El historial muestra los tipos del enum `AppointmentEventType`; estado anterior/nuevo solo si C los guarda en `metadata`.
+
+**Validacion y correccion humana**
+
+Yael eligio esta opcion frente a reemplazar el frontend. Verificado: lint, typecheck, build y E2E 3/3 sin mocks contra Supabase local (incluye onboarding de una cuenta nueva, alta con error de validacion, recarga, edicion y logout), y revision visual en escritorio y movil.
+
+**Resultado**
+
+Pantallas de A integradas. Pendiente: enlace desde la agenda a `/appointments/[id]` (C) y revision de B.
+
+---
+
+## 2026-10-26 - Baja de clientes
+
+**Problema abordado**
+
+El ABM de clientes solo permitia alta y edicion. Se pidio completar la baja sin perder la consistencia con los turnos.
+
+**Prompt / herramienta utilizada**
+
+Claude Code. Se pidio agregar la baja de clientes al CRUD existente.
+
+**Codigo / arquitectura propuesta por IA**
+
+- `DELETE /api/customers/:id` con baja definitiva, sin migraciones nuevas.
+- Un cliente con turnos no se borra: el schema define la relacion turno → cliente con `onDelete: Restrict`. La API responde 409 `CUSTOMER_HAS_APPOINTMENTS`, verificando antes los turnos y capturando `P2003` si se crea uno en el medio.
+- Solo OWNER y ADMIN pueden eliminar (permiso `customers:delete`); STAFF sigue dando de alta y editando.
+- En la pantalla, boton "Eliminar" por fila con dialogo de confirmacion.
+- Alternativa descartada: baja logica (archivar), porque requiere un campo y una migracion nuevos en el schema compartido. Queda como opcion si se necesita ocultar clientes con turnos.
+
+**Validacion y correccion humana**
+
+Yael detecto que el CRUD estaba incompleto. Verificado con tests unitarios (204, 403, 404 entre negocios y 409), integracion contra PostgreSQL con un turno real y el recorrido E2E con baja.
+
+**Resultado**
+
+Implementado.
+
+---
+
+## Pendientes con docentes (A10)
+
+- [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.
+- [ ] Cuando puede cerrarse el entorno cloud de la demo del 09/11?
+- [ ] Se acepta demo local ante una caida externa, con validacion cloud posterior?
+
+Consulta enviada: _fecha, canal_ · Respuesta: _fecha, quien respondio, texto resumido_
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ### YYYY-MM-DD - Titulo de la decision
