@@ -4,14 +4,16 @@
   "description": "API REST de TurnoSmart.",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "node scripts/ensure-prisma-client.mjs && tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/ensure-prisma-client.mjs && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "keywords": [],
   "author": "",
@@ -19,16 +21,25 @@
   "type": "module",
   "private": true,
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^20.19.43",
+    "@types/supertest": "^7.2.1",
     "prisma": "6.12.0",
+    "supertest": "^7.3.1",
     "tsx": "^4.23.15",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
   },
   "dependencies": {
+    "@google/genai": "^2.31.0",
     "@prisma/client": "6.12.0",
     "@supabase/supabase-js": "^2.116.0",
+    "@turnosmart/shared": "^1.0.0",
+    "cors": "^2.8.6",
     "dotenv": "^16.6.1",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "zod": "^4.6.7"
   }
 }

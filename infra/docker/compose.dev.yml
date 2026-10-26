@@ -6,9 +6,10 @@ services:
 
     container_name: turnosmart-frontend
 
+    # shared se consume desde dist: se compila antes de levantar Next.
     command: >
-      npm run dev --workspace=apps/frontend --
-      --hostname 0.0.0.0
+      sh -c "npm run build:shared &&
+      npm run dev --workspace=apps/frontend -- --hostname 0.0.0.0"
 
     ports:
       - '3000:3000'
@@ -33,7 +34,10 @@ services:
 
     container_name: turnosmart-backend
 
-    command: npm run dev --workspace=apps/backend
+    # Cliente de Prisma y shared compilados antes de arrancar (no estan en la imagen).
+    command: >
+      sh -c "npm run prisma:generate --workspace=apps/backend &&
+      npm run dev:backend"
 
     ports:
       - '4000:4000'
