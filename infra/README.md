@@ -7,28 +7,30 @@
 - Puertos `3000` y `4000`, hot reload y volumen de dependencias.
 - Cache de Next.js y carga de `apps/backend/.env` mediante `env_file`.
 - Supabase cloud como base remota; no hay PostgreSQL local en Compose.
+- Al arrancar, el backend genera el cliente de Prisma y ambos servicios compilan `packages/shared`, que no forma parte de la imagen.
 
 ```bash
 npm run docker:dev
 npm run docker:down
 ```
 
-El frontend usa `NEXT_PUBLIC_API_URL=http://localhost:4000` porque el navegador accede al puerto publicado.
+El frontend usa `NEXT_PUBLIC_API_URL=http://localhost:4000` porque el navegador accede al puerto publicado. Las variables de Supabase del frontend se leen de `apps/frontend/.env.local`, que queda montado en el contenedor.
+
+- GitHub Actions: CI en pushes y pull requests, y deploy manual del frontend en Vercel (`frontend-deploy.yml`, ver README de la raíz).
 
 ## Planificado
 
-- Vercel para frontend.
 - Azure App Service para backend.
 - Gestion de secretos por ambiente.
 - Azure Monitor o Application Insights.
 - Imagenes y pipeline de produccion.
 
-No existe actualmente infraestructura como codigo, CD ni evidencia versionada de recursos activos en Vercel o Azure.
+No existe actualmente infraestructura como codigo ni CD automatico. El frontend se despliega en Vercel solo a mano, desde el workflow.
 
 ## Plan de evolucion
 
 1. Separar ambientes de desarrollo y produccion.
-2. Desplegar el frontend en Vercel.
+2. Desplegar el frontend en Vercel (workflow manual preparado).
 3. Preparar una imagen de produccion para el backend.
 4. Desplegar la API en Azure App Service.
 5. Gestionar secretos fuera del repositorio.
