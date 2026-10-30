@@ -176,6 +176,18 @@ Con Docker (usa el mismo `apps/backend/.env` y el Supabase configurado ahi; no c
 npm run docker:dev
 ```
 
+El servicio `dependencies` sincroniza el volumen compartido `node_modules` con
+`npm ci --include=dev` antes de iniciar ambas apps. Reconstruir la imagen no
+actualiza por si solo un volumen existente; esto evita `prisma: not found` tras
+cambios de dependencias. No hace falta borrar volúmenes ni datos de Supabase.
+Si las apps ya estan corriendo, detenerlas antes de volver a ejecutar el comando
+para que no lean dependencias mientras se reinstalan:
+
+```bash
+docker compose -f infra/docker/compose.dev.yml stop
+npm run docker:dev
+```
+
 ### Problemas frecuentes
 
 | Sintoma                                              | Causa y solucion                                                                                                  |

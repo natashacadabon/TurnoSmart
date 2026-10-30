@@ -1,4 +1,18 @@
 services:
+  # Un volumen existente oculta las dependencias de la imagen reconstruida.
+  # Sincronizarlo una sola vez antes de iniciar los dos consumidores.
+  dependencies:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.dev
+    command: npm ci --include=dev
+    environment:
+      NODE_ENV: development
+      HUSKY: '0'
+    volumes:
+      - ../..:/workspace
+      - node_modules:/workspace/node_modules
+
   frontend:
     build:
       context: ../..
@@ -25,7 +39,10 @@ services:
       - next_cache:/workspace/apps/frontend/.next
 
     depends_on:
-      - backend
+      dependencies:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
 
   backend:
     build:
@@ -52,6 +69,10 @@ services:
     volumes:
       - ../..:/workspace
       - node_modules:/workspace/node_modules
+
+    depends_on:
+      dependencies:
+        condition: service_completed_successfully
 
 volumes:
   node_modules:
