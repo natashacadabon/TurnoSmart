@@ -22,7 +22,7 @@ Todas las rutas son relativas a la base de la API. No incluyen businessId en pat
 | POST /api/services          | Crear servicio                                         | OWNER, ADMIN        | Validacion, unicidad y alta            | Modulo autenticación: contexto y autorizacion                           |
 | PATCH /api/services/:id     | Editar o desactivar servicio                           | OWNER, ADMIN        | Cambios parciales y reglas de duracion | Autenticación: acceso; Modulo Turnos: no alterar turnos existentes      |
 | GET /api/availability-rules | Leer configuracion semanal completa                    | OWNER, ADMIN, STAFF | Serializar dias y horas locales        | Autenticacion: contexto/timezone                                        |
-| PUT /api/availability-rules | Reemplazar configuracion semanal completa              | OWNER, ADMIN        | Validacion y reemplazo atomico         | Aautenticacion: permisos; TUrnos: preservar turnos y serializar cambios |
+| PUT /api/availability-rules | Reemplazar configuracion semanal completa              | OWNER, ADMIN        | Validacion y reemplazo atomico         | Autenticacion: permisos; Turnos: preservar turnos y serializar cambios |
 | GET /api/slots              | Consultar intervalos disponibles para servicio y fecha | OWNER, ADMIN, STAFF | Calculo de disponibilidad              | Autenticacion: contexto/timezone; Turnos: ocupacion y reprogramacion    |
 
 **En esta primera instancia no se aceptan varias agendas por negocio. El negocio tendrá una única agenda compartida, con capacidad para atender un solo turno a la vez, independientemente de la cantidad de empleados o servicios que ofrezca.**
