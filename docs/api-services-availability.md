@@ -42,7 +42,6 @@ Esto significa que:
 - El modulo de autenticación valida el token y obtiene el usuario. El perfil existente determina businessId y role; Business determina timezone. No confiar en roles o negocio enviados por el navegador ni
   decodificar el token sin verificarlo.
 - Aislamiento entre negocios (tenant): cada usuario solo puede consultar y modificar datos de su propio negocio. El businessId se obtiene del servidor, nunca de valores enviados por el frontend.
-- Aislamiento entre negocios (tenant): cada usuario solo puede consultar y modificar datos de su propio negocio. El businessId se obtiene del servidor, nunca de valores enviados por el frontend.
 
 #### Errores
 
