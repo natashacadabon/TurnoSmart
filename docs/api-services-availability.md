@@ -159,7 +159,7 @@ sin resultados devuelve 200 con data vacio y total real. No hay busqueda ni orde
 
 Request: `GET /api/services?active=true&limit=50&offset=0`.
 
-Response 200:
+Respuesta 200:
 
 ```json
 {
@@ -407,6 +407,40 @@ Permite consultar los horarios disponibles para reservar un servicio en una fech
 | `date`                 | Sí          | Fecha a consultar (`YYYY-MM-DD`).                                     |
 | `serviceId`            | Sí          | Identificador del servicio activo.                                    |
 | `excludeAppointmentId` | No          | Turno que se excluye de la ocupación al consultar una reprogramación. |
+
+Response 200:
+
+```json
+{
+  "data": [
+    {
+      "startsAt": "2026-10-22T12:00:00.000Z",
+      "endsAt": "2026-10-22T13:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "date": "2026-10-22",
+    "timezone": "America/Argentina/Buenos_Aires",
+    "serviceId": "20000000-0000-4000-8000-000000000001",
+    "slotIntervalMinutes": 15,
+    "total": 1
+  }
+}
+```
+
+`data` siempre es un array de `SlotDto` (`startsAt` y `endsAt` son timestamps UTC ISO 8601
+con milisegundos y sufijo `Z`). `meta` siempre está presente: `date` es la fecha civil
+solicitada en la zona del negocio, `timezone` es la zona IANA del negocio, `serviceId` es
+el UUID del servicio solicitado, `slotIntervalMinutes` es 15 y `total` es la cantidad de
+slots en `data`. Si no hay horarios disponibles, responder `200` con `data: []` y
+`meta.total: 0`.
+
+Respuestas: `200` con el envelope anterior; `401 UNAUTHENTICATED`; `403
+BUSINESS_CONTEXT_REQUIRED` o `FORBIDDEN`; `404 RESOURCE_NOT_FOUND` si el servicio no
+existe en el negocio autenticado; `409 SERVICE_INACTIVE` o
+`AVAILABILITY_TIME_UNRESOLVABLE`; `422 VALIDATION_ERROR` para parámetros de consulta
+inválidos, repetidos o no admitidos; `500 INTERNAL_ERROR`; `503 SERVICE_UNAVAILABLE`.
+Los errores usan el envelope común `{ "error": { "code", "message", "details" } }`.
 
 ### Reglas de disponibilidad
 
