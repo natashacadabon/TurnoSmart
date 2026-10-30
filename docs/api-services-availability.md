@@ -430,7 +430,7 @@ Permite consultar los horarios disponibles para reservar un servicio en una fech
 - Se utiliza el `timezone` del negocio, no el del navegador.
 - Los horarios semanales se expresan en hora local; los turnos se almacenan como instantes UTC.
 - No se permiten solapamientos. Un turno de 09:00 a 10:00 y otro de 10:00 a 11:00 son compatibles.
-- Las fechas y horas deben ser válidas. Si un cambio de horario de verano genera una hora ambigua o inexistente, se aplica la política conservadora acordada y no se inventa una conversión.
+- Las horas ambiguas o inexistentes por cambios de horario de verano quedan pendientes de la política D06; no se debe inventar una conversión hasta que A/C la aprueben.
 - En P0 se propone impedir cambios de zona horaria cuando existen turnos vigentes.
 
 ### Responsabilidades
