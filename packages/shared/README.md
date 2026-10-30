@@ -48,6 +48,7 @@ enums de roles/estados ni tipos de error alternativos. D07 (concurrencia) y D08
 (autorizacion de escrituras directas a Supabase) siguen pendientes y los DTOs
 no los resuelven. La frase de B01 sobre una politica DST "acordada" no se toma
 como evidencia de aprobacion mientras D06 permanezca abierto.
+
 | Archivo           | Contenido                                                                                                        |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `errors.ts`       | Códigos de error de la API, su status HTTP y la forma del cuerpo de error.                                       |
