@@ -216,6 +216,70 @@ Implementado.
 
 ---
 
+## 2026-10-30 - B03: gestion de servicios y revision de arquitectura
+
+**Problema abordado**
+
+Implementar el CRUD de servicios con aislamiento entre negocios y evaluar si
+`routes.ts` requiere separar controllers y logica de negocio.
+
+**Prompt / herramienta utilizada**
+
+Codex. Se solicito implementar B03 respetando B01 y los componentes de A, con
+revisiones puntuales de `backend-architect` y `security-reviewer`. Luego se pidio
+evaluar la arquitectura sin modificar archivos y registrar la decision.
+
+**Codigo / arquitectura propuesta por IA**
+
+- `GET /api/services`, `POST /api/services` y `PATCH /api/services/:id` con schemas
+  estrictos compartidos, filtros, paginacion y proyeccion explicita a `ServiceDto`.
+- Autenticacion y contexto de A reutilizados. Lectura OWNER/ADMIN/STAFF y escritura
+  OWNER/ADMIN mediante la matriz de permisos existente; tenant exclusivamente del
+  contexto autenticado. El repositorio Prisma filtra por negocio y actualiza con
+  la clave compuesta `(id, businessId)`.
+- Unicidad por negocio, incluidos inactivos, respaldada por la restriccion existente;
+  `P2002` se traduce a `SERVICE_NAME_CONFLICT` (409). Desactivacion sin borrado ni
+  cambios en reservas o eventos.
+- Conservar `routes.ts` y `repository.ts`, siguiendo los patrones de identidad y
+  clientes de A. Las rutas contienen handlers HTTP, validacion, defaults simples y
+  serializacion; no hay reglas de negocio complejas que justifiquen `service.ts`.
+- Alternativa evaluada: extraer solo `controller.ts` para dejar rutas declarativas.
+  Es opcional para organizar el codigo, pero actualmente aporta poco a las pruebas,
+  que ya ejercitan los handlers mediante HTTP. No se realizo ese refactor.
+- Considerar `service.ts` cuando existan reglas aprobadas que coordinen servicios,
+  disponibilidad y reservas; evitar una capa que solo delegue al repositorio.
+
+**Validacion y correccion humana**
+
+La desarrolladora aprobo expresamente para B03 reutilizar los errores y middleware
+de A, agregar unicamente `SERVICE_NAME_CONFLICT` al registro de errores y aplicar
+los campos, limites, filtros y envelopes de servicios de B01. Esto conserva los
+codigos `NOT_FOUND`, `TOKEN_INVALID` y `PROFILE_REQUIRED`, los detalles opcionales
+de A y JSON malformado con respuesta 422; no implica aprobar todo B01.
+
+La implementacion se verifico con lint, typecheck, build del backend, 70 pruebas
+unitarias y 9 de integracion HTTP aprobadas. Las pruebas HTTP usan un repositorio
+en memoria; las del repositorio Prisma usan dobles. No certifican persistencia ni
+RLS en PostgreSQL. El formato de los archivos de B03 y `git diff --check` pasaron;
+el chequeo global de formato detecto CRLF preexistentes en cuatro archivos sin
+cambios respecto de HEAD: B01, Compose, README de shared y README raiz.
+
+La revision arquitectonica posterior fue estatica, con `backend-architect`; no
+modifico archivos ni volvio a ejecutar pruebas. No se encontraron defectos que
+requieran refactorizar. La solicitud de registrar esta evaluacion no se toma como
+aprobacion de decisiones pendientes ni de cambios funcionales adicionales.
+
+**Resultado**
+
+B03 implementado y recomendacion de mantener la estructura actual documentada.
+No se agregaron controllers ni services adicionales. D01 general sigue pendiente
+de unificacion con A/C; D07 requiere acordar la concurrencia de cambios de servicio
+con reservas; D08 requiere resolver las escrituras directas a Supabase que pueden
+evadir los permisos Express. No se modificaron schema, migraciones, infraestructura
+ni `.env`. Sin commit ni push automaticos.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.
