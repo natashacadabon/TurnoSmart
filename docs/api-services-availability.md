@@ -460,19 +460,13 @@ Para evitarlo:
 
 ## 8. Contratos compartidos (`packages/shared`)
 
-Se propone crear una PR separada con los **tipos TypeScript compartidos entre frontend y backend**.
+Los contratos iniciales de lectura de B02 ya se incorporaron en `packages/shared`: `ServiceDto`, `AvailabilityRuleDto` y `SlotDto`, además de la constante `SLOT_INTERVAL_MINUTES`.
 
-Incluirá DTOs de servicios, disponibilidad, slots, consultas, respuestas y errores comunes.
+Estos tipos representan objetos de lectura y no importan modelos de Prisma ni exponen `businessId`.
 
-**Decisiones:**
+Las consultas, envelopes, errores y validaciones en ejecución quedan pendientes de las tareas de implementación de endpoints.
 
-- Utilizar los mismos tipos para evitar diferencias entre frontend y backend.
-- No importar modelos Prisma directamente al frontend.
-- Representar fechas y horas como strings en los contratos HTTP.
-- Compartir la constante de 15 minutos para los slots.
-- Agregar validaciones en ejecución cuando se implementen los endpoints.
-
-En B01 solamente se documentan estos contratos; todavía no se implementan.
+En B01 se documentan los contratos HTTP y sus decisiones pendientes; B02 implementa únicamente estos tipos compartidos.
 
 ---
 
