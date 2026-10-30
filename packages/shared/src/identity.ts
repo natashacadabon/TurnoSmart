@@ -7,6 +7,8 @@ export type Role = (typeof ROLES)[number];
 /** Matriz de permisos: OWNER/ADMIN configuran y eliminan clientes; todos dan de alta y editan clientes y turnos. */
 export const PERMISSIONS = {
   'business:update': ['OWNER', 'ADMIN'],
+  'services:read': ['OWNER', 'ADMIN', 'STAFF'],
+  'services:write': ['OWNER', 'ADMIN'],
   'customers:read': ['OWNER', 'ADMIN', 'STAFF'],
   'customers:write': ['OWNER', 'ADMIN', 'STAFF'],
   // Baja definitiva: sólo quienes administran el negocio.
