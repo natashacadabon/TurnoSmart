@@ -14,6 +14,7 @@ import { PrismaCustomerRepository } from '../../src/modules/customers/repository
 import { PrismaEventRepository } from '../../src/modules/events/repository.js';
 import { PrismaIdentityRepository } from '../../src/modules/identity/repository.js';
 import { FakeVerifier } from '../fakes.js';
+import { PrismaServiceRepository } from '../../src/modules/services/repository.js';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -29,6 +30,7 @@ const app = createApp({
   verifier,
   identity,
   customers: new PrismaCustomerRepository(prisma),
+  services: new PrismaServiceRepository(prisma),
   events: new PrismaEventRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer: null,
