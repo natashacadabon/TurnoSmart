@@ -4,7 +4,6 @@ import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
 import MailOutlineRoundedIcon from '@mui/icons-material/MailOutlineRounded';
 import QueryStatsRoundedIcon from '@mui/icons-material/QueryStatsRounded';
 import ScheduleRoundedIcon from '@mui/icons-material/ScheduleRounded';
@@ -21,7 +20,8 @@ import {
   Typography,
 } from '@mui/material';
 import { useState } from 'react';
-import styles from './page.module.css';
+import { AppSidebar } from '@/components/AppSidebar';
+import styles from '../page.module.css';
 
 const appointments = [
   {
@@ -73,35 +73,7 @@ export default function Home() {
 
   return (
     <main className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <Box>
-          <Typography variant="h5" component="p" className={styles.brand}>
-            TurnoSmart
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Agenda inteligente
-          </Typography>
-        </Box>
-
-        <nav className={styles.nav} aria-label="Secciones principales">
-          <a className={styles.navActive} href="#agenda">
-            <CalendarMonthRoundedIcon fontSize="small" />
-            Agenda
-          </a>
-          <a href="#clientes">
-            <GroupsRoundedIcon fontSize="small" />
-            Clientes
-          </a>
-          <a href="#riesgo">
-            <AutoAwesomeRoundedIcon fontSize="small" />
-            Predicciones IA
-          </a>
-          <a href="#reportes">
-            <QueryStatsRoundedIcon fontSize="small" />
-            Reportes
-          </a>
-        </nav>
-      </aside>
+      <AppSidebar />
 
       <section className={styles.content}>
         <Stack

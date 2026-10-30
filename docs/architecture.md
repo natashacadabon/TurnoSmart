@@ -9,24 +9,30 @@ Navegador
 Next.js + Material UI (dashboard con datos estaticos)
 
 Express + TypeScript
-   |-- GET /health
+   |-- GET /health, GET /ready
+   |-- Supabase Auth (validacion de token)
+   |-- /api/me, /api/onboarding, /api/business
+   |-- /api/customers
+   |-- /api/appointments/:id/events (lectura)
+   |-- /api/appointments/:id/risk/explanation --> Gemini API
    `-- Prisma --> Supabase PostgreSQL
                   |-- modelo multi-tenant
                   |-- migraciones aplicadas
                   `-- RLS habilitado
 ```
 
-Frontend y backend pueden ejecutarse juntos con Docker, pero aun no estan integrados mediante HTTP.
+El frontend consume la API en login, onboarding, negocio, clientes e historial/explicacion de un turno. El dashboard de `/` sigue siendo demostrativo con datos estaticos.
 
 | Componente          | Estado                    | Alcance actual                     |
 | ------------------- | ------------------------- | ---------------------------------- |
-| Frontend            | Implementado parcialmente | Dashboard demostrativo             |
-| Backend             | Implementado parcialmente | Servidor y health check            |
+| Frontend            | Implementado parcialmente | Login, onboarding, clientes        |
+| Backend             | Implementado parcialmente | Identidad, clientes, historial, IA |
 | Prisma              | Implementado              | Schema, Client, migraciones y seed |
 | Supabase PostgreSQL | Configurado y probado     | Persistencia remota                |
 | RLS                 | Implementado              | Politicas por negocio              |
-| Supabase Auth       | Planificado               | Sin login ni onboarding            |
-| Gemini y email      | Planificados              | Sin integraciones                  |
+| Supabase Auth       | Implementado en backend   | Token, perfil y onboarding por API |
+| Gemini              | Implementado en backend   | Explicacion de riesgo bajo demanda |
+| Email               | Planificado               | Sin integracion                    |
 | Vercel y Azure      | Planificados              | Sin evidencia de despliegue        |
 | Observabilidad      | Planificada               | Sin implementacion                 |
 
@@ -60,9 +66,36 @@ La arquitectura objetivo no implica que esos servicios esten desplegados actualm
 - El alta inicial de negocio y perfil debe realizarse desde backend confiable.
 - El backend debe filtrar por `businessId` aunque Prisma use un rol que omita RLS.
 
+## Seguridad en la API
+
+1. `authenticate` valida el token contra Supabase Auth (`auth.getUser`): cubre firma, vencimiento y usuarios eliminados.
+2. `requireProfile` resuelve `businessId` y `role` desde `Profile` (`Profile.id = auth.users.id`).
+3. `requirePermission` aplica la matriz de roles de `@turnosmart/shared`.
+4. Cada repositorio recibe `businessId`; no existe consulta de un tenant sin ese filtro.
+5. Recursos de otro negocio responden 404, igual que los inexistentes, para no revelar su existencia.
+
+Cubierto por `apps/backend/test/unit` y `apps/backend/test/integration/tenant-isolation.test.ts`.
+
+## Onboarding transaccional
+
+`Business` + `Profile(OWNER)` se crean en una transaccion, con el email del usuario de Supabase Auth. Ante requests
+concurrentes, la clave primaria de `Profile` (= userId) hace fallar a todos menos uno con `P2002`; esas transacciones
+hacen rollback de su negocio y devuelven el ganador. Probado con 5 requests simultaneos contra PostgreSQL.
+
+## Integracion con Gemini (A08)
+
+- Adaptador detras del puerto `LlmClient` (`modules/ai/llm.ts`), intercambiable y testeable con fakes.
+- Solo se envian `score`, `level` y factores `{code, label, impact, value}`; `sanitizeFactors` descarta cualquier otro
+  campo. Nunca nombres, emails, telefonos ni notas.
+- Salida estructurada (`responseJsonSchema`) validada con Zod; un unico reintento solo si el formato es invalido.
+- Timeout (`GEMINI_TIMEOUT_MS`), `maxOutputTokens` acotado y limite por usuario (`AI_RATE_LIMIT_*`) en memoria.
+  Con mas de una replica, ese limite debera moverse a PostgreSQL.
+- Gemini no modifica turnos ni decide estados. Si falla, la agenda y el score siguen operativos.
+- La explicacion es transitoria: no se persiste ni requiere cambios de schema.
+
 ## Infraestructura
 
-Docker se usa para desarrollo. GitHub Actions provee CI con formato, lint, tipos y build. No existe CD configurado. Vercel, Azure App Service y Application Insights permanecen planificados.
+Docker se usa para desarrollo. GitHub Actions provee CI con formato, lint, tipos, tests unitarios y build. El deploy del frontend es manual (`frontend-deploy.yml`, `workflow_dispatch`): Vercel Hobby o Azure Web App; el destino Azure requiere `output: 'standalone'` en Next.js. Vercel, Azure App Service y Application Insights permanecen planificados.
 
 ## Modulos planificados
 
