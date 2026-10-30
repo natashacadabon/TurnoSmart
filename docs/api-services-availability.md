@@ -159,7 +159,7 @@ sin resultados devuelve 200 con data vacio y total real. No hay busqueda ni orde
 
 Request: `GET /api/services?active=true&limit=50&offset=0`.
 
-Respuesta 200:
+Response 200:
 
 ```json
 {
@@ -408,7 +408,7 @@ Permite consultar los horarios disponibles para reservar un servicio en una fech
 | `serviceId`            | Sí          | Identificador del servicio activo.                                    |
 | `excludeAppointmentId` | No          | Turno que se excluye de la ocupación al consultar una reprogramación. |
 
-Response 200:
+Respuesta 200:
 
 ```json
 {
