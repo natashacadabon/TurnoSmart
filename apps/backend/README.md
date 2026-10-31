@@ -5,7 +5,7 @@ Backend construido con Node.js, Express y TypeScript.
 
 ## Descripción general
 
-El backend es la capa central de la aplicación y cubre los procesos operativos del negocio:
+El backend es la capa central de la aplicación. Su alcance objetivo incluye:
 
 - Autenticación y perfiles de usuarios
 - Gestión de negocios, servicios y clientes
@@ -35,11 +35,12 @@ Implementado:
 - autenticacion con Supabase Auth, contexto de negocio desde `Profile` y permisos por rol;
 - identidad: `GET /api/me`, `POST /api/onboarding`, `PATCH /api/business`;
 - clientes: `GET/POST /api/customers`, `GET/PATCH/DELETE /api/customers/:id` (la baja es solo para OWNER/ADMIN y responde 409 si el cliente tiene turnos);
+- servicios: `GET/POST /api/services`, `PATCH /api/services/:id` (desactivacion con `active: false`, sin borrado fisico);
 - historial: `GET /api/appointments/:id/events` (solo lectura);
 - explicacion de riesgo con Gemini: `POST /api/appointments/:id/risk/explanation`;
 - Prisma Client, esquema multi-tenant, migraciones, RLS y seed idempotente.
 
-Pendiente: servicios, disponibilidad, horarios libres, reservas, cálculo del score, email y observabilidad.
+Pendiente: disponibilidad, horarios libres, reservas, cálculo del score, email y observabilidad. El [alcance de servicios](src/modules/services/README.md) documenta lo implementado y sus limites.
 
 Contratos y codigos de error: [docs/contracts.md](../../docs/contracts.md).
 
@@ -79,7 +80,7 @@ Prisma se conecta con un rol que omite RLS: el aislamiento entre negocios lo gar
 
 ## Arquitectura
 
-La API se organiza en módulos (`identity`, `customers`, `events`, `ai`), cada uno con sus rutas y un repositorio que concentra el acceso a datos con Prisma. `createApp` recibe las dependencias, por eso los tests reemplazan Supabase, la base y Gemini por fakes. Las entradas se validan con los schemas de `@turnosmart/shared`.
+La API se organiza en módulos (`identity`, `customers`, `services`, `events`, `ai`), cada uno con sus rutas y un repositorio que concentra el acceso a datos con Prisma. `createApp` recibe las dependencias, por eso los tests reemplazan Supabase, la base y Gemini por fakes. Las entradas se validan con los schemas de `@turnosmart/shared`.
 
 Cada request autenticado pasa por `authenticate` (token de Supabase), `requireProfile` (negocio y rol desde `Profile`) y, según la ruta, `requirePermission`. El negocio nunca se toma del body: todas las consultas filtran por el `businessId` del perfil.
 
@@ -102,7 +103,7 @@ apps/backend/
 │   ├── config/env.ts     # Validacion de variables con Zod
 │   ├── lib/              # Errores, helpers HTTP, logger, verificador de Supabase
 │   ├── middleware/       # requestId, errores, authenticate, requireProfile, permisos
-│   ├── modules/          # identity, customers, events, ai (routes + repository)
+│   ├── modules/          # identity, customers, services, events, ai (routes + repository)
 │   └── types/            # Extension de Express.Request
 ├── test/
 │   ├── fakes.ts          # Repositorios en memoria y verificador de tokens falso
@@ -124,7 +125,7 @@ apps/backend/
 
 ## Próximos pasos
 
-- Servicios, disponibilidad y horarios libres
+- Disponibilidad y horarios libres
 - Reservas, reprogramaciones y cancelaciones con prevención de solapamientos
 - Cálculo del score de riesgo de no-show
 - Recordatorios por email

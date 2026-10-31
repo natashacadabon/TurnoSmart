@@ -2,7 +2,7 @@
   // Visit https://aka.ms/tsconfig to read more about this file
   "compilerOptions": {
     // File Layout
-    // Typecheck cubre src y test; el build usa tsconfig.build.json (sólo src).
+    // Typecheck cubre src, test y prisma; el build usa tsconfig.build.json (sólo src).
     "rootDir": ".",
     "outDir": "./dist",
 
@@ -38,6 +38,6 @@
     "moduleDetection": "force",
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "vitest.config.mts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "prisma/**/*.ts", "vitest.config.mts"],
   "exclude": ["node_modules", "dist", "build", "coverage"]
 }

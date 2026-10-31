@@ -13,12 +13,15 @@ import type { RiskRepository } from './modules/ai/risk-repository.js';
 import type { RiskExplainer } from './modules/ai/risk-explainer.js';
 import { FixedWindowRateLimiter } from './modules/ai/rate-limiter.js';
 import { aiRouter } from './modules/ai/routes.js';
+import type { ServiceRepository } from './modules/services/repository.js';
+import { servicesRouter } from './modules/services/routes.js';
 
 export interface AppDeps {
   corsOrigins: string[];
   verifier: TokenVerifier;
   identity: IdentityRepository;
   customers: CustomerRepository;
+  services: ServiceRepository;
   events: EventRepository;
   risk: RiskRepository;
   /** null si GEMINI_API_KEY no está configurada: la explicación responde 503. */
@@ -69,6 +72,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use('/api', identityRouter(deps));
   app.use('/api/customers', ...authed, customersRouter(deps));
+  app.use('/api/services', ...authed, servicesRouter(deps));
   app.use('/api/appointments', ...authed, eventsRouter(deps));
   app.use(
     '/api/appointments',

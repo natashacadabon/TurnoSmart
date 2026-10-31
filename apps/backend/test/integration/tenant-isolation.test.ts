@@ -14,6 +14,7 @@ import { PrismaCustomerRepository } from '../../src/modules/customers/repository
 import { PrismaEventRepository } from '../../src/modules/events/repository.js';
 import { PrismaIdentityRepository } from '../../src/modules/identity/repository.js';
 import { FakeVerifier } from '../fakes.js';
+import { PrismaServiceRepository } from '../../src/modules/services/repository.js';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -29,6 +30,7 @@ const app = createApp({
   verifier,
   identity,
   customers: new PrismaCustomerRepository(prisma),
+  services: new PrismaServiceRepository(prisma),
   events: new PrismaEventRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer: null,
@@ -125,6 +127,69 @@ describe('integración API-DB: clientes y aislamiento', () => {
   });
 });
 
+describe('integración API-DB: servicios', () => {
+  it('persiste create/list/PATCH, aísla negocios y traduce conflictos únicos', async () => {
+    const name = `Servicio ${randomUUID()}`;
+    const payload = { name, durationMinutes: 30, priceCents: 1000 };
+    const created = await request(app).post('/api/services').set(ownerA).send(payload);
+    expect(created.status).toBe(201);
+    const id = created.body.data.id as string;
+
+    const listA = await request(app).get('/api/services?active=all').set(ownerA);
+    expect(listA.body.data).toContainEqual(
+      expect.objectContaining({ id, name, durationMinutes: 30, priceCents: 1000 }),
+    );
+    const listB = await request(app).get('/api/services?active=all').set(ownerB);
+    expect(listB.body.data).not.toContainEqual(expect.objectContaining({ id }));
+
+    const duplicate = await request(app).post('/api/services').set(ownerA).send(payload);
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.error.code).toBe('SERVICE_NAME_CONFLICT');
+
+    const sameNameInOtherBusiness = await request(app)
+      .post('/api/services')
+      .set(ownerB)
+      .send(payload);
+    expect(sameNameInOtherBusiness.status).toBe(201);
+    expect(sameNameInOtherBusiness.body.data.id).not.toBe(id);
+
+    expect(
+      (await request(app).patch(`/api/services/${id}`).set(ownerB).send({ active: false })).status,
+    ).toBe(404);
+    const updated = await request(app)
+      .patch(`/api/services/${id}`)
+      .set(ownerA)
+      .send({ name: `${name} actualizado`, durationMinutes: 45, active: false });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data).toMatchObject({
+      id,
+      name: `${name} actualizado`,
+      durationMinutes: 45,
+      active: false,
+    });
+
+    const conflictTarget = `Conflicto ${randomUUID()}`;
+    const target = await request(app)
+      .post('/api/services')
+      .set(ownerA)
+      .send({ name: conflictTarget, durationMinutes: 30 });
+    expect(target.status).toBe(201);
+    const patchConflict = await request(app)
+      .patch(`/api/services/${id}`)
+      .set(ownerA)
+      .send({ name: conflictTarget });
+    expect(patchConflict.status).toBe(409);
+    expect(patchConflict.body.error.code).toBe('SERVICE_NAME_CONFLICT');
+
+    const persisted = await prisma.service.findUnique({ where: { id } });
+    expect(persisted).toMatchObject({
+      businessId: businessA,
+      name: `${name} actualizado`,
+      durationMinutes: 45,
+      active: false,
+    });
+  });
+});
 describe('integración API-DB: baja de clientes', () => {
   it('elimina un cliente sin turnos y respeta el aislamiento', async () => {
     const id = (await request(app).post('/api/customers').set(ownerA).send({ fullName: 'Baja' }))

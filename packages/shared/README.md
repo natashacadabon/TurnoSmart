@@ -43,7 +43,9 @@ Esta aprobacion parcial no cierra los acuerdos con A/C documentados en
   representacion de lectura: timestamps UTC ISO 8601 con milisegundos y Z,
   horas semanales HH:mm locales y dias 0 domingo a 6 sabado.
 
-Requests, envelopes, errores y validadores quedan pendientes. No se agregan
+Para servicios, B03 ya implementa requests, envelopes y validadores en `services.ts`,
+usados por la API; ver [alcance B03](../../apps/backend/src/modules/services/README.md).
+Para disponibilidad y slots, requests, envelopes, errores y validadores quedan pendientes. No se agregan
 enums de roles/estados ni tipos de error alternativos. D07 (concurrencia) y D08
 (autorizacion de escrituras directas a Supabase) siguen pendientes y los DTOs
 no los resuelven. La frase de B01 sobre una politica DST "acordada" no se toma

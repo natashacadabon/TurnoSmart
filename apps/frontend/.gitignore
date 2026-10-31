@@ -46,6 +46,3 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-
-# Vercel CLI (vercel link)
-.vercel

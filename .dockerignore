@@ -12,8 +12,17 @@ coverage
 
 .git
 
-.env
-.env.local
-.env.*.local
+**/.env
+**/.env.*
+!**/.env.example
+**/.vercel
+**/*.tsbuildinfo
+**/next-env.d.ts
+**/test-results
+**/playwright-report
+**/blob-report
+**/playwright/.cache
+**/*.pem
+**/*.key
 
 npm-debug.log*
