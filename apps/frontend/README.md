@@ -52,7 +52,6 @@ El despliegue en Vercel es manual, con el workflow **Frontend deploy (manual)**;
 ```text
 apps/frontend/
 ├── e2e/                     # Pruebas end-to-end (Playwright)
-├── public/                  # Archivos estáticos
 ├── src/
 │   ├── app/
 │   │   ├── (app)/           # Pantallas con sesión: agenda, clientes, negocio y detalle de turno
