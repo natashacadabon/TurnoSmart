@@ -280,6 +280,68 @@ ni `.env`. Sin commit ni push automaticos.
 
 ---
 
+## 2026-10-30 - B04: gestion de disponibilidad semanal
+
+**Problema abordado**
+
+Implementar lectura y reemplazo semanal con validacion, aislamiento de negocios
+y persistencia atomica, revisando antes las decisiones pendientes sobre turnos.
+
+**Prompt / herramienta utilizada**
+
+Codex. Se solicito implementar B04 siguiendo B03, revisar AGENTS.md, B01,
+Prisma y DTOs, agregar pruebas y ejecutar lint/typecheck/tests, sin modificar
+C ni hacer commit o push. Se revisaron las ubicaciones de AGENTS.md; solo hay
+uno en frontend, fuera del alcance de estos cambios.
+
+**Codigo / arquitectura propuesta por IA**
+
+- GET/PUT `/api/availability-rules` con rutas/repositorio, sin controllers ni
+  capas de delegacion adicionales. Schemas estrictos, request/envelope y tipos
+  de disponibilidad en shared; reutilizacion de AvailabilityRuleDto y errores A.
+- Permisos de lectura OWNER/ADMIN/STAFF y escritura OWNER/ADMIN mediante la
+  matriz existente. businessId siempre del perfil autenticado; DTO sin tenant.
+- Dia 0..6, HH:mm, inicio anterior al fin, sin duplicados/solapamientos incluso
+  inactivos. Adyacencia permitida, sin medianoche. TIME conserva hora/minuto
+  sin conversion de zona; legado con segundos devuelve 500 sin truncarlo.
+- Reemplazo por transaccion con borrado de omitidas y upsert de tuplas para
+  conservar ID/createdAt. Bloqueo de Business serializa PUT del mismo negocio,
+  incluso semana vacia. No hay versionado ni deteccion de edicion perdida.
+- D03: comprobar turnos SCHEDULED/CONFIRMED con endsAt futuro, incluidos en
+  curso, usando intervalos persistidos y timezone de Business. Rechazar 409
+  AVAILABILITY_CONFLICT si no caben en una unica franja activa. Sin cambios en
+  reservas ni eventos. Mantener el resto de codigos y formatos de A/B03.
+
+**Validacion y correccion humana**
+
+Se detecto que D03 seguia como propuesta y se consulto antes de implementar su
+politica. La desarrolladora respondio expresamente: "Si, aprobar D03 para B04".
+Esto no aprueba D06/D07/D08 ni modifica C. Los turnos que atraviesan cambios de
+offset abortan con INTERNAL_ERROR sin escrituras hasta acordar D06; no se
+inventa una conversion DST. D07 requiere que C acuerde bloqueo y revalidacion
+transaccional antes de prometer exclusion entre reservas y cambios semanales.
+
+Pasaron lint y typecheck de todo el monorepo, 157 pruebas unitarias y las 30
+pruebas de integracion (incluidos B03 y A). Se verificaron permisos y aislamiento
+HTTP, persistencia TIME, conservacion de identidad, rechazo D03 sin alterar
+turnos/eventos, turnos en curso, rollback real despues de borrar/insertar y
+reemplazos concurrentes desde semana vacia.
+
+Las pruebas de PostgreSQL se ejecutaron contra una base descartable creada en
+el contenedor Supabase local, aplicando ambas migraciones. El bootstrap auth.uid()
+retornaba NULL; se usaron FakeVerifier y conexion postgres. Esta evidencia
+valida API/persistencia, no tokens reales de Supabase ni RLS. La base temporal
+se elimino al terminar y no se uso la base remota configurada habitualmente.
+
+**Resultado**
+
+B04 implementado y D03 aprobada para su alcance. Se actualizaron B01 y el README
+del modulo con los limites de integracion: D06 (transiciones horarias), D07
+(concurrencia con C) y D08 (acceso directo por RLS). Sin cambios en C, schema,
+migraciones, infraestructura ni `.env`. Sin commit ni push.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.

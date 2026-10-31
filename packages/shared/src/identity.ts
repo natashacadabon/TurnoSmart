@@ -9,6 +9,8 @@ export const PERMISSIONS = {
   'business:update': ['OWNER', 'ADMIN'],
   'services:read': ['OWNER', 'ADMIN', 'STAFF'],
   'services:write': ['OWNER', 'ADMIN'],
+  'availability:read': ['OWNER', 'ADMIN', 'STAFF'],
+  'availability:write': ['OWNER', 'ADMIN'],
   'customers:read': ['OWNER', 'ADMIN', 'STAFF'],
   'customers:write': ['OWNER', 'ADMIN', 'STAFF'],
   // Baja definitiva: sólo quienes administran el negocio.
