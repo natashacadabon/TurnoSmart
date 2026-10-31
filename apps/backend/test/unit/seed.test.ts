@@ -28,8 +28,8 @@ const authorizedRef = 'gtghqinpghiryxuloeub';
 const otherRef = 'abcdefghijklmnopqrst';
 const remoteEnv = () => ({
   ...localEnv(),
-  DATABASE_URL: `postgresql://postgres.${authorizedRef}@aws-1-us-east-2.pooler.supabase.com:6543/postgres?pgbouncer=true`,
-  DIRECT_URL: `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres`,
+  DATABASE_URL: `postgresql://postgres.${authorizedRef}@aws-1-us-east-2.pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=require`,
+  DIRECT_URL: `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres?sslmode=require`,
   SUPABASE_URL: `https://${authorizedRef}.supabase.co`,
   ALLOW_REMOTE_SEED: 'true',
   SEED_CONFIRM_REMOTE: `seed:${authorizedRef}`,
@@ -38,14 +38,29 @@ const remoteEnv = () => ({
 describe('seed: autorizacion Cloud sin red', () => {
   it('admite unicamente el proyecto autorizado con triple coincidencia y confirmacion', () => {
     expect(readSeedConfig(remoteEnv()).projectRef).toBe(authorizedRef);
-    const direct = `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres`;
+    const direct = `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres?sslmode=require`;
     expect(readSeedConfig({ ...remoteEnv(), DATABASE_URL: direct }).projectRef).toBe(authorizedRef);
     expect(
       readSeedConfig({
         ...remoteEnv(),
-        DIRECT_URL: `postgresql://postgres.${authorizedRef}@aws-0-eu-central-1.pooler.supabase.com:5432/postgres`,
+        DIRECT_URL: `postgresql://postgres.${authorizedRef}@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=verify-full&sslaccept=strict`,
       }).projectRef,
     ).toBe(authorizedRef);
+  });
+  it('requiere TLS y no permite omitir la validacion del certificado', () => {
+    for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
+      for (const mode of ['disable', 'allow', 'prefer', 'no-verify', '']) {
+        const env = remoteEnv();
+        env[key] = env[key].replace(/sslmode=[^&]*/, `sslmode=${mode}`);
+        expect(() => readSeedConfig(env)).toThrow(/conexion TLS/);
+      }
+      const env = remoteEnv();
+      env[key] = env[key].replace(
+        'sslmode=require',
+        'sslmode=require&sslaccept=accept_invalid_certs',
+      );
+      expect(() => readSeedConfig(env)).toThrow(/certificado TLS/);
+    }
   });
   it.each(['', 'false', 'TRUE'])('rechaza habilitacion distinta de true: %s', (value) => {
     expect(() => readSeedConfig({ ...remoteEnv(), ALLOW_REMOTE_SEED: value })).toThrow(
@@ -78,13 +93,13 @@ describe('seed: autorizacion Cloud sin red', () => {
     expect(() =>
       readSeedConfig({
         ...remoteEnv(),
-        DATABASE_URL: `postgresql://postgres.${otherRef}@aws-0-us-east-1.pooler.supabase.com:6543/postgres`,
+        DATABASE_URL: `postgresql://postgres.${otherRef}@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require`,
       }),
     ).toThrow(/mismo proyecto/);
     expect(() =>
       readSeedConfig({
         ...remoteEnv(),
-        DIRECT_URL: `postgresql://postgres@db.${otherRef}.supabase.co:5432/postgres`,
+        DIRECT_URL: `postgresql://postgres@db.${otherRef}.supabase.co:5432/postgres?sslmode=require`,
       }),
     ).toThrow(/mismo proyecto/);
   });
@@ -103,16 +118,16 @@ describe('seed: autorizacion Cloud sin red', () => {
     for (const DATABASE_URL of [
       `postgresql://postgres.${authorizedRef}@attacker.pooler.supabase.com:5432/postgres`,
       `postgresql://postgres.${authorizedRef}@aws-0-us-east-1.pooler.supabase.com.attacker.test:5432/postgres`,
-      `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres?host=attacker.test`,
-      `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres?schema=other`,
-      `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/other`,
+      `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres?host=attacker.test&sslmode=require`,
+      `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/postgres?schema=other&sslmode=require`,
+      `postgresql://postgres@db.${authorizedRef}.supabase.co:5432/other?sslmode=require`,
     ])
       expect(() => readSeedConfig({ ...remoteEnv(), DATABASE_URL })).toThrow();
   });
   it('errores de destino no incluyen claves ni URLs completas', () => {
     const env = {
       ...remoteEnv(),
-      DATABASE_URL: `postgresql://postgres:${password()}@db.${otherRef}.supabase.co:5432/postgres`,
+      DATABASE_URL: `postgresql://postgres:${password()}@db.${otherRef}.supabase.co:5432/postgres?sslmode=require`,
     };
     let rejected = false;
     try {

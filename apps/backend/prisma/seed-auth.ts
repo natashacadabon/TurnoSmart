@@ -56,6 +56,10 @@ function databaseProject(url: URL, key: string) {
     if (!allowedParams.has(name) || url.searchParams.getAll(name).length !== 1)
       throw new SeedError(`${key}: parametro de conexion no permitido.`);
   }
+  if (!['require', 'verify-ca', 'verify-full'].includes(url.searchParams.get('sslmode') ?? ''))
+    throw new SeedError(`${key}: se requiere una conexion TLS.`);
+  if (url.searchParams.has('sslaccept') && url.searchParams.get('sslaccept') !== 'strict')
+    throw new SeedError(`${key}: no se permite omitir la validacion del certificado TLS.`);
   if (url.searchParams.has('schema') && url.searchParams.get('schema') !== 'public')
     throw new SeedError(`${key}: solo se admite schema public.`);
   return direct?.[1] ?? pooledUser![1]!;
