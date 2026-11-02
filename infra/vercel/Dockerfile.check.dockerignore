@@ -4,6 +4,7 @@
 !apps/
 !apps/frontend/
 !apps/frontend/package.json
+!apps/frontend/vercel.json
 !apps/frontend/next.config.ts
 !apps/frontend/tsconfig.json
 !apps/frontend/src/
@@ -16,3 +17,6 @@
 !packages/shared/tsconfig.json
 !packages/shared/src/
 !packages/shared/src/**
+!.github/
+!.github/workflows/
+!.github/workflows/frontend-deploy.yml

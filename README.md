@@ -262,15 +262,18 @@ Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API
 
 ## Despliegue del frontend
 
-El frontend se despliega en Vercel solo de forma manual, con el workflow **Frontend deploy (manual)** (`.github/workflows/frontend-deploy.yml`). No se despliega en cada push. Requiere una API publica con HTTPS: desde Vercel no se puede usar `http://localhost:4000`.
+El frontend se despliega manualmente en Vercel o Azure, con el workflow **Frontend deploy (manual)** (`.github/workflows/frontend-deploy.yml`). No se despliega en cada push. En produccion requiere una API publica con HTTPS: desde Vercel no se puede usar `http://localhost:4000`.
 
 Preparacion y procedimiento completo: [Vercel Hobby para la demo](infra/vercel/README.md).
 El proyecto usa Root Directory apps/frontend, Node 22 y vercel.json versionado;
 compila shared desde la raiz y valida ambos origenes HTTPS y las variables Supabase antes de construir.
-NEXT_PUBLIC_USE_AZURE ausente/false selecciona Render; true selecciona Azure.
-Cambiarlo requiere rebuild, sin fallback automatico ni uso de NEXT_PUBLIC_API_URL legacy.
+El workflow separa `target` (API Render/Azure) de `frontend_target` (publicacion Vercel/Azure) y deriva `NEXT_PUBLIC_USE_AZURE` del primero.
+Cambiar el proveedor requiere rebuild, sin fallback automatico ni uso de `NEXT_PUBLIC_API_URL` legacy.
 Hobby exige uso personal no comercial y confirmacion explicita antes de publicar.
 No hay deploy por push ni fallback a infraestructura paga.
+
+Durante `next dev`, el frontend se conecta directamente a `http://localhost:4000`;
+los builds de produccion siguen requiriendo origenes HTTPS publicos.
 
 La CLI y .vercel/project.json se utilizan desde la **raiz del monorepo**.
 Configurar el entorno publico en Production antes del build; los valores de

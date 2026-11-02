@@ -14,9 +14,12 @@ npm run docker:dev
 npm run docker:down
 ```
 
-El frontend usa `NEXT_PUBLIC_API_URL=http://localhost:4000` porque el navegador accede al puerto publicado. Las variables de Supabase del frontend se leen de `apps/frontend/.env.local`, que queda montado en el contenedor.
+En `next dev`, el frontend usa `http://localhost:4000`, el puerto del backend
+publicado en el host; no hace falta definir una URL de API local. Las variables
+de Supabase del frontend se leen de `apps/frontend/.env.local`, montado en el
+contenedor. Los builds de produccion exigen origenes HTTPS publicos.
 
-- GitHub Actions: CI en pushes y pull requests, y deploy manual del frontend en Vercel (`frontend-deploy.yml`, ver README de la raíz).
+- GitHub Actions: CI en pushes y pull requests, y deploy manual del frontend en Vercel/Azure (`frontend-deploy.yml`, ver README de la raiz).
 
 ## Planificado
 

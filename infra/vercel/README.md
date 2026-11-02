@@ -85,21 +85,55 @@ un dominio estable para la demo. No crear otra Web App ni recursos Azure.
 ## Publicacion manual futura y validacion
 
 No ejecutar hasta autorizar la ventana. CLI desde la **raiz del monorepo**:
-`npx vercel link` (proyecto existente correcto), `npx vercel pull --environment=production`,
-`npx vercel build --prod`, verificar bundle y `npx vercel deploy --prebuilt --prod`.
-Antes de `npm run verify:public-build --workspace=apps/frontend`, exportar al
-proceso las cinco variables publicas esperadas (flag opcional false), coincidentes con Production. vercel pull
-guarda sus valores en .vercel/.env.production.local, pero el proceso de build no
-los exporta al shell; el verificador no debe usar un .env.local de desarrollo.
+`npx vercel@65.9.0 link` (proyecto existente correcto). Exportar al proceso las cinco
+variables publicas esperadas y VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID; no
+copiar secretos del backend. Seguir el mismo orden del workflow:
+
+```bash
+node apps/frontend/scripts/deploy-config.mjs validate
+npx vercel@65.9.0 pull --yes --environment=production
+node apps/frontend/scripts/deploy-config.mjs prepare
+npx vercel@65.9.0 build --prod --output .vercel/output
+npm run verify:public-build --workspace=apps/frontend
+node apps/frontend/scripts/deploy-config.mjs output
+# Solo durante la ventana autorizada:
+url=$(npx vercel@65.9.0 deploy --prebuilt --prod --yes)
+DEPLOYMENT_URL="$url" node apps/frontend/scripts/deploy-config.mjs published
+```
+
+`pull` descarga configuracion remota. `prepare` verifica el proyecto y su Root
+Directory, fija Node 22 y comandos del vercel.json versionado, y reemplaza las
+caches de entorno de Vercel por las cinco variables publicas del proceso. Asi el
+selector y las URLs de GitHub Actions prevalecen aunque Production tenga valores
+viejos; no modifica Settings remotos ni archivos .env de desarrollo. No ejecutar
+otro pull entre prepare y build. Nunca imprimir ni subir caches como artifacts.
 La vinculacion vive en .vercel/ de la raiz, ignorada por Git; no vincular una segunda
 copia desde apps/frontend. CLI local no implica publicacion hasta deploy.
 
-El workflow existente Frontend deploy (manual) es equivalente: target vercel,
-api_url_render y api_url_azure HTTPS, use_azure false/true y hobby_eligible confirmado. Requiere VERCEL_TOKEN como secret,
+El workflow existente Frontend deploy (manual) separa `target` (proveedor de API:
+render/azure) de `frontend_target` (publicacion: vercel/azure). Para publicar en
+Vercel usar `frontend_target=vercel`, seleccionar `target=render` o `azure`,
+ingresar api_url_render y api_url_azure HTTPS y confirmar hobby_eligible.
+`NEXT_PUBLIC_USE_AZURE` se deriva exclusivamente de `target`; no hay un selector
+booleano adicional. Requiere VERCEL_TOKEN como secret,
 VERCEL_ORG_ID/VERCEL_PROJECT_ID del link **raiz**, SUPABASE_URL/SUPABASE_ANON_KEY
-publicos en GitHub Variables, coincidentes con Vercel. El chequeo posterior al
-build aborta si los valores efectivos difieren; no publicar un bundle antiguo.
-No activar pushes automaticos ni usar el target Azure legacy para esta demo.
+publicos en GitHub Variables. Requiere el ultimo run de `ci.yml` por push, para el
+SHA exacto del dispatch, completado con success (actualmente dev/main); no acepta
+CI de otro SHA, solo PR, pendiente, fallida o cancelada. Ambos checkouts fijan ese SHA.
+Los tests de configuracion se ejecutan antes del CLI. Se verifica .next y tambien
+la copia JS de `.vercel/output` que deploy --prebuilt envia. Tras publicar, se
+descarga /login de la URL inmutable y todos los chunks JS (tambien lazy) y se comparan SHA-256 contra
+ese artefacto; un bundle distinto, 401/5xx, timeout o redirect falla el workflow.
+Deployment Protection debe permitir el acceso publico de la demo. Una falla de
+verificacion posterior no revierte automaticamente la publicacion: inspeccionar y
+retirar el deployment durante la ventana autorizada. No prueba login real ni CORS.
+
+`frontend_target=azure` falla explicitamente en preflight, incluso cuando
+`target=azure` es valido para Vercel. No hay pasos de despliegue Azure ni permiso
+OIDC. Solo habilitarlo tras contar con infraestructura, ZIP standalone y startup
+comprobados; entonces `id-token: write` debe existir exclusivamente en su job
+Azure, nunca globalmente ni en Vercel. `actions: read` solo se otorga al gate CI.
+El unico trigger es workflow_dispatch; no activar pushes automaticos.
 
 Validar desde navegador publicado: /demo y /login; /customers sin sesion redirige;
 login, onboarding solo si corresponde, clientes, recarga y logout. DevTools Network

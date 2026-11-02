@@ -99,6 +99,18 @@ test('selector: flag ausente/false usa Render, true usa Azure; ignora variable l
   );
   assert.equal(selectBackendUrl('false', undefined, valid.NEXT_PUBLIC_API_URL_AZURE), '');
 });
+test('selector: desarrollo usa exclusivamente la API local', () => {
+  assert.equal(
+    selectBackendUrl(
+      'false',
+      valid.NEXT_PUBLIC_API_URL_RENDER,
+      valid.NEXT_PUBLIC_API_URL_AZURE,
+      true,
+    ),
+    'http://localhost:4000',
+  );
+  assert.equal(selectBackendUrl('true', undefined, undefined, true), 'http://localhost:4000');
+});
 test('selector rechaza valores distintos a strings true/false', () => {
   for (const flag of ['', 'TRUE', 'False', '0', '1', ' true ', true, false])
     assert.throws(() => validatePublicEnv({ ...valid, NEXT_PUBLIC_USE_AZURE: flag }), {

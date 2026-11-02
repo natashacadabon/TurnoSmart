@@ -464,6 +464,14 @@ Vercel, confirmacion Hobby, variables Production, Site URL/redirects Supabase,
 CORS_ORIGIN del backend Azure y E2E con cuenta real. Sin servicios pagos/Azure
 adicionales, secretos nuevos, cambios de .env reales, deploy, commit ni push.
 
+## 2026-11-02 - Seleccion de API y desarrollo local del frontend
+
+`frontend-deploy.yml` separa proveedor API (`target`: Render/Azure) del destino
+de publicacion (`frontend_target`: Vercel/Azure); `NEXT_PUBLIC_USE_AZURE` se
+deriva exclusivamente del primero. En `next dev`, las llamadas usan directamente
+`http://localhost:4000`, tambien en Docker Compose; no hay fallback entre APIs.
+Los builds de produccion conservan la validacion HTTPS estricta de ambos origenes.
+
 ## 2026-11-02 - B05: generacion de slots disponibles
 
 **Problema abordado**
