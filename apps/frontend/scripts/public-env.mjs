@@ -21,6 +21,7 @@ export function validatePublicEnv(source) {
   for (const name of names) if (!source[name]?.trim()) fail(name);
   for (const name of names.slice(0, 3)) {
     let url;
+    if (source[name] !== source[name].trim()) fail(name);
     try {
       url = new URL(source[name]);
     } catch {
@@ -30,10 +31,10 @@ export function validatePublicEnv(source) {
     const local =
       host === 'localhost' ||
       /\.(localhost|local|internal)$/.test(host) ||
-      /^(0|10|127)\./.test(host) ||
-      /^169\.254\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      /^(0|10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^169\.254\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host) ||
       host === '::' ||
       host === '::1' ||
       /^(fc|fd|fe[89ab])[0-9a-f]*:/.test(host) ||
