@@ -1,6 +1,6 @@
 # A07: deploy manual del frontend. Nunca se dispara por push.
 # Vercel Hobby solo con elegibilidad confirmada; si no cumple, detener y acordar destino.
-# El target "azure" requiere `output: 'standalone'` en apps/frontend/next.config.ts (pendiente).
+# Azure bloqueado hasta validar infraestructura, ZIP standalone y startup.
 # B es responsable de los workflows: este archivo se integra con el CD de B08.
 name: Frontend deploy (manual)
 
@@ -8,7 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Destino del frontend
+        description: Proveedor de API del frontend
+        type: choice
+        options: [render, azure]
+        required: true
+      frontend_target:
+        description: Destino de publicacion del frontend
         type: choice
         options: [vercel, azure]
         required: true
@@ -18,43 +23,67 @@ on:
       api_url_azure:
         description: Origen HTTPS de Azure (NEXT_PUBLIC_API_URL_AZURE)
         required: true
-      use_azure:
-        description: Seleccionar Azure en lugar de Render
-        type: boolean
-        default: false
       hobby_eligible:
-        description: Confirmo uso personal no comercial y elegibilidad Hobby (solo target vercel)
+        description: Confirmo uso personal no comercial y elegibilidad Hobby (solo frontend_target vercel)
         type: boolean
         default: false
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: frontend-deploy
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Bloquear Azure y confirmar Hobby
+        env:
+          FRONTEND_TARGET: ${{ inputs.frontend_target }}
+          HOBBY_ELIGIBLE: ${{ inputs.hobby_eligible }}
+        run: |
+          test "$FRONTEND_TARGET" = "vercel" || { echo "Azure frontend bloqueado: faltan infraestructura, ZIP standalone y startup comprobados."; exit 1; }
+          test "$HOBBY_ELIGIBLE" = "true" || { echo "Confirmar elegibilidad Hobby antes de desplegar; no hay upgrade automatico."; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Exigir CI aprobada para esta revision
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { assertSuccessfulCi } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'ci.yml', head_sha: context.sha,
+              event: 'push', per_page: 100
+            });
+            assertSuccessfulCi(data.workflow_runs, context.sha);
+
   deploy:
+    needs: preflight
+    if: inputs.frontend_target == 'vercel'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      NEXT_PUBLIC_USE_AZURE: ${{ inputs.use_azure && 'true' || 'false' }}
+      NEXT_PUBLIC_USE_AZURE: ${{ inputs.target == 'azure' && 'true' || 'false' }}
       NEXT_PUBLIC_API_URL_RENDER: ${{ inputs.api_url_render }}
       NEXT_PUBLIC_API_URL_AZURE: ${{ inputs.api_url_azure }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
       RELEASE_SHA: ${{ github.sha }}
+      VERCEL_CLI_VERSION: '65.9.0'
     steps:
-      - name: Confirmar elegibilidad Hobby
-        if: inputs.target == 'vercel'
-        env:
-          HOBBY_ELIGIBLE: ${{ inputs.hobby_eligible }}
-        run: |
-          test "$HOBBY_ELIGIBLE" = "true" || { echo "Confirmar elegibilidad Hobby antes de desplegar; no hay upgrade automatico."; exit 1; }
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -63,55 +92,26 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: HUSKY=0 npm ci --ignore-scripts
+
+      - name: Tests de configuracion
+        run: npm run test:config --workspace=apps/frontend
 
       - name: Build shared
         run: npm run build:shared
 
       - name: Deploy a Vercel
-        if: inputs.target == 'vercel'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: |
-          npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
-          npx vercel@latest build --prod --token="$VERCEL_TOKEN"
+          node apps/frontend/scripts/deploy-config.mjs validate
+          npx --yes "vercel@$VERCEL_CLI_VERSION" pull --yes --environment=production --token="$VERCEL_TOKEN"
+          node apps/frontend/scripts/deploy-config.mjs prepare
+          npx --yes "vercel@$VERCEL_CLI_VERSION" build --prod --output .vercel/output --token="$VERCEL_TOKEN"
           npm run verify:public-build --workspace=apps/frontend
-          url=$(npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          node apps/frontend/scripts/deploy-config.mjs output
+          url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN")
+          DEPLOYMENT_URL="$url" node apps/frontend/scripts/deploy-config.mjs published
           echo "Frontend: $url" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Build standalone para Azure
-        if: inputs.target == 'azure'
-        run: |
-          npm run build --workspace=apps/frontend
-          cd apps/frontend
-          if [ ! -d .next/standalone ]; then
-            echo "Falta output: 'standalone' en next.config.ts" && exit 1
-          fi
-          cp -r .next/static .next/standalone/apps/frontend/.next/static
-          [ -d public ] && cp -r public .next/standalone/apps/frontend/public || true
-          cd .next/standalone && zip -qr "$GITHUB_WORKSPACE/frontend.zip" .
-
-      - name: Login Azure (OIDC)
-        if: inputs.target == 'azure'
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy a Azure Web App
-        if: inputs.target == 'azure'
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ vars.AZURE_FRONTEND_APP_NAME }}
-          package: frontend.zip
-          startup-command: node apps/frontend/server.js
-
-      - name: Smoke
-        if: inputs.target == 'azure'
-        run: |
-          url="https://${{ vars.AZURE_FRONTEND_APP_NAME }}.azurewebsites.net/"
-          for i in $(seq 1 10); do curl -fsS -o /dev/null "$url" && exit 0; sleep 15; done
-          echo "Smoke fallo: $url" && exit 1
