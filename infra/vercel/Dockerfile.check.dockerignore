@@ -1,6 +1,7 @@
 **
 !package.json
 !package-lock.json
+!.nvmrc
 !.husky/
 !.husky/install*.mjs
 !apps/

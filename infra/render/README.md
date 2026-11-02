@@ -37,7 +37,8 @@ compila frontend y exige sus variables publicas. No usar `npm install` en startu
 
 Se instalan desde el lock unico solo los workspaces requeridos, incluyendo las
 herramientas de compilacion aun con NODE_ENV=production. Los lifecycle scripts npm
-permanecen habilitados; prepare omite solo Husky en hosting/CI/produccion o si falta.
+permanecen habilitados; prepare omite Husky en hosting/CI/produccion. En desarrollo
+local falla claramente si faltan las devDependencies, conservando los hooks.
 No configurar NPM_CONFIG_IGNORE_SCRIPTS. Se genera Prisma **explicitamente en Linux** antes de
 compilar. Se conserva el cliente nativo generado y shared/dist en el monorepo.
 No usar cliente generado en Windows/musl ni copiar node_modules desde una PC.

@@ -13,8 +13,12 @@ let huskyUrl;
 try {
   huskyUrl = import.meta.resolve('husky');
 } catch (error) {
-  // Una instalacion sin devDependencies puede no contener Husky.
-  if (error.code === 'ERR_MODULE_NOT_FOUND') process.exit(0);
+  if (error.code === 'ERR_MODULE_NOT_FOUND') {
+    throw new Error(
+      'Faltan dependencias locales (husky). Ejecuta npm ci --include=dev desde la raiz con Node 22.',
+      { cause: error },
+    );
+  }
   throw error;
 }
 
