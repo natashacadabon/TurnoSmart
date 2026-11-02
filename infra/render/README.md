@@ -28,7 +28,7 @@ Manual Deploy solo cuando hagan falta. No se agregan workflows de GitHub Actions
 Build Command expande exactamente a:
 
 ```sh
-npm ci --include=dev --ignore-scripts --workspace=apps/backend --workspace=packages/shared && npm run prisma:generate --workspace=apps/backend && npm run build:shared && npm run build --workspace=apps/backend
+npm ci --include=dev --workspace=apps/backend --workspace=packages/shared && npm run prisma:generate --workspace=apps/backend && npm run build:shared && npm run build --workspace=apps/backend
 ```
 
 Start Command expande a `npm run start --workspace=apps/backend`, que ejecuta
@@ -36,8 +36,9 @@ Start Command expande a `npm run start --workspace=apps/backend`, que ejecuta
 compila frontend y exige sus variables publicas. No usar `npm install` en startup.
 
 Se instalan desde el lock unico solo los workspaces requeridos, incluyendo las
-herramientas de compilacion aun con NODE_ENV=production. ignore-scripts impide
-hooks de dependencias/Husky; se genera Prisma **explicitamente en Linux** antes de
+herramientas de compilacion aun con NODE_ENV=production. Los lifecycle scripts npm
+permanecen habilitados; prepare omite solo Husky en hosting/CI/produccion o si falta.
+No configurar NPM_CONFIG_IGNORE_SCRIPTS. Se genera Prisma **explicitamente en Linux** antes de
 compilar. Se conserva el cliente nativo generado y shared/dist en el monorepo.
 No usar cliente generado en Windows/musl ni copiar node_modules desde una PC.
 No se cambia schema ni binaryTargets. No hay migrate, db push, seed ni SQL en

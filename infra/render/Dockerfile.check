@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 COPY package.json package-lock.json ./
+COPY .husky/install.mjs .husky/install.mjs
 COPY apps/backend/package.json apps/backend/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/backend/src/ apps/backend/src/

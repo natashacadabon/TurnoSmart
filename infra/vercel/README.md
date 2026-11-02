@@ -21,13 +21,20 @@ Preparar/configurar **manualmente** el proyecto del titular, sin publicar ahora:
 | Root Directory                              | apps/frontend                                                        |
 | Include source files outside Root Directory | Activado (packages/shared y lock raiz)                               |
 | Node.js                                     | 22.x (tambien declarado en frontend/package.json)                    |
-| Install Command                             | vercel.json: cd ../.. && HUSKY=0 npm ci --ignore-scripts             |
+| Install Command                             | vercel.json: cd ../.. && HUSKY=0 npm ci --include=dev                |
 | Build Command                               | vercel.json: compilar shared desde raiz y npm run build del frontend |
 | Output Directory                            | Default de Next.js (.next), sin standalone/static export             |
 | Git deployment                              | Deshabilitado en vercel.json; preferir proyecto sin Git conectado    |
 
 El lock unico se instala desde raiz; shared exporta dist y se compila primero.
-No se construye/despliega el backend, no se genera Prisma ni se ejecutan migraciones.
+`--include=dev` conserva TypeScript y herramientas de Next/shared aun con
+NODE_ENV=production u omit=dev. No configurar NPM_CONFIG_IGNORE_SCRIPTS ni
+deshabilitar lifecycle scripts. El prepare raiz usa el
+[installer recomendado por Husky](https://typicode.github.io/husky/how-to.html#ci-server-and-docker):
+omite CI, produccion, hosting o HUSKY=0 antes de importar Husky, y tolera su ausencia.
+Los hooks locales siguen inicializandose al instalar con devDependencies.
+No se construye/despliega el backend ni se ejecutan migraciones; los lifecycle
+de dependencias permanecen habilitados.
 Next detecta la raiz del workspace mediante package-lock.json, sin alias nuevos.
 [Referencia monorepos](https://vercel.com/docs/monorepos/monorepo-faq).
 
