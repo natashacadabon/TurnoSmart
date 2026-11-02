@@ -17,6 +17,7 @@ import { FakeVerifier } from '../fakes.js';
 import { PrismaServiceRepository } from '../../src/modules/services/repository.js';
 import { PrismaAvailabilityRepository } from '../../src/modules/availability/repository.js';
 import { PrismaSlotsRepository } from '../../src/modules/slots/repository.js';
+import { PrismaAppointmentRepository } from '../../src/modules/appointments/repository.js';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -35,6 +36,7 @@ const app = createApp({
   services: new PrismaServiceRepository(prisma),
   availability: new PrismaAvailabilityRepository(prisma),
   slots: new PrismaSlotsRepository(prisma),
+  appointments: new PrismaAppointmentRepository(prisma),
   events: new PrismaEventRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer: null,

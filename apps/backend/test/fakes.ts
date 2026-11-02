@@ -14,6 +14,7 @@ import type {
   ListQuery,
 } from '../src/modules/customers/repository.js';
 import type { EventRecord, EventRepository } from '../src/modules/events/repository.js';
+import { InMemoryAppointmentRepository } from './appointments-fakes.js';
 import type {
   BusinessRecord,
   IdentityRepository,
@@ -173,6 +174,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
   const availability = new InMemoryAvailability(identity);
   const slots = new InMemorySlots(services);
   const appointments = new InMemoryAppointments();
+  const appointmentRepository = new InMemoryAppointmentRepository();
   const deps: AppDeps = {
     corsOrigins: ['http://localhost:3000'],
     verifier,
@@ -181,6 +183,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     services,
     availability,
     slots,
+    appointments: appointmentRepository,
     events: appointments,
     risk: appointments,
     explainer: null,
@@ -196,6 +199,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     services,
     availability,
     appointments,
+    appointmentRepository,
     slots,
   };
 }

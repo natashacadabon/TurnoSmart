@@ -19,6 +19,8 @@ import type { AvailabilityRepository } from './modules/availability/repository.j
 import { availabilityRouter } from './modules/availability/routes.js';
 import { slotsRouter } from './modules/slots/routes.js';
 import type { SlotsRepository } from './modules/slots/repository.js';
+import type { AppointmentRepository } from './modules/appointments/repository.js';
+import { appointmentsRouter } from './modules/appointments/routes.js';
 
 export interface AppDeps {
   corsOrigins: string[];
@@ -28,6 +30,7 @@ export interface AppDeps {
   services: ServiceRepository;
   availability: AvailabilityRepository;
   slots: SlotsRepository;
+  appointments: AppointmentRepository;
   events: EventRepository;
   risk: RiskRepository;
   /** null si GEMINI_API_KEY no está configurada: la explicación responde 503. */
@@ -81,6 +84,16 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/services', ...authed, servicesRouter(deps));
   app.use('/api/availability-rules', ...authed, availabilityRouter(deps));
   app.use('/api/slots', ...authed, slotsRouter(deps));
+  app.use(
+    '/api/appointments',
+    ...authed,
+    appointmentsRouter({
+      appointments: deps.appointments,
+      customers: deps.customers,
+      services: deps.services,
+      availability: deps.availability,
+    }),
+  );
   app.use('/api/appointments', ...authed, eventsRouter(deps));
   app.use(
     '/api/appointments',

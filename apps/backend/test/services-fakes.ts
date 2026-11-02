@@ -10,6 +10,9 @@ import type {
 /** Doble para HTTP; no sustituye pruebas de PostgreSQL o RLS. */
 export class InMemoryServices implements ServiceRepository {
   readonly rows: ServiceRecord[] = [];
+  async findById(businessId: string, id: string) {
+    return this.rows.find((row) => row.businessId === businessId && row.id === id) ?? null;
+  }
   async list(businessId: string, query: ListServicesQuery) {
     const all = this.rows
       .filter(
