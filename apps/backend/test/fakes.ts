@@ -1,3 +1,6 @@
+import { InMemoryServices } from './services-fakes.js';
+import { InMemoryAvailability } from './availability-fakes.js';
+import { InMemorySlots } from './slots-fakes.js';
 import { randomUUID } from 'node:crypto';
 import type { Role } from '@turnosmart/shared';
 import { createApp, type AppDeps } from '../src/app.js';
@@ -166,12 +169,18 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
   const verifier = new FakeVerifier();
   const identity = new InMemoryIdentity();
   const customers = new InMemoryCustomers();
+  const services = new InMemoryServices();
+  const availability = new InMemoryAvailability(identity);
+  const slots = new InMemorySlots(services);
   const appointments = new InMemoryAppointments();
   const deps: AppDeps = {
     corsOrigins: ['http://localhost:3000'],
     verifier,
     identity,
     customers,
+    services,
+    availability,
+    slots,
     events: appointments,
     risk: appointments,
     explainer: null,
@@ -179,5 +188,14 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     checkReady: async () => true,
     ...overrides,
   };
-  return { app: createApp(deps), verifier, identity, customers, appointments };
+  return {
+    app: createApp(deps),
+    verifier,
+    identity,
+    customers,
+    services,
+    availability,
+    appointments,
+    slots,
+  };
 }

@@ -42,6 +42,7 @@ export function requireProfile(identity: IdentityRepository): RequestHandler {
       userId: req.user.id,
       email: req.user.email,
       businessId: found.business.id,
+      timezone: found.business.timezone,
       role: found.profile.role,
     };
     next();

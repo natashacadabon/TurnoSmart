@@ -12,6 +12,8 @@
     "dev:frontend": "npm run build:shared && npm run dev --workspace=apps/frontend",
     "dev:backend": "npm run build:shared && npm run dev --workspace=apps/backend",
     "build:shared": "npm run build --workspace=packages/shared",
+    "build:render": "npm ci --include=dev --ignore-scripts --workspace=apps/backend --workspace=packages/shared && npm run prisma:generate --workspace=apps/backend && npm run build:shared && npm run build --workspace=apps/backend",
+    "start:render": "npm run start --workspace=apps/backend",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

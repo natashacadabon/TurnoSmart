@@ -11,6 +11,9 @@ import { PrismaRiskRepository } from './modules/ai/risk-repository.js';
 import { PrismaCustomerRepository } from './modules/customers/repository.js';
 import { PrismaEventRepository } from './modules/events/repository.js';
 import { PrismaIdentityRepository } from './modules/identity/repository.js';
+import { PrismaServiceRepository } from './modules/services/repository.js';
+import { PrismaAvailabilityRepository } from './modules/availability/repository.js';
+import { PrismaSlotsRepository } from './modules/slots/repository.js';
 
 const env = loadEnv();
 const prisma = new PrismaClient();
@@ -27,6 +30,9 @@ const app = createApp({
   verifier: new SupabaseTokenVerifier(env.SUPABASE_URL, env.SUPABASE_ANON_KEY),
   identity: new PrismaIdentityRepository(prisma),
   customers: new PrismaCustomerRepository(prisma),
+  services: new PrismaServiceRepository(prisma),
+  availability: new PrismaAvailabilityRepository(prisma),
+  slots: new PrismaSlotsRepository(prisma),
   events: new PrismaEventRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer,

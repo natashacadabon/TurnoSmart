@@ -6,13 +6,14 @@
 Navegador
    |
    v
-Next.js + Material UI (dashboard con datos estaticos)
+Next.js + Material UI (sesion y contexto real; agenda pendiente; /demo estatico)
 
 Express + TypeScript
    |-- GET /health, GET /ready
    |-- Supabase Auth (validacion de token)
    |-- /api/me, /api/onboarding, /api/business
    |-- /api/customers
+   |-- /api/services (GET, POST, PATCH /:id)
    |-- /api/appointments/:id/events (lectura)
    |-- /api/appointments/:id/risk/explanation --> Gemini API
    `-- Prisma --> Supabase PostgreSQL
@@ -21,20 +22,20 @@ Express + TypeScript
                   `-- RLS habilitado
 ```
 
-El frontend consume la API en login, onboarding, negocio, clientes e historial/explicacion de un turno. El dashboard de `/` sigue siendo demostrativo con datos estaticos.
+El frontend usa Supabase Auth para login y consume la API en onboarding, negocio, clientes e historial/explicacion de un turno. El dashboard de `/` muestra negocio y total de clientes reales, pero la agenda esta pendiente; `/demo` contiene datos estaticos. Servicios solo tiene API.
 
-| Componente          | Estado                    | Alcance actual                     |
-| ------------------- | ------------------------- | ---------------------------------- |
-| Frontend            | Implementado parcialmente | Login, onboarding, clientes        |
-| Backend             | Implementado parcialmente | Identidad, clientes, historial, IA |
-| Prisma              | Implementado              | Schema, Client, migraciones y seed |
-| Supabase PostgreSQL | Configurado y probado     | Persistencia remota                |
-| RLS                 | Implementado              | Politicas por negocio              |
-| Supabase Auth       | Implementado en backend   | Token, perfil y onboarding por API |
-| Gemini              | Implementado en backend   | Explicacion de riesgo bajo demanda |
-| Email               | Planificado               | Sin integracion                    |
-| Vercel y Azure      | Planificados              | Sin evidencia de despliegue        |
-| Observabilidad      | Planificada               | Sin implementacion                 |
+| Componente          | Estado                    | Alcance actual                                |
+| ------------------- | ------------------------- | --------------------------------------------- |
+| Frontend            | Implementado parcialmente | Login, onboarding, clientes                   |
+| Backend             | Implementado parcialmente | Identidad, clientes, servicios, historial, IA |
+| Prisma              | Implementado              | Schema, Client, migraciones y seed            |
+| Supabase PostgreSQL | Configurado y probado     | Persistencia remota                           |
+| RLS                 | Implementado              | Politicas por negocio                         |
+| Supabase Auth       | Implementado en backend   | Token, perfil y onboarding por API            |
+| Gemini              | Implementado en backend   | Explicacion de riesgo bajo demanda            |
+| Email               | Planificado               | Sin integracion                               |
+| Vercel y Azure      | Planificados              | Sin evidencia de despliegue                   |
+| Observabilidad      | Planificada               | Sin implementacion                            |
 
 ## Arquitectura objetivo
 

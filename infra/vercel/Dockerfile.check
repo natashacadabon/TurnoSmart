@@ -1,0 +1,28 @@
+# Verificacion local aislada: no copia .env ni usa credenciales/despliegues.
+FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+WORKDIR /workspace
+ENV HUSKY=0 NEXT_TELEMETRY_DISABLED=1
+COPY package.json package-lock.json ./
+COPY apps/frontend/package.json apps/frontend/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN npm ci --include=dev --ignore-scripts --workspace=apps/frontend --workspace=packages/shared
+COPY packages/shared/src/ packages/shared/src/
+COPY packages/shared/tsconfig.json packages/shared/
+COPY apps/frontend/src/ apps/frontend/src/
+COPY apps/frontend/scripts/ apps/frontend/scripts/
+COPY apps/frontend/vercel.json apps/frontend/vercel.json
+COPY .github/workflows/frontend-deploy.yml .github/workflows/frontend-deploy.yml
+COPY apps/frontend/next.config.ts apps/frontend/tsconfig.json apps/frontend/
+ARG USE_AZURE=false
+ENV NEXT_PUBLIC_USE_AZURE=${USE_AZURE} \
+    NEXT_PUBLIC_API_URL_RENDER=https://turnosmart-backend-demo.onrender.com \
+    NEXT_PUBLIC_API_URL_AZURE=https://turnosmart-api.azurewebsites.net \
+    NEXT_PUBLIC_SUPABASE_URL=https://demo.supabase.co \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_build_fixture
+RUN npm run build:shared && npm run test:config --workspace=apps/frontend \
+    && npm run build --workspace=apps/frontend \
+    && npm run typecheck --workspace=apps/frontend \
+    && npm run verify:public-build --workspace=apps/frontend
+ENV PORT=43128
+EXPOSE 43128
+CMD ["npm", "run", "start", "--workspace=apps/frontend", "--", "--hostname", "0.0.0.0"]

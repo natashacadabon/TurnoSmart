@@ -42,17 +42,25 @@ npm run test:e2e --workspace=@turnosmart/frontend
 ```
 
 La app se sirve en `http://localhost:3000`. Next.js lee las variables desde `apps/frontend/.env.local` (plantilla: `apps/frontend/.env.example`), con los mismos valores de Supabase que `apps/backend/.env`. Sin las variables de Supabase solo funciona `/demo`. La guía completa para configurar y correr el proyecto está en el README de la raíz.
+En `next dev`, las llamadas API van directamente a `http://localhost:4000`,
+tambien con Docker Compose; no se usa un proveedor remoto como fallback.
 
 `test:e2e` corre el recorrido crítico sin mocks: requiere frontend, API y Supabase levantados, y una cuenta de prueba en `E2E_USER_EMAIL` / `E2E_USER_PASSWORD`. Una cuenta nueva pasa por el onboarding una sola vez.
 
-El despliegue en Vercel es manual, con el workflow **Frontend deploy (manual)**; los pasos están en el README de la raíz.
+El despliegue Vercel Hobby esta preparado, sin publicar: [guia de demo](../../infra/vercel/README.md).
+El build exige NEXT_PUBLIC_API_URL_RENDER, NEXT_PUBLIC_API_URL_AZURE y las dos
+variables Supabase publicas; compilar shared primero. NEXT_PUBLIC_USE_AZURE ausente
+o false usa Render; true usa Azure. Ambas URLs deben ser HTTPS publicas, incluso
+la inactiva. No hay fallback automatico; NEXT_PUBLIC_API_URL antigua se ignora.
+Cambiar el proveedor requiere rebuild. Auth, CORS y contratos no cambian.
+Pruebas de configuracion: `npm run test:config --workspace=apps/frontend`;
+smoke del build con Auth/API simuladas: `npm run test:deploy --workspace=apps/frontend`.
 
 ## Estructura
 
 ```text
 apps/frontend/
 ├── e2e/                     # Pruebas end-to-end (Playwright)
-├── public/                  # Archivos estáticos
 ├── src/
 │   ├── app/
 │   │   ├── (app)/           # Pantallas con sesión: agenda, clientes, negocio y detalle de turno

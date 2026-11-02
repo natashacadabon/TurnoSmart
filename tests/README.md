@@ -10,7 +10,13 @@ Las pruebas viven junto a cada app. Los comandos y requisitos están en la secci
 | Integración | `apps/backend/test/integration` | API + PostgreSQL real con las migraciones: onboarding concurrente que crea un único negocio, persistencia y aislamiento de clientes entre dos negocios, y baja bloqueada por la FK cuando el cliente tiene turnos.                                                                              |
 | End-to-end  | `apps/frontend/e2e`             | Navegador real, sin mocks: login inválido, rutas protegidas, recuperación ante una API caída y alta, recarga, edición, baja y cierre de sesión con un cliente.                                                                                                                                  |
 
-Las pruebas de integración crean y borran negocios: usar una base descartable con las migraciones aplicadas, nunca la del equipo ni la de la demo.
+La suite de integración contra PostgreSQL crea y borra negocios: usar una base descartable con las migraciones aplicadas, nunca la del equipo ni la de la demo.
+
+La suite `services-http.test.ts` es una excepcion: prueba la API de servicios con
+fakes, sin PostgreSQL ni `.env`. Ejecutarla con
+`npm run test:integration --workspace=@turnosmart/backend -- services-http.test.ts`.
+Las unitarias tambien cubren servicios y el seed local con dobles, sin cargar datos.
+Estas suites no demuestran persistencia ni RLS de PostgreSQL.
 
 ## Pendiente
 
