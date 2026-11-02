@@ -406,6 +406,72 @@ con la app detenida. Registrar costo real y cierre en docs/costs.md. Sin commit/
 
 ---
 
+## 2026-11-02 - Preparacion del frontend para demo en Vercel Hobby
+
+**Problema abordado**
+
+Preparar el monorepo para publicar apps/frontend con costo minimo y variables
+publicas correctas, sin desplegar ni agregar infraestructura Azure/paga.
+
+**Prompt / herramienta utilizada**
+
+Codex. Se revisaron AGENTS.md, las guias de Next incluidas en la version instalada,
+workspaces, Supabase Auth, CORS, workflow y condiciones oficiales vigentes de Hobby.
+Un agente independiente reviso configuracion, scripts, documentacion y fixtures,
+como exige AGENTS.md de frontend, sin modificar archivos.
+
+**Codigo / arquitectura propuesta por IA**
+
+- vercel.json en apps/frontend declara Next.js, instalacion desde la raiz sin
+  lifecycle scripts y build de shared antes de frontend; deshabilita deploys Git.
+  Root Directory apps/frontend, acceso fuera de root y Node 22 requieren settings
+  del proyecto; engines de frontend y lock quedan alineados, sin nuevas dependencias.
+- prebuild valida los valores efectivos con el cargador de entorno propio de Next:
+  exige las tres NEXT_PUBLIC, origenes HTTPS no locales y clave Supabase publica
+  publishable/legacy anon. Rechaza secret/service_role y variables privilegiadas
+  con prefijo publico, sin imprimir valores. JWT decode solo es guarda de formato.
+- Fallback API localhost solo en development. Verificador del bundle comprueba
+  las tres variables esperadas y ausencia del fallback productivo; deben cambiarse
+  mediante rebuild. La deteccion de secretos completos evita el falso positivo
+  del prefijo literal sb_secret_ incluido en el SDK Supabase.
+- Se mantiene login por password y redirects internos; no se inventan OAuth ni
+  callback. CORS requiere origen Vercel exacto y conserva Bearer/OPTIONS existentes.
+  Documentados Site URL/Redirect URLs del Supabase existente y limpieza posterior.
+- Workflow manual requiere confirmar elegibilidad Hobby y verifica el bundle antes
+  de deploy. Las variables publicas GitHub/Vercel deben coincidir. CI usa fixtures
+  HTTPS/publicas para builds sin desplegar. No se amplia el target Azure legacy.
+
+**Validacion y correccion humana**
+
+La solicitud autoriza preparar, no publicar. Hobby es compatible en principio con
+la demo personal no comercial declarada; el titular debe confirmar condiciones de
+uso y cuenta antes de publicar. No se atribuye aprobacion juridica ni alta de plan.
+Si deja de ser elegible, detenerse sin upgrade/fallback automatico.
+
+Pasaron build Next 16.4.3 y typecheck en Linux Node 22.23.4 aislado, sin copiar .env,
+27 pruebas de configuracion, verificacion del JS publicado y rechazo del prebuild
+real con URL localhost. Playwright/Chrome paso 3 casos de build productivo con
+Auth/API simuladas: login/recarga/logout Bearer, login de rutas protegidas y
+onboarding sin escrituras. Se sobreescribio la API en runtime y el navegador siguio
+utilizando el valor del build. Se bloquearon requests externos inesperados.
+Tambien pasaron 8 pruebas de plataforma/CORS bajo Node 22, lint y typecheck de todo
+el monorepo. No se ejecuta el E2E real que requiere cuenta/Supabase de prueba.
+
+Formato de archivos modificados y git diff --check aprobados; el formato global
+detecta 42 archivos preexistentes sin cambios respecto de HEAD. No se reformatean.
+La instalacion y build usaron valores ficticios; no se accedio ni modifico Cloud.
+Se elimino el contenedor local temporal, conservando la imagen para reproducirlo.
+
+**Resultado**
+
+Frontend preparado con guia de publicacion, validacion y eliminacion en
+infra/vercel/README.md. Pendientes de la ventana autorizada: settings reales de
+Vercel, confirmacion Hobby, variables Production, Site URL/redirects Supabase,
+CORS_ORIGIN del backend Azure y E2E con cuenta real. Sin servicios pagos/Azure
+adicionales, secretos nuevos, cambios de .env reales, deploy, commit ni push.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.

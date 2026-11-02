@@ -16,13 +16,17 @@ export class ApiError extends Error {
   }
 }
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'development' ? 'http://localhost:4000' : '')
+).replace(/\/$/, '');
 
 /** Cliente HTTP común: adjunta el access token vigente y normaliza errores del contrato A01. */
 export async function api<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
+  if (!API_URL) throw new ApiError(0, 'NETWORK_ERROR', 'Falta configurar la URL publica de la API');
   const { data } = await getSupabase().auth.getSession();
   const token = data.session?.access_token;
 

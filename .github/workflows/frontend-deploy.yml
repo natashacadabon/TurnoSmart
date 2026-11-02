@@ -1,5 +1,5 @@
 # A07: deploy manual del frontend. Nunca se dispara por push.
-# Vercel Hobby solo si A11 confirmo elegibilidad; si no, usar el target "azure".
+# Vercel Hobby solo con elegibilidad confirmada; si no cumple, detener y acordar destino.
 # El target "azure" requiere `output: 'standalone'` en apps/frontend/next.config.ts (pendiente).
 # B es responsable de los workflows: este archivo se integra con el CD de B08.
 name: Frontend deploy (manual)
@@ -15,6 +15,10 @@ on:
       api_url:
         description: URL HTTPS de la API desplegada en la ventana (NEXT_PUBLIC_API_URL)
         required: true
+      hobby_eligible:
+        description: Confirmo uso personal no comercial y elegibilidad Hobby (solo target vercel)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,6 +38,12 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
       RELEASE_SHA: ${{ github.sha }}
     steps:
+      - name: Confirmar elegibilidad Hobby
+        if: inputs.target == 'vercel'
+        env:
+          HOBBY_ELIGIBLE: ${{ inputs.hobby_eligible }}
+        run: |
+          test "$HOBBY_ELIGIBLE" = "true" || { echo "Confirmar elegibilidad Hobby antes de desplegar; no hay upgrade automatico."; exit 1; }
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -58,6 +68,7 @@ jobs:
         run: |
           npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
           npx vercel@latest build --prod --token="$VERCEL_TOKEN"
+          npm run verify:public-build --workspace=apps/frontend
           url=$(npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN")
           echo "Frontend: $url" >> "$GITHUB_STEP_SUMMARY"
 

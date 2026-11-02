@@ -45,7 +45,11 @@ La app se sirve en `http://localhost:3000`. Next.js lee las variables desde `app
 
 `test:e2e` corre el recorrido crítico sin mocks: requiere frontend, API y Supabase levantados, y una cuenta de prueba en `E2E_USER_EMAIL` / `E2E_USER_PASSWORD`. Una cuenta nueva pasa por el onboarding una sola vez.
 
-El despliegue en Vercel es manual, con el workflow **Frontend deploy (manual)**; los pasos están en el README de la raíz.
+El despliegue Vercel Hobby esta preparado, sin publicar: [guia de demo](../../infra/vercel/README.md).
+El build exige las tres NEXT_PUBLIC con URLs HTTPS publicas y clave anon/publishable;
+compilar shared primero. El fallback localhost solo existe en development.
+Pruebas de configuracion: `npm run test:config --workspace=apps/frontend`;
+smoke del build con Auth/API simuladas: `npm run test:deploy --workspace=apps/frontend`.
 
 ## Estructura
 

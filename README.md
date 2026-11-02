@@ -262,34 +262,16 @@ Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API
 
 El frontend se despliega en Vercel solo de forma manual, con el workflow **Frontend deploy (manual)** (`.github/workflows/frontend-deploy.yml`). No se despliega en cada push. Requiere una API publica con HTTPS: desde Vercel no se puede usar `http://localhost:4000`.
 
-**1. Proyecto en Vercel**, sin repositorio de Git conectado (por ejemplo, creado con `npx vercel link --cwd apps/frontend`). En Settings → Build and Deployment:
+Preparacion y procedimiento completo: [Vercel Hobby para la demo](infra/vercel/README.md).
+El proyecto usa Root Directory apps/frontend, Node 22 y vercel.json versionado;
+compila shared desde la raiz y valida las tres NEXT_PUBLIC antes de construir.
+Hobby exige uso personal no comercial y confirmacion explicita antes de publicar.
+No hay deploy por push ni fallback a infraestructura paga.
 
-| Ajuste                                   | Valor                                                                    |
-| ---------------------------------------- | ------------------------------------------------------------------------ |
-| Framework Preset                         | Next.js                                                                  |
-| Root Directory                           | `apps/frontend`                                                          |
-| Include files outside the root directory | Activado                                                                 |
-| Install Command (Override)               | `cd ../.. && npm ci`                                                     |
-| Build Command (Override)                 | `cd ../.. && npm run build:shared && cd apps/frontend && npx next build` |
-| Node.js Version                          | 22.x                                                                     |
-
-**2. Secret y variables en GitHub** (repositorio → Settings → Secrets and variables → Actions):
-
-| Nombre              | Tipo     | Valor                                                     |
-| ------------------- | -------- | --------------------------------------------------------- |
-| `VERCEL_TOKEN`      | Secret   | Token de Vercel (Account Settings → Tokens)               |
-| `VERCEL_ORG_ID`     | Variable | `orgId` de `apps/frontend/.vercel/project.json` o Team ID |
-| `VERCEL_PROJECT_ID` | Variable | `projectId` de `apps/frontend/.vercel/project.json`       |
-| `SUPABASE_URL`      | Variable | URL del proyecto de Supabase                              |
-| `SUPABASE_ANON_KEY` | Variable | Anon / publishable key de Supabase                        |
-
-Nunca cargar en GitHub ni en Vercel la `service_role`, las URLs de la base ni la clave de Gemini: son solo del backend.
-
-**3. Desplegar:** Actions → **Frontend deploy (manual)** → Run workflow, con `target: vercel` y `api_url` igual a la URL HTTPS de la API. El workflow tiene que estar en la rama por defecto para que aparezca el boton. La URL publicada queda en el resumen de la ejecucion.
-
-**4. Despues de cada despliegue nuevo:** agregar la URL de Vercel a `CORS_ORIGIN` del backend y configurarla como Site URL en Supabase → Authentication → URL Configuration. Si cambia la URL de la API, volver a correr el workflow: `NEXT_PUBLIC_API_URL` queda fija en el build.
-
-El workflow tambien admite `target: azure` (Web App); requiere `output: 'standalone'` en `apps/frontend/next.config.ts`.
+La CLI y .vercel/project.json se utilizan desde la **raiz del monorepo**.
+Configurar el entorno publico en Production antes del build; los valores de
+GitHub Variables del workflow deben coincidir con Vercel.
+La guia incluye redirects Supabase, CORS Azure, pruebas y eliminacion.
 
 ## Datos y multi-tenancy
 

@@ -2,9 +2,16 @@
   "name": "@turnosmart/frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "prebuild": "node scripts/check-public-env.mjs",
+    "verify:public-build": "node scripts/verify-public-build.mjs",
+    "test:config": "node --test scripts/public-env.test.mjs",
+    "test:deploy": "playwright test --config=playwright.deploy.config.ts",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",

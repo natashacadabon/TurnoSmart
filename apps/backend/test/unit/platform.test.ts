@@ -39,6 +39,25 @@ describe('plataforma', () => {
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
+  it('CORS admite el origen Vercel exacto y Authorization para la API Azure', async () => {
+    const origin = 'https://turnosmart-demo.vercel.app';
+    const { app } = buildTestApp({ corsOrigins: [origin] });
+    const allowed = await request(app)
+      .options('/api/customers')
+      .set('Origin', origin)
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization,content-type');
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers['access-control-allow-origin']).toBe(origin);
+    expect(allowed.headers['access-control-allow-headers']).toMatch(/Authorization/i);
+    for (const denied of [
+      'https://other.vercel.app',
+      `${origin}.attacker.invalid`,
+      'http://localhost:3000',
+    ])
+      expect((await request(app).get('/health').set('Origin', denied)).status).toBe(403);
+  });
+
   it('errores sin stack público y con requestId', async () => {
     const { app } = buildTestApp();
     const res = await request(app).get('/no-existe');
