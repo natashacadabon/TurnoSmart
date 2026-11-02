@@ -1,17 +1,20 @@
 # Verificacion local aislada: no copia .env ni usa credenciales/despliegues.
 FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
 WORKDIR /workspace
-ENV HUSKY=0 NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production HUSKY=0 NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
+COPY .husky/install*.mjs .husky/
 COPY apps/frontend/package.json apps/frontend/package.json
+COPY apps/backend/package.json apps/backend/package.json
 COPY packages/shared/package.json packages/shared/package.json
-RUN npm ci --include=dev --ignore-scripts --workspace=apps/frontend --workspace=packages/shared
+RUN npm ci --include=dev
 COPY packages/shared/src/ packages/shared/src/
 COPY packages/shared/tsconfig.json packages/shared/
 COPY apps/frontend/src/ apps/frontend/src/
 COPY apps/frontend/scripts/ apps/frontend/scripts/
 COPY apps/frontend/vercel.json apps/frontend/vercel.json
 COPY .github/workflows/frontend-deploy.yml .github/workflows/frontend-deploy.yml
+RUN npm run test:install
 COPY apps/frontend/next.config.ts apps/frontend/tsconfig.json apps/frontend/
 ARG USE_AZURE=false
 ENV NEXT_PUBLIC_USE_AZURE=${USE_AZURE} \

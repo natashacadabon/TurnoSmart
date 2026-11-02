@@ -1,6 +1,8 @@
 **
 !package.json
 !package-lock.json
+!.husky/
+!.husky/install.mjs
 !apps/
 !apps/backend/
 !apps/backend/package.json

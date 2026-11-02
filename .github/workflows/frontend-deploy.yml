@@ -92,7 +92,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: HUSKY=0 npm ci --ignore-scripts
+        run: HUSKY=0 npm ci --include=dev
 
       - name: Tests de configuracion
         run: npm run test:config --workspace=apps/frontend

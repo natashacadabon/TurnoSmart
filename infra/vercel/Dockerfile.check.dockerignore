@@ -1,6 +1,8 @@
 **
 !package.json
 !package-lock.json
+!.husky/
+!.husky/install*.mjs
 !apps/
 !apps/frontend/
 !apps/frontend/package.json
@@ -11,6 +13,8 @@
 !apps/frontend/src/**
 !apps/frontend/scripts/
 !apps/frontend/scripts/**
+!apps/backend/
+!apps/backend/package.json
 !packages/
 !packages/shared/
 !packages/shared/package.json
