@@ -2,14 +2,6 @@
 
 Estado: **propuesta para revision**.
 
-Actualizacion B04 (2026-10-30): la desarrolladora aprobo D03 para el reemplazo
-semanal y el rechazo con `409 AVAILABILITY_CONFLICT` si un turno vigente deja
-de caber en una unica franja activa, sin modificar turnos/eventos. La
-coordinacion concurrente con C (D07), la politica DST (D06) y las escrituras
-directas a Supabase (D08) siguen pendientes. El alcance implementado y sus
-limites estan en `apps/backend/src/modules/availability/README.md`; esta
-aprobacion no cierra el resto de B01.
-
 ### Modelo real y limites del contrato
 
 | Modelo           | Campos utilizados                                                                            | Restricciones existentes                                            | Reglas adicionales de API propuestas                                |
@@ -24,14 +16,14 @@ aprobacion no cierra el resto de B01.
 
 Todas las rutas son relativas a la base de la API. No incluyen businessId en path, query ni body.
 
-| Metodo y ruta               | Objetivo                                               | Permisos propuestos | Responsable B                          | Dependencias                                                           |
-| --------------------------- | ------------------------------------------------------ | ------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
-| GET /api/services           | Listar catalogo con filtro de actividad                | OWNER, ADMIN, STAFF | Listado y DTO de servicios             | Modulo autenticación: contexto y acceso                                |
-| POST /api/services          | Crear servicio                                         | OWNER, ADMIN        | Validacion, unicidad y alta            | Modulo autenticación: contexto y autorizacion                          |
-| PATCH /api/services/:id     | Editar o desactivar servicio                           | OWNER, ADMIN        | Cambios parciales y reglas de duracion | Autenticación: acceso; Modulo Turnos: no alterar turnos existentes     |
-| GET /api/availability-rules | Leer configuracion semanal completa                    | OWNER, ADMIN, STAFF | Serializar dias y horas locales        | Autenticacion: contexto/timezone                                       |
+| Metodo y ruta               | Objetivo                                               | Permisos propuestos | Responsable B                          | Dependencias                                                            |
+| --------------------------- | ------------------------------------------------------ | ------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| GET /api/services           | Listar catalogo con filtro de actividad                | OWNER, ADMIN, STAFF | Listado y DTO de servicios             | Modulo autenticación: contexto y acceso                                 |
+| POST /api/services          | Crear servicio                                         | OWNER, ADMIN        | Validacion, unicidad y alta            | Modulo autenticación: contexto y autorizacion                           |
+| PATCH /api/services/:id     | Editar o desactivar servicio                           | OWNER, ADMIN        | Cambios parciales y reglas de duracion | Autenticación: acceso; Modulo Turnos: no alterar turnos existentes      |
+| GET /api/availability-rules | Leer configuracion semanal completa                    | OWNER, ADMIN, STAFF | Serializar dias y horas locales        | Autenticacion: contexto/timezone                                        |
 | PUT /api/availability-rules | Reemplazar configuracion semanal completa              | OWNER, ADMIN        | Validacion y reemplazo atomico         | Autenticacion: permisos; Turnos: preservar turnos y serializar cambios |
-| GET /api/slots              | Consultar intervalos disponibles para servicio y fecha | OWNER, ADMIN, STAFF | Calculo de disponibilidad              | Autenticacion: contexto/timezone; Turnos: ocupacion y reprogramacion   |
+| GET /api/slots              | Consultar intervalos disponibles para servicio y fecha | OWNER, ADMIN, STAFF | Calculo de disponibilidad              | Autenticacion: contexto/timezone; Turnos: ocupacion y reprogramacion    |
 
 **En esta primera instancia no se aceptan varias agendas por negocio. El negocio tendrá una única agenda compartida, con capacidad para atender un solo turno a la vez, independientemente de la cantidad de empleados o servicios que ofrezca.**
 
@@ -406,21 +398,6 @@ publico. A autoriza OWNER/ADMIN; C aporta reglas de ocupacion y mecanismo de ser
 
 ## 6. Consulta de slots
 
-Implementado en B05 (2026-11-02): contrato estricto compartido, permiso
-`slots:read` para OWNER/ADMIN/STAFF, tenant/timezone del contexto autenticado,
-calculo separado de HTTP y una consulta de ocupacion para toda la fecha.
-Respuesta `200 { data: SlotDto[] }`, con startsAt/endsAt UTC ISO 8601 y milisegundos.
-Se mantienen errores/envelope de A: `NOT_FOUND` para recursos ajenos/inexistentes.
-Servicio inactivo: `409 SERVICE_INACTIVE`; exclusion invalida:
-`409 APPOINTMENT_SERVICE_MISMATCH` o `409 APPOINTMENT_NOT_RESCHEDULABLE`.
-
-Mientras D06 sigue pendiente, una franja activa con horas ambiguas/inexistentes
-o cambio interno de offset rechaza toda la consulta con
-`409 AVAILABILITY_TIME_UNRESOLVABLE`. No se selecciona una ocurrencia DST ni se
-desplaza una hora inexistente. Franjas univocas fuera de la transicion funcionan.
-Zona/reglas persistidas invalidas: `500 INTERNAL_ERROR`, como B04.
-Detalles y limites con C/D07: `apps/backend/src/modules/slots/README.md`.
-
 ### GET `/api/slots`
 
 Permite consultar los horarios disponibles para reservar un servicio en una fecha determinada. **Solo consulta disponibilidad, no crea ni bloquea reservas.**
@@ -430,6 +407,40 @@ Permite consultar los horarios disponibles para reservar un servicio en una fech
 | `date`                 | Sí          | Fecha a consultar (`YYYY-MM-DD`).                                     |
 | `serviceId`            | Sí          | Identificador del servicio activo.                                    |
 | `excludeAppointmentId` | No          | Turno que se excluye de la ocupación al consultar una reprogramación. |
+
+Respuesta 200:
+
+```json
+{
+  "data": [
+    {
+      "startsAt": "2026-10-22T12:00:00.000Z",
+      "endsAt": "2026-10-22T13:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "date": "2026-10-22",
+    "timezone": "America/Argentina/Buenos_Aires",
+    "serviceId": "20000000-0000-4000-8000-000000000001",
+    "slotIntervalMinutes": 15,
+    "total": 1
+  }
+}
+```
+
+`data` siempre es un array de `SlotDto` (`startsAt` y `endsAt` son timestamps UTC ISO 8601
+con milisegundos y sufijo `Z`). `meta` siempre está presente: `date` es la fecha civil
+solicitada en la zona del negocio, `timezone` es la zona IANA del negocio, `serviceId` es
+el UUID del servicio solicitado, `slotIntervalMinutes` es 15 y `total` es la cantidad de
+slots en `data`. Si no hay horarios disponibles, responder `200` con `data: []` y
+`meta.total: 0`.
+
+Respuestas: `200` con el envelope anterior; `401 UNAUTHENTICATED`; `403
+BUSINESS_CONTEXT_REQUIRED` o `FORBIDDEN`; `404 RESOURCE_NOT_FOUND` si el servicio no
+existe en el negocio autenticado; `409 SERVICE_INACTIVE` o
+`AVAILABILITY_TIME_UNRESOLVABLE`; `422 VALIDATION_ERROR` para parámetros de consulta
+inválidos, repetidos o no admitidos; `500 INTERNAL_ERROR`; `503 SERVICE_UNAVAILABLE`.
+Los errores usan el envelope común `{ "error": { "code", "message", "details" } }`.
 
 ### Reglas de disponibilidad
 
@@ -496,19 +507,18 @@ En B01 se documentan los contratos HTTP y sus decisiones pendientes; B02 impleme
 
 Las siguientes decisiones deben acordarse con los demás módulos antes de integrar las funcionalidades.
 
-| ID      | Decisión                                                                                                                          |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **D01** | Formato de la API, errores, autenticación y permisos.                                                                             |
-| **D02** | Validaciones de servicios, nombres, precios y duración.                                                                           |
-| **D03** | Aprobada para B04: reemplazo semanal y rechazo de cambios incompatibles con turnos vigentes; coordinacion con C pendiente de D07. |
-| **D04** | Cambios en servicios no modifican turnos anteriores.                                                                              |
-| **D05** | Una agenda por negocio y comienzos cada 15 minutos.                                                                               |
-| **D06** | Manejo de fechas, UTC y zonas horarias.                                                                                           |
-| **D07** | Transacciones para evitar reservas simultáneas incompatibles.                                                                     |
-| **D08** | Evitar que accesos directos a Supabase salteen los permisos del backend.                                                          |
+| ID      | Decisión                                                                 |
+| ------- | ------------------------------------------------------------------------ |
+| **D01** | Formato de la API, errores, autenticación y permisos.                    |
+| **D02** | Validaciones de servicios, nombres, precios y duración.                  |
+| **D03** | Reemplazo completo de horarios semanales sin afectar turnos existentes.  |
+| **D04** | Cambios en servicios no modifican turnos anteriores.                     |
+| **D05** | Una agenda por negocio y comienzos cada 15 minutos.                      |
+| **D06** | Manejo de fechas, UTC y zonas horarias.                                  |
+| **D07** | Transacciones para evitar reservas simultáneas incompatibles.            |
+| **D08** | Evitar que accesos directos a Supabase salteen los permisos del backend. |
 
-Salvo el alcance de D03 aprobado para B04 y los acuerdos parciales de B03,
-estas decisiones siguen siendo propuestas que requieren acuerdo de los modulos involucrados.
+Estas decisiones todavía son propuestas y requieren aprobación de los módulos involucrados.
 
 ---
 

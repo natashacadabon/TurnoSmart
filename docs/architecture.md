@@ -103,8 +103,7 @@ Docker se usa para desarrollo. GitHub Actions provee CI con formato, lint, tipos
 Los contratos propuestos de B01 para servicios, disponibilidad semanal y slots se documentan en
 [Contratos de servicios y disponibilidad](api-services-availability.md). Incluyen las dependencias
 de autenticacion (A), reservas (C) y las decisiones pendientes de revision; no representan endpoints
-implementados en su totalidad. La API de servicios ya esta implementada segun el
-[alcance B03](../apps/backend/src/modules/services/README.md); disponibilidad y slots siguen pendientes.
+implementados.
 
 - autenticacion y perfiles;
 - negocios, servicios y clientes;
