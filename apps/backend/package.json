@@ -20,6 +20,9 @@
   "license": "ISC",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

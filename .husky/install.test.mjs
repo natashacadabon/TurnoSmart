@@ -7,15 +7,20 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 function fixture(t, husky) {
-  const root = mkdtempSync(join(tmpdir(), 'turnosmart-husky-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tempBase = realpathSync(tmpdir());
+  const root = mkdtempSync(join(tempBase, 'turnosmart-husky-'));
+  t.after(() => {
+    assert.equal(dirname(realpathSync(root)), tempBase);
+    rmSync(root, { recursive: true, force: true });
+  });
   mkdirSync(join(root, '.husky'));
   copyFileSync(new URL('./install.mjs', import.meta.url), join(root, '.husky/install.mjs'));
   if (husky) {
@@ -27,20 +32,55 @@ function fixture(t, husky) {
     );
     writeFileSync(join(module, 'index.js'), husky);
   }
+  function environment(overrides) {
+    return {
+      ...process.env,
+      NODE_ENV: 'development',
+      CI: 'false',
+      HUSKY: '1',
+      VERCEL: '0',
+      RENDER: 'false',
+      ...overrides,
+    };
+  }
   return {
     root,
     run(overrides = {}) {
       return spawnSync(process.execPath, ['.husky/install.mjs'], {
         cwd: root,
-        env: {
-          ...process.env,
-          NODE_ENV: 'development',
-          CI: 'false',
-          HUSKY: '1',
-          VERCEL: '0',
-          RENDER: 'false',
-          ...overrides,
-        },
+        env: environment(overrides),
+        encoding: 'utf8',
+      });
+    },
+    install(overrides = {}) {
+      const name = 'husky-install-fixture';
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({
+          name,
+          version: '1.0.0',
+          private: true,
+          scripts: { prepare: 'node .husky/install.mjs' },
+        }),
+      );
+      writeFileSync(
+        join(root, 'package-lock.json'),
+        JSON.stringify({
+          name,
+          version: '1.0.0',
+          lockfileVersion: 3,
+          requires: true,
+          packages: { '': { name, version: '1.0.0', hasInstallScript: true } },
+        }),
+      );
+      const npm =
+        process.env.npm_execpath ??
+        (process.platform === 'win32'
+          ? join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js')
+          : realpathSync(join(dirname(process.execPath), 'npm')));
+      return spawnSync(process.execPath, [npm, 'ci', '--include=dev', '--offline'], {
+        cwd: root,
+        env: environment(overrides),
         encoding: 'utf8',
       });
     },
@@ -62,12 +102,29 @@ for (const overrides of [
     assert.equal(result.stdout, '');
   });
 
-test('sin Husky instalado prepare finaliza silenciosamente', (t) => {
+test('sin Husky local prepare falla con una instruccion de reparacion', (t) => {
   const { run } = fixture(t);
   const result = run();
-  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.status, 0);
   assert.equal(result.stdout, '');
-  assert.equal(result.stderr, '');
+  assert.match(result.stderr, /Faltan dependencias locales \(husky\)/);
+  assert.match(result.stderr, /npm ci --include=dev/);
+});
+
+for (const hosting of [{ VERCEL: '1' }, { CI: 'true' }, { NODE_ENV: 'production' }])
+  test(`npm ci real sin Husky en hosting: ${JSON.stringify(hosting)}`, (t) => {
+    const { root, install } = fixture(t);
+    const result = install(hosting);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert(result.stdout.includes('node .husky/install.mjs'), 'prepare debe ejecutarse');
+    assert(!existsSync(join(root, 'node_modules/husky')));
+  });
+
+test('npm ci local sin devDependencies detecta el problema sin omitir prepare', (t) => {
+  const { install } = fixture(t);
+  const result = install();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout + result.stderr, /Faltan dependencias locales/);
 });
 
 test('desarrollo invoca Husky conservando hooks locales', (t) => {
@@ -95,6 +152,18 @@ test('hosting incluye devDependencies y permite lifecycle scripts npm', () => {
   const root = JSON.parse(read('../package.json'));
   const vercel = JSON.parse(read('../apps/frontend/vercel.json'));
   assert.equal(root.scripts.prepare, 'node .husky/install.mjs');
+  for (const path of [
+    '../package.json',
+    '../apps/frontend/package.json',
+    '../apps/backend/package.json',
+    '../packages/shared/package.json',
+  ])
+    assert.equal(JSON.parse(read(path)).engines.node, '22.x');
+  assert.equal(read('../.nvmrc').trim(), '22.23.4');
+  const lock = JSON.parse(read('../package-lock.json'));
+  for (const path of ['', 'apps/frontend', 'apps/backend', 'packages/shared'])
+    assert.equal(lock.packages[path].engines.node, '22.x');
+  assert(!('nodeVersion' in vercel), 'Node se configura con engines/Settings, no vercel.json');
   for (const command of [vercel.installCommand, root.scripts['build:render']]) {
     assert.match(command, /npm ci --include=dev/);
     assert(!command.includes('--ignore-scripts'));

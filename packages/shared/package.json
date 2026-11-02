@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Paquete para tipos, constantes y reglas compartidas entre frontend y backend.",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

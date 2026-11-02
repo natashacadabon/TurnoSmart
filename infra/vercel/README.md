@@ -21,7 +21,7 @@ Preparar/configurar **manualmente** el proyecto del titular, sin publicar ahora:
 | Root Directory                              | apps/frontend                                                        |
 | Include source files outside Root Directory | Activado (packages/shared y lock raiz)                               |
 | Node.js                                     | 22.x (tambien declarado en frontend/package.json)                    |
-| Install Command                             | vercel.json: cd ../.. && HUSKY=0 npm ci --include=dev                |
+| Install Command                             | vercel.json: cd ../.. && npm ci --include=dev                        |
 | Build Command                               | vercel.json: compilar shared desde raiz y npm run build del frontend |
 | Output Directory                            | Default de Next.js (.next), sin standalone/static export             |
 | Git deployment                              | Deshabilitado en vercel.json; preferir proyecto sin Git conectado    |
@@ -31,12 +31,32 @@ El lock unico se instala desde raiz; shared exporta dist y se compila primero.
 NODE_ENV=production u omit=dev. No configurar NPM_CONFIG_IGNORE_SCRIPTS ni
 deshabilitar lifecycle scripts. El prepare raiz usa el
 [installer recomendado por Husky](https://typicode.github.io/husky/how-to.html#ci-server-and-docker):
-omite CI, produccion, hosting o HUSKY=0 antes de importar Husky, y tolera su ausencia.
-Los hooks locales siguen inicializandose al instalar con devDependencies.
+omite CI, produccion, Vercel/Render o HUSKY=0 antes de importar Husky, aunque el
+paquete no este instalado. En desarrollo local la ausencia de Husky es un error
+explicito que pide `npm ci --include=dev`; no se oculta una instalacion rota.
+Los hooks locales siguen inicializandose al instalar con devDependencies. Usar
+Node 22.23.4 (`.nvmrc`), que tambien cumple el minimo de lint-staged.
 No se construye/despliega el backend ni se ejecutan migraciones; los lifecycle
 de dependencias permanecen habilitados.
 Next detecta la raiz del workspace mediante package-lock.json, sin alias nuevos.
 [Referencia monorepos](https://vercel.com/docs/monorepos/monorepo-faq).
+
+## Si el log muestra Node 26 o prepare: husky
+
+Los cuatro workspaces declaran `engines.node: "22.x"`. Vercel usa engines para
+[seleccionar Node](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions);
+no admite un campo nodeVersion en vercel.json. En Settings → Build and Deployment,
+seleccionar Node.js 22.x y Root Directory `apps/frontend`, habilitando archivos
+fuera de esa carpeta. Conservar el Install Command y Build Command del vercel.json
+versionado; retirar overrides antiguos con `npm install` o `husky`.
+
+Antes de un despliegue manual autorizado, comprobar el SHA del deployment y que
+esa revision contiene `prepare: node .husky/install.mjs` y este vercel.json. Un
+Redeploy de un deployment viejo reutiliza su revision: no toma cambios locales ni
+automaticamente otro commit. Para la nueva revision, reconstruir sin cache viejo
+al cambiar Node o la instalacion. El log esperado muestra Node 22.x,
+`npm ci --include=dev` y `node .husky/install.mjs`, nunca `sh -c husky`.
+No se modifican Settings de la cuenta ni se despliega desde estas comprobaciones.
 
 ## Variables publicas durante el build
 
