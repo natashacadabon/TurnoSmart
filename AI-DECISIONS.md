@@ -469,6 +469,76 @@ infra/vercel/README.md. Pendientes de la ventana autorizada: settings reales de
 Vercel, confirmacion Hobby, variables Production, Site URL/redirects Supabase,
 CORS_ORIGIN del backend Azure y E2E con cuenta real. Sin servicios pagos/Azure
 adicionales, secretos nuevos, cambios de .env reales, deploy, commit ni push.
+## 2026-11-02 - B05: generacion de slots disponibles
+
+**Problema abordado**
+
+Consultar disponibilidad real por servicio y fecha con una agenda compartida por
+negocio, aislamiento multi-tenant y conversion IANA, sin implementar reservas de C.
+
+**Prompt / herramienta utilizada**
+
+Codex. Se solicito implementar B05 revisando instrucciones, B01, decisiones,
+Prisma y modulos B03/B04; agregar pruebas unitarias/integracion y ejecutar
+lint, typecheck, formato y tests, sin commit ni push. No hay AGENTS.md aplicable
+al backend/shared; el unico del repositorio esta en frontend.
+
+**Codigo / arquitectura propuesta por IA**
+
+- GET `/api/slots` con query estricta compartida y respuesta `{ data: SlotDto[] }`.
+  Reutiliza auth/perfil/errores de A; agrega timezone al contexto autenticado y
+  permiso slots:read para OWNER/ADMIN/STAFF. Tenant y zona no vienen del request.
+- Rutas HTTP delgadas, servicio de coordinacion, calculador puro y repositorio
+  Prisma de solo lectura. La complejidad de B05 justifica service.ts, siguiendo
+  el criterio documentado en B03; no se agregan controllers de delegacion.
+- Servicio activo del negocio, duracion actual completa dentro de una unica
+  franja activa y comienzos cada 15 minutos anclados a esa franja. No se unen
+  franjas adyacentes. Solo comienzos futuros, ordenados, UTC ISO con milisegundos.
+- Ocupacion global SCHEDULED/CONFIRMED, independientemente del servicio; estados
+  CANCELLED/COMPLETED/NO_SHOW no bloquean. Intervalos semiabiertos y precision de
+  milisegundos. Una consulta acotada por rango/tenant para toda la ocupacion,
+  incluyendo turnos que comienzan antes del dia; sin consultas por slot.
+- Exclusion para reprogramar solo de turno del tenant, del mismo servicio,
+  pendiente/confirmado y no comenzado. Se agregan los codigos 409 previstos por
+  B01 sin modificar los errores/envelopes existentes de A.
+- D06: conversion estricta con Intl/IANA, sin nueva dependencia. No se elige
+  entre ocurrencias ambiguas ni se desplazan horas inexistentes. Cualquier
+  franja activa afectada rechaza toda la consulta con 409
+  AVAILABILITY_TIME_UNRESOLVABLE. Se verifica tambien el interior de las franjas,
+  cambios de 30 minutos y dias omitidos. Franjas univocas antes/despues funcionan.
+  Es una guarda conservadora, no una aprobacion de politica DST definitiva.
+
+**Validacion y correccion humana**
+
+La solicitud autoriza implementar B05 con agenda compartida e intervalo de 15
+minutos; no se considera aprobacion global de B01 ni de D06/D07/D08. D06 permanece
+pendiente de acuerdo A/C para ofrecer horarios durante transiciones. B04 conserva
+su rechazo previo para turnos que cruzan cambios de offset.
+
+Pasaron 177 pruebas unitarias y 55 de integracion del backend, incluidas 20
+unitarias nuevas y 25 de integracion B05 (14 HTTP con fakes, 11 API/PostgreSQL).
+Cubren solapamientos, estados, limites, servicios inactivos, exclusion, auth,
+aislamiento, DST y conservacion de turnos/eventos. Se utilizo PostgreSQL local
+descartable con ambas migraciones y bootstrap auth.uid() que retorna NULL;
+FakeVerifier y conexion postgres no certifican autenticacion Supabase ni RLS.
+Los primeros intentos HTTP fallaron por EACCES del sandbox; la repeticion con
+acceso localhost paso. No se utilizo la base remota ni se modifico .env.
+
+Lint y typecheck de todo el monorepo aprobados. Prettier aplicado y comprobado
+en todos los archivos de B05; git diff --check aprobado. El chequeo global
+de formato detecta 34 archivos preexistentes sin cambios respecto de HEAD,
+fuera del alcance de B05; no se reformatearon. La base temporal de pruebas
+se elimino al finalizar.
+
+**Resultado**
+
+B05 implementado sin crear/modificar reservas, schema ni migraciones. Contrato
+y limites documentados en B01 y README de slots. D07 sigue pendiente: C debe
+revalidar servicio/duracion/timezone/franjas/ocupacion dentro de la transaccion y
+acordar serializacion por negocio con B04, cambios de servicios y de timezone.
+La consulta no bloquea ni promete snapshot consistente o disponibilidad al
+reservar; la exclusion consultada tampoco autoriza una reprogramacion futura.
+D08 sigue pendiente para accesos directos a Supabase. Sin commit ni push.
 
 ---
 

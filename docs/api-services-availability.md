@@ -406,6 +406,21 @@ publico. A autoriza OWNER/ADMIN; C aporta reglas de ocupacion y mecanismo de ser
 
 ## 6. Consulta de slots
 
+Implementado en B05 (2026-11-02): contrato estricto compartido, permiso
+`slots:read` para OWNER/ADMIN/STAFF, tenant/timezone del contexto autenticado,
+calculo separado de HTTP y una consulta de ocupacion para toda la fecha.
+Respuesta `200 { data: SlotDto[] }`, con startsAt/endsAt UTC ISO 8601 y milisegundos.
+Se mantienen errores/envelope de A: `NOT_FOUND` para recursos ajenos/inexistentes.
+Servicio inactivo: `409 SERVICE_INACTIVE`; exclusion invalida:
+`409 APPOINTMENT_SERVICE_MISMATCH` o `409 APPOINTMENT_NOT_RESCHEDULABLE`.
+
+Mientras D06 sigue pendiente, una franja activa con horas ambiguas/inexistentes
+o cambio interno de offset rechaza toda la consulta con
+`409 AVAILABILITY_TIME_UNRESOLVABLE`. No se selecciona una ocurrencia DST ni se
+desplaza una hora inexistente. Franjas univocas fuera de la transicion funcionan.
+Zona/reglas persistidas invalidas: `500 INTERNAL_ERROR`, como B04.
+Detalles y limites con C/D07: `apps/backend/src/modules/slots/README.md`.
+
 ### GET `/api/slots`
 
 Permite consultar los horarios disponibles para reservar un servicio en una fecha determinada. **Solo consulta disponibilidad, no crea ni bloquea reservas.**
