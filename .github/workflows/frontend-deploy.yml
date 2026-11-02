@@ -12,9 +12,16 @@ on:
         type: choice
         options: [vercel, azure]
         required: true
-      api_url:
-        description: URL HTTPS de la API desplegada en la ventana (NEXT_PUBLIC_API_URL)
+      api_url_render:
+        description: Origen HTTPS de Render (NEXT_PUBLIC_API_URL_RENDER)
         required: true
+      api_url_azure:
+        description: Origen HTTPS de Azure (NEXT_PUBLIC_API_URL_AZURE)
+        required: true
+      use_azure:
+        description: Seleccionar Azure en lugar de Render
+        type: boolean
+        default: false
       hobby_eligible:
         description: Confirmo uso personal no comercial y elegibilidad Hobby (solo target vercel)
         type: boolean
@@ -33,7 +40,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      NEXT_PUBLIC_API_URL: ${{ inputs.api_url }}
+      NEXT_PUBLIC_USE_AZURE: ${{ inputs.use_azure && 'true' || 'false' }}
+      NEXT_PUBLIC_API_URL_RENDER: ${{ inputs.api_url_render }}
+      NEXT_PUBLIC_API_URL_AZURE: ${{ inputs.api_url_azure }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
       RELEASE_SHA: ${{ github.sha }}

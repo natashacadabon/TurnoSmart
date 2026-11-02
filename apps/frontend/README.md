@@ -46,8 +46,11 @@ La app se sirve en `http://localhost:3000`. Next.js lee las variables desde `app
 `test:e2e` corre el recorrido crítico sin mocks: requiere frontend, API y Supabase levantados, y una cuenta de prueba en `E2E_USER_EMAIL` / `E2E_USER_PASSWORD`. Una cuenta nueva pasa por el onboarding una sola vez.
 
 El despliegue Vercel Hobby esta preparado, sin publicar: [guia de demo](../../infra/vercel/README.md).
-El build exige las tres NEXT_PUBLIC con URLs HTTPS publicas y clave anon/publishable;
-compilar shared primero. El fallback localhost solo existe en development.
+El build exige NEXT_PUBLIC_API_URL_RENDER, NEXT_PUBLIC_API_URL_AZURE y las dos
+variables Supabase publicas; compilar shared primero. NEXT_PUBLIC_USE_AZURE ausente
+o false usa Render; true usa Azure. Ambas URLs deben ser HTTPS publicas, incluso
+la inactiva. No hay fallback automatico; NEXT_PUBLIC_API_URL antigua se ignora.
+Cambiar el flag requiere rebuild. Auth, CORS y contratos no cambian.
 Pruebas de configuracion: `npm run test:config --workspace=apps/frontend`;
 smoke del build con Auth/API simuladas: `npm run test:deploy --workspace=apps/frontend`.
 

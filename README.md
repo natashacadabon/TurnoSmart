@@ -136,11 +136,13 @@ En las URLs de la base, reemplazar `[YOUR-PASSWORD]` (corchetes incluidos) por e
 
 **`apps/frontend/.env.local`** (plantilla: `apps/frontend/.env.example`)
 
-| Variable                        | Valor                                    |
-| ------------------------------- | ---------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | El mismo `SUPABASE_URL` del backend      |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | La misma `SUPABASE_ANON_KEY` del backend |
-| `NEXT_PUBLIC_API_URL`           | `http://localhost:4000`                  |
+| Variable                        | Valor                                                      |
+| ------------------------------- | ---------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | El mismo `SUPABASE_URL` del backend                        |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | La misma `SUPABASE_ANON_KEY` del backend                   |
+| `NEXT_PUBLIC_USE_AZURE`         | `false` (Render); `true` (Azure). Ausente equivale a false |
+| `NEXT_PUBLIC_API_URL_RENDER`    | Origen HTTPS publico Render                                |
+| `NEXT_PUBLIC_API_URL_AZURE`     | Origen HTTPS publico Azure, aun si esta apagado            |
 
 El backend valida sus variables al arrancar: si falta alguna, termina con `Configuración de entorno inválida: <variables>` sin mostrar valores.
 
@@ -264,7 +266,9 @@ El frontend se despliega en Vercel solo de forma manual, con el workflow **Front
 
 Preparacion y procedimiento completo: [Vercel Hobby para la demo](infra/vercel/README.md).
 El proyecto usa Root Directory apps/frontend, Node 22 y vercel.json versionado;
-compila shared desde la raiz y valida las tres NEXT_PUBLIC antes de construir.
+compila shared desde la raiz y valida ambos origenes HTTPS y las variables Supabase antes de construir.
+NEXT_PUBLIC_USE_AZURE ausente/false selecciona Render; true selecciona Azure.
+Cambiarlo requiere rebuild, sin fallback automatico ni uso de NEXT_PUBLIC_API_URL legacy.
 Hobby exige uso personal no comercial y confirmacion explicita antes de publicar.
 No hay deploy por push ni fallback a infraestructura paga.
 

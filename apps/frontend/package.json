@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "prebuild": "node scripts/check-public-env.mjs",
+    "postbuild": "node scripts/record-public-build.mjs",
     "verify:public-build": "node scripts/verify-public-build.mjs",
     "test:config": "node --test scripts/public-env.test.mjs",
     "test:deploy": "playwright test --config=playwright.deploy.config.ts",

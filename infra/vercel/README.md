@@ -36,11 +36,13 @@ Next detecta la raiz del workspace mediante package-lock.json, sin alias nuevos.
 En Vercel → Settings → Environment Variables, configurar **Production** (y solo
 si se necesita, Preview con valores propios) antes del build:
 
-| Variable                      | Valor                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| NEXT_PUBLIC_API_URL           | Origen HTTPS del backend Azure existente, sin /api, query ni credenciales |
-| NEXT_PUBLIC_SUPABASE_URL      | Origen HTTPS del mismo proyecto Supabase que utiliza el backend           |
-| NEXT_PUBLIC_SUPABASE_ANON_KEY | Publishable sb_publishable_* o JWT legacy con role anon de ese proyecto   |
+| Variable                      | Valor                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| NEXT_PUBLIC_USE_AZURE         | false (predeterminado si se omite): Render; true: Azure. Strings exactos, sin espacios |
+| NEXT_PUBLIC_API_URL_RENDER    | Origen HTTPS de Render, sin /api, query ni credenciales                                |
+| NEXT_PUBLIC_API_URL_AZURE     | Origen HTTPS de Azure, tambien obligatorio aunque este apagado                         |
+| NEXT_PUBLIC_SUPABASE_URL      | Origen HTTPS del mismo proyecto Supabase que utiliza el backend                        |
+| NEXT_PUBLIC_SUPABASE_ANON_KEY | Publishable sb_publishable_* o JWT legacy con role anon de ese proyecto                |
 
 Todo NEXT_PUBLIC_* queda visible en el navegador. **Nunca** configurar service_role,
 sb_secret_*, DATABASE_URL, DIRECT_URL, claves Gemini o credenciales Azure en este
@@ -51,12 +53,15 @@ validacion de tokens ni aislamiento del backend.
 prebuild usa el cargador de entorno de Next con su precedencia y falla ante
 variables ausentes, URLs locales/no HTTPS/no origen o claves privilegiadas. El
 decode del JWT solo previene una mala configuracion; no valida firmas. El cliente
-solo tiene fallback localhost en development. verify:public-build comprueba los
-valores esperados en JS del navegador y ausencia del fallback de API local.
+no usa la variable antigua NEXT_PUBLIC_API_URL ni fallback a localhost. verify:public-build comprueba los
+valores esperados en JS y el origen registrado por postbuild, sin publicar claves en metadata.
+El selector vive en src/lib/backend-url.mjs y lo reutiliza el cliente HTTP. No hay
+fallback automatico: un fallo se informa sin llamar al proveedor inactivo. Ambas
+URLs se validan solo por formato/seguridad, nunca por disponibilidad de red.
 Cambiar cualquier NEXT_PUBLIC requiere **rebuild y nuevo deploy**; cambiar solo
 el entorno de runtime no reemplaza valores ya incluidos en el bundle.
 
-## Auth y CORS con Azure
+## Auth y CORS con el backend seleccionado
 
 El flujo implementado es signInWithPassword, sesion local/renovacion y token Bearer
 a Express. Redirects internos: sin sesion → /login; con sesion sin negocio →
@@ -70,7 +75,7 @@ de Auth. El login por password no necesita redirectTo. Registrar el valor anteri
 para restaurarlo al terminar si el proyecto se comparte. Evitar wildcards amplios
 en produccion. [Referencia redirects](https://supabase.com/docs/guides/auth/redirect-urls).
 
-En el backend Azure existente, CORS_ORIGIN debe contener el **origen exacto** del
+En cada backend existente que vaya a usarse (Render/Azure), CORS_ORIGIN debe contener el **origen exacto** del
 frontend (ej. https://turnosmart-demo.vercel.app), sin slash final ni rutas; varios
 origenes se separan por coma. No usar * ni *.vercel.app. Authorization/Content-Type
 y OPTIONS ya estan admitidos; no hacen falta cookies cross-site ni credentials.
@@ -83,14 +88,14 @@ No ejecutar hasta autorizar la ventana. CLI desde la **raiz del monorepo**:
 `npx vercel link` (proyecto existente correcto), `npx vercel pull --environment=production`,
 `npx vercel build --prod`, verificar bundle y `npx vercel deploy --prebuilt --prod`.
 Antes de `npm run verify:public-build --workspace=apps/frontend`, exportar al
-proceso las tres NEXT_PUBLIC esperadas, coincidentes con Production. vercel pull
+proceso las cinco variables publicas esperadas (flag opcional false), coincidentes con Production. vercel pull
 guarda sus valores en .vercel/.env.production.local, pero el proceso de build no
 los exporta al shell; el verificador no debe usar un .env.local de desarrollo.
 La vinculacion vive en .vercel/ de la raiz, ignorada por Git; no vincular una segunda
 copia desde apps/frontend. CLI local no implica publicacion hasta deploy.
 
 El workflow existente Frontend deploy (manual) es equivalente: target vercel,
-api_url HTTPS y hobby_eligible confirmado. Requiere VERCEL_TOKEN como secret,
+api_url_render y api_url_azure HTTPS, use_azure false/true y hobby_eligible confirmado. Requiere VERCEL_TOKEN como secret,
 VERCEL_ORG_ID/VERCEL_PROJECT_ID del link **raiz**, SUPABASE_URL/SUPABASE_ANON_KEY
 publicos en GitHub Variables, coincidentes con Vercel. El chequeo posterior al
 build aborta si los valores efectivos difieren; no publicar un bundle antiguo.
@@ -98,17 +103,17 @@ No activar pushes automaticos ni usar el target Azure legacy para esta demo.
 
 Validar desde navegador publicado: /demo y /login; /customers sin sesion redirige;
 login, onboarding solo si corresponde, clientes, recarga y logout. DevTools Network
-debe mostrar Auth a Supabase y API al backend Azure, sin localhost ni mixed content.
+debe mostrar Auth a Supabase y API solo al backend elegido, sin localhost ni mixed content.
 OPTIONS a /api/customers con Origin Vercel y Access-Control-Request-Headers:
 authorization,content-type debe responder 204 y Access-Control-Allow-Origin exacto;
-un origen ajeno debe ser 403. /health y /ready de Azure deben dar 200 antes de demo.
+un origen ajeno debe ser 403. /health y /ready del backend elegido deben dar 200 antes de operar datos.
 
 ## Pruebas locales aisladas (sin cuenta ni cambios en Cloud)
 
 ```powershell
 npm run test:config --workspace=apps/frontend
 docker build -f infra/vercel/Dockerfile.check -t turnosmart-vercel-check .
-docker run -d --name turnosmart-vercel-check -p 127.0.0.1:43128:43128 -e NEXT_PUBLIC_API_URL=https://runtime-ignored.invalid turnosmart-vercel-check
+docker run -d --name turnosmart-vercel-check -p 127.0.0.1:43128:43128 -e NEXT_PUBLIC_USE_AZURE=true -e NEXT_PUBLIC_API_URL_RENDER=https://runtime-ignored.invalid turnosmart-vercel-check
 npm run test:deploy --workspace=apps/frontend
 docker rm -f turnosmart-vercel-check
 npm run typecheck
@@ -119,7 +124,10 @@ El Dockerfile usa Node 22 Linux, allowlist sin .env y URLs/clave ficticias. Comp
 shared/Next, prueba configuracion y verifica el bundle sin tocar el dev server.
 Playwright usa Chrome instalado (E2E_BROWSER_CHANNEL=msedge como alternativa),
 intercepta Auth/API y bloquea requests externos inesperados. Prueba que cambiar la
-URL en runtime no altera el build. No reemplaza el E2E real con Supabase/cuenta
+seleccion en runtime no altera el build. Para probar Azure, construir con
+`--build-arg USE_AZURE=true` y ejecutar Playwright con
+`E2E_API_URL=https://turnosmart-api.azurewebsites.net`. Ambos modos comprueban
+que una falla no dispara fallback. Cambiar el flag en Vercel requiere reconstruir. No reemplaza el E2E real con Supabase/cuenta
 provisionada (`test:e2e`), que queda para la ventana con configuracion real.
 
 ## Eliminacion y costo

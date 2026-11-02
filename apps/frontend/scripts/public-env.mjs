@@ -1,7 +1,10 @@
+import { selectBackendUrl } from '../src/lib/backend-url.mjs';
+
 /** Guardas de configuracion de build; nunca imprimen valores ni verifican firmas JWT. */
 export function validatePublicEnv(source) {
   const names = [
-    'NEXT_PUBLIC_API_URL',
+    'NEXT_PUBLIC_API_URL_RENDER',
+    'NEXT_PUBLIC_API_URL_AZURE',
     'NEXT_PUBLIC_SUPABASE_URL',
     'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   ];
@@ -16,7 +19,7 @@ export function validatePublicEnv(source) {
       fail(name);
   }
   for (const name of names) if (!source[name]?.trim()) fail(name);
-  for (const name of names.slice(0, 2)) {
+  for (const name of names.slice(0, 3)) {
     let url;
     try {
       url = new URL(source[name]);
@@ -57,9 +60,14 @@ export function validatePublicEnv(source) {
         parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part)) ||
         JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')).role !== 'anon'
       )
-        fail(names[2]);
+        fail(names[3]);
     } catch {
-      fail(names[2]);
+      fail(names[3]);
     }
   }
+  return selectBackendUrl(
+    source.NEXT_PUBLIC_USE_AZURE,
+    source.NEXT_PUBLIC_API_URL_RENDER,
+    source.NEXT_PUBLIC_API_URL_AZURE,
+  );
 }

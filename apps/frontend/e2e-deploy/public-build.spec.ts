@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const api = 'https://turnosmart-api.azurewebsites.net';
+// Resultado esperado del build bajo prueba, no vuelve a decidir el proveedor del cliente.
+const api = process.env.E2E_API_URL ?? 'https://turnosmart-backend-demo.onrender.com';
 const supabase = 'https://demo.supabase.co';
 const userId = '10000000-0000-4000-8000-000000000001';
 const user = {
@@ -14,7 +15,7 @@ const user = {
 };
 const token = `e30.${Buffer.from(JSON.stringify({ sub: userId, role: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.signature`;
 
-async function mockPublicServices(page: Page, onboarded = true) {
+async function mockPublicServices(page: Page, onboarded = true, unavailable = false) {
   const calls: string[] = [];
   const unexpected: string[] = [];
   await page.route('**/*', async (route) => {
@@ -41,6 +42,10 @@ async function mockPublicServices(page: Page, onboarded = true) {
       await route.fulfill({ json: body, headers });
     } else if (url.startsWith(`${api}/api/`)) {
       calls.push(url);
+      if (unavailable) {
+        await route.abort();
+        return;
+      }
       if (request.method() !== 'OPTIONS')
         expect(request.headers().authorization).toBe(`Bearer ${token}`);
       const body = url.includes('/api/me')
@@ -85,7 +90,7 @@ test('sin sesion, ruta protegida redirige al login del mismo origen', async ({ p
   expect(unexpected).toEqual([]);
 });
 
-test('login/recarga/logout usan Supabase y Azure fijados al build, con Bearer', async ({
+test('login/recarga/logout usan Supabase y el proveedor fijado al build, con Bearer', async ({
   page,
 }) => {
   const { calls, unexpected } = await mockPublicServices(page);
@@ -98,6 +103,17 @@ test('login/recarga/logout usan Supabase y Azure fijados al build, con Bearer', 
   await expect(page).toHaveURL(/\/login$/);
   expect(calls.some((url) => url.startsWith(`${supabase}/auth/v1/token`))).toBe(true);
   expect(calls.some((url) => url.startsWith(`${api}/api/customers`))).toBe(true);
+  expect(unexpected).toEqual([]);
+});
+
+test('un fallo del proveedor elegido muestra el error sin fallback al otro', async ({ page }) => {
+  const { calls, unexpected } = await mockPublicServices(page, true, true);
+  await signIn(page);
+  await expect(page.getByTestId('account-error')).toContainText(
+    'No se pudo conectar con el servidor',
+  );
+  await expect(page.getByRole('button', { name: 'Reintentar', exact: true })).toBeVisible();
+  expect(calls.some((url) => url.startsWith(`${api}/api/me`))).toBe(true);
   expect(unexpected).toEqual([]);
 });
 

@@ -29,6 +29,7 @@ const nodeJavaScriptFiles = [
   'apps/backend/**/*.{js,mjs,cjs}',
   'packages/shared/**/*.{js,mjs,cjs}',
   'infra/azure/**/*.mjs',
+  'infra/render/**/*.mjs',
 ];
 const nodeTypeScriptFiles = [
   'apps/backend/**/*.{ts,tsx,mts,cts}',

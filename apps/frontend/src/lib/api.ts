@@ -2,6 +2,7 @@
 
 import type { ApiErrorBody, ErrorCode, ValidationIssue } from '@turnosmart/shared';
 import { getSupabase } from './supabase';
+import { selectBackendUrl } from './backend-url.mjs';
 
 export class ApiError extends Error {
   constructor(
@@ -16,10 +17,11 @@ export class ApiError extends Error {
   }
 }
 
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  (process.env.NODE_ENV === 'development' ? 'http://localhost:4000' : '')
-).replace(/\/$/, '');
+const API_URL = selectBackendUrl(
+  process.env.NEXT_PUBLIC_USE_AZURE,
+  process.env.NEXT_PUBLIC_API_URL_RENDER,
+  process.env.NEXT_PUBLIC_API_URL_AZURE,
+);
 
 /** Cliente HTTP común: adjunta el access token vigente y normaliza errores del contrato A01. */
 export async function api<T>(
