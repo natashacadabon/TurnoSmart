@@ -12,6 +12,7 @@ import { PrismaCustomerRepository } from './modules/customers/repository.js';
 import { PrismaEventRepository } from './modules/events/repository.js';
 import { PrismaIdentityRepository } from './modules/identity/repository.js';
 import { PrismaServiceRepository } from './modules/services/repository.js';
+import { PrismaAvailabilityRepository } from './modules/availability/repository.js';
 
 const env = loadEnv();
 const prisma = new PrismaClient();
@@ -29,6 +30,7 @@ const app = createApp({
   identity: new PrismaIdentityRepository(prisma),
   customers: new PrismaCustomerRepository(prisma),
   services: new PrismaServiceRepository(prisma),
+  availability: new PrismaAvailabilityRepository(prisma),
   events: new PrismaEventRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer,

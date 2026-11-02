@@ -2,6 +2,14 @@
 
 Estado: **propuesta para revision**.
 
+Actualizacion B04 (2026-10-30): la desarrolladora aprobo D03 para el reemplazo
+semanal y el rechazo con `409 AVAILABILITY_CONFLICT` si un turno vigente deja
+de caber en una unica franja activa, sin modificar turnos/eventos. La
+coordinacion concurrente con C (D07), la politica DST (D06) y las escrituras
+directas a Supabase (D08) siguen pendientes. El alcance implementado y sus
+limites estan en `apps/backend/src/modules/availability/README.md`; esta
+aprobacion no cierra el resto de B01.
+
 ### Modelo real y limites del contrato
 
 | Modelo           | Campos utilizados                                                                            | Restricciones existentes                                            | Reglas adicionales de API propuestas                                |
@@ -473,18 +481,19 @@ En B01 se documentan los contratos HTTP y sus decisiones pendientes; B02 impleme
 
 Las siguientes decisiones deben acordarse con los demás módulos antes de integrar las funcionalidades.
 
-| ID      | Decisión                                                                 |
-| ------- | ------------------------------------------------------------------------ |
-| **D01** | Formato de la API, errores, autenticación y permisos.                    |
-| **D02** | Validaciones de servicios, nombres, precios y duración.                  |
-| **D03** | Reemplazo completo de horarios semanales sin afectar turnos existentes.  |
-| **D04** | Cambios en servicios no modifican turnos anteriores.                     |
-| **D05** | Una agenda por negocio y comienzos cada 15 minutos.                      |
-| **D06** | Manejo de fechas, UTC y zonas horarias.                                  |
-| **D07** | Transacciones para evitar reservas simultáneas incompatibles.            |
-| **D08** | Evitar que accesos directos a Supabase salteen los permisos del backend. |
+| ID      | Decisión                                                                                                                          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **D01** | Formato de la API, errores, autenticación y permisos.                                                                             |
+| **D02** | Validaciones de servicios, nombres, precios y duración.                                                                           |
+| **D03** | Aprobada para B04: reemplazo semanal y rechazo de cambios incompatibles con turnos vigentes; coordinacion con C pendiente de D07. |
+| **D04** | Cambios en servicios no modifican turnos anteriores.                                                                              |
+| **D05** | Una agenda por negocio y comienzos cada 15 minutos.                                                                               |
+| **D06** | Manejo de fechas, UTC y zonas horarias.                                                                                           |
+| **D07** | Transacciones para evitar reservas simultáneas incompatibles.                                                                     |
+| **D08** | Evitar que accesos directos a Supabase salteen los permisos del backend.                                                          |
 
-Estas decisiones todavía son propuestas y requieren aprobación de los módulos involucrados.
+Salvo el alcance de D03 aprobado para B04 y los acuerdos parciales de B03,
+estas decisiones siguen siendo propuestas que requieren acuerdo de los modulos involucrados.
 
 ---
 

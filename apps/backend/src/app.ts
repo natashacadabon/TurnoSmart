@@ -15,6 +15,8 @@ import { FixedWindowRateLimiter } from './modules/ai/rate-limiter.js';
 import { aiRouter } from './modules/ai/routes.js';
 import type { ServiceRepository } from './modules/services/repository.js';
 import { servicesRouter } from './modules/services/routes.js';
+import type { AvailabilityRepository } from './modules/availability/repository.js';
+import { availabilityRouter } from './modules/availability/routes.js';
 
 export interface AppDeps {
   corsOrigins: string[];
@@ -22,6 +24,7 @@ export interface AppDeps {
   identity: IdentityRepository;
   customers: CustomerRepository;
   services: ServiceRepository;
+  availability: AvailabilityRepository;
   events: EventRepository;
   risk: RiskRepository;
   /** null si GEMINI_API_KEY no está configurada: la explicación responde 503. */
@@ -73,6 +76,7 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api', identityRouter(deps));
   app.use('/api/customers', ...authed, customersRouter(deps));
   app.use('/api/services', ...authed, servicesRouter(deps));
+  app.use('/api/availability-rules', ...authed, availabilityRouter(deps));
   app.use('/api/appointments', ...authed, eventsRouter(deps));
   app.use(
     '/api/appointments',
