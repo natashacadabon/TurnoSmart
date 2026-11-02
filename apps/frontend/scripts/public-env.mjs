@@ -21,6 +21,7 @@ export function validatePublicEnv(source) {
   for (const name of names) if (!source[name]?.trim()) fail(name);
   for (const name of names.slice(0, 3)) {
     let url;
+    if (source[name] !== source[name].trim()) fail(name);
     try {
       url = new URL(source[name]);
     } catch {
