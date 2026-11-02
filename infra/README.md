@@ -20,12 +20,18 @@ El frontend usa `NEXT_PUBLIC_API_URL=http://localhost:4000` porque el navegador 
 
 ## Planificado
 
+B07 M1–M2 preparado en [azure/README.md](azure/README.md): Bicep de RG temporal,
+Plan F1 Linux/App Service Node 22, ZIP de produccion y comandos PowerShell manuales.
+No se crearon recursos Azure; B1 requiere aprobacion explicita. El frontend y los
+workflows existentes no cambian. La demo exige preflight/what-if y limpieza del RG.
+
 - Azure App Service para backend.
 - Gestion de secretos por ambiente.
 - Azure Monitor o Application Insights.
 - Imagenes y pipeline de produccion.
 
-No existe actualmente infraestructura como codigo ni CD automatico. El frontend se despliega en Vercel solo a mano, desde el workflow.
+Existe infraestructura como codigo para el backend, sin CD automatico ni despliegue
+Azure realizado por B07. El frontend se despliega en Vercel solo a mano, desde el workflow.
 
 ## Plan de evolucion
 

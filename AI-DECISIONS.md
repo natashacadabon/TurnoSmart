@@ -342,6 +342,70 @@ migraciones, infraestructura ni `.env`. Sin commit ni push.
 
 ---
 
+## 2026-11-02 - B07: infraestructura Azure minima M1-M2, sin despliegue
+
+**Problema abordado**
+
+Preparar infraestructura reproducible y ZIP ejecutable del backend para una demo
+temporal de costo minimo, sin crear recursos ni modificar Supabase Cloud.
+
+**Prompt / herramienta utilizada**
+
+Codex. Se solicito revisar instrucciones y archivos relevantes de backend, Prisma,
+Docker y documentacion Azure; implementar Bicep y comandos PowerShell manuales,
+validar localmente en Node 22 y no desplegar, migrar, editar .env, hacer commit/push.
+Solo existe AGENTS.md en frontend, fuera del alcance de las modificaciones.
+
+**Codigo / arquitectura propuesta por IA**
+
+- Bicep de suscripcion crea RG temporal exclusivo con etiquetas de proyecto/cierre;
+  modulo de RG contiene solo Plan Linux F1 por defecto y Web App Node 22, una
+  instancia, HTTPS Only/TLS 1.2, Always On deshabilitado. B1 es opcion manual con
+  aprobacion explicita, sin fallback automatico. Sin BD Azure ni servicios extra.
+- Reutilizar Supabase Cloud. Parametros secure para DATABASE_URL/SUPABASE_ANON_KEY;
+  sin secretos en codigo, ZIP, salidas o what-if. Gemini no se habilita en M1-M2.
+- ZIP local en Docker Debian/OpenSSL 3 x64/Node 22, imagen base fijada por digest y
+  npm package-lock existente. Allowlist de contexto sin .env/frontend/tests/migraciones.
+  Se generan Prisma/shared/backend y se materializa shared sin enlaces workspace.
+  Solo se copia el cierre de dependencias runtime, excluyendo peers opcionales
+  como Prisma CLI y tooling huerfano que npm conservaba aun con omit=dev/peer.
+- App Service arranca con node dist/index.js, PORT de la plataforma, sin Oryx,
+  instalacion, build ni migracion remota. Scripts Validate/Preflight/WhatIf/Deploy/
+  Remove separados: what-if a nivel suscripcion no crea RG y usa placeholders.
+  Deploy exige aprobacion, B1 exige aprobacion adicional. Remove exige nombre
+  temporal exacto y etiquetas de propiedad; comprueba inexistencia al terminar.
+- Sin cambios en workflows. ZIP y plantillas compiladas quedan en build/ ignorado.
+  expiresOn es informativo, no TTL ni mecanismo automatico de borrado.
+
+**Validacion y correccion humana**
+
+La solicitud autoriza preparar y validar M1, no desplegar ni aprobar B1. Se
+verifico con Bicep CLI oficial 0.48.1 (compilacion/formato y politicas offline),
+pruebas PowerShell con az simulado, build/Prisma/ZIP real en Linux Node 22.23.4 y
+smoke del ZIP extraido: Prisma carga su motor (P1001 contra localhost cerrado),
+shared, PORT 43127, health 200, ready 503 sin BD, auth 401 y CORS. Pasaron lint y
+typecheck del monorepo y las 158 unitarias existentes bajo Node 22.
+
+Formato verificado para archivos modificados (Prettier y Bicep format), sintaxis
+PowerShell y git diff --check aprobados. El formato global detecta 44 archivos
+preexistentes sin cambios respecto de HEAD; no se reformatean archivos ajenos.
+ZIP verificado: 22.665.979 bytes, motor debian-openssl-3.0.x; salida build/ ignorada.
+
+Azure CLI no esta instalada; Preflight/what-if reales, cuotas, politicas, capacidad,
+configuracion Supabase y runtime administrado quedan para la ventana autorizada.
+Se consultaron fuentes oficiales de Microsoft sobre ZIP, Node/PORT, SKU/regiones
+y precios; referencias en infra/azure/README.md. No se uso la cuenta Azure ni BD
+remota. No se cambian schema, migraciones, .env, modulos funcionales ni frontend.
+
+**Resultado**
+
+B07 M1-M2 preparado y validado localmente. M2 queda manual durante el checkpoint,
+con validacion de F1/region/runtime previa y limpieza completa del RG. F1 tiene
+cuotas/cold starts; B1 puede consumir credito mientras exista el plan, incluso
+con la app detenida. Registrar costo real y cierre en docs/costs.md. Sin commit/push.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.

@@ -25,7 +25,11 @@ const frontendConfigs = [...nextCoreWebVitals, ...nextTypescript].map((config) =
 
 const frontendFiles = ['apps/frontend/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'];
 const frontendTypeScriptFiles = ['apps/frontend/**/*.{ts,tsx,mts,cts}'];
-const nodeJavaScriptFiles = ['apps/backend/**/*.{js,mjs,cjs}', 'packages/shared/**/*.{js,mjs,cjs}'];
+const nodeJavaScriptFiles = [
+  'apps/backend/**/*.{js,mjs,cjs}',
+  'packages/shared/**/*.{js,mjs,cjs}',
+  'infra/azure/**/*.mjs',
+];
 const nodeTypeScriptFiles = [
   'apps/backend/**/*.{ts,tsx,mts,cts}',
   'packages/shared/**/*.{ts,tsx,mts,cts}',
