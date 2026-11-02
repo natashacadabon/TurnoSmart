@@ -391,12 +391,6 @@ PowerShell y git diff --check aprobados. El formato global detecta 44 archivos
 preexistentes sin cambios respecto de HEAD; no se reformatean archivos ajenos.
 ZIP verificado: 22.665.979 bytes, motor debian-openssl-3.0.x; salida build/ ignorada.
 
-Azure CLI no esta instalada; Preflight/what-if reales, cuotas, politicas, capacidad,
-configuracion Supabase y runtime administrado quedan para la ventana autorizada.
-Se consultaron fuentes oficiales de Microsoft sobre ZIP, Node/PORT, SKU/regiones
-y precios; referencias en infra/azure/README.md. No se uso la cuenta Azure ni BD
-remota. No se cambian schema, migraciones, .env, modulos funcionales ni frontend.
-
 **Resultado**
 
 B07 M1-M2 preparado y validado localmente. M2 queda manual durante el checkpoint,
@@ -469,6 +463,7 @@ infra/vercel/README.md. Pendientes de la ventana autorizada: settings reales de
 Vercel, confirmacion Hobby, variables Production, Site URL/redirects Supabase,
 CORS_ORIGIN del backend Azure y E2E con cuenta real. Sin servicios pagos/Azure
 adicionales, secretos nuevos, cambios de .env reales, deploy, commit ni push.
+
 ## 2026-11-02 - B05: generacion de slots disponibles
 
 **Problema abordado**
