@@ -10,6 +10,13 @@ directas a Supabase (D08) siguen pendientes. El alcance implementado y sus
 limites estan en `apps/backend/src/modules/availability/README.md`; esta
 aprobacion no cierra el resto de B01.
 
+Actualizacion D06 (2026-11-02): politica estricta resuelta para B04/B05. Franjas
+ambiguas/inexistentes o con transiciones devuelven 409
+`AVAILABILITY_TIME_UNRESOLVABLE`, tambien al validar turnos en PUT. El detalle
+y la justificacion de compatibilidad estan en [D06](timezones-dst.md).
+D07/D08 y la adopcion por Agenda siguen pendientes. Esta actualizacion prevalece
+sobre las referencias historicas a D06 pendiente.
+
 ### Modelo real y limites del contrato
 
 | Modelo           | Campos utilizados                                                                            | Restricciones existentes                                            | Reglas adicionales de API propuestas                                |
@@ -85,7 +92,7 @@ Esto significa que:
 | 409  | SERVICE_INACTIVE                                             | Servicio desactivado al consultar slots o reservar                |
 | 409  | AVAILABILITY_CONFLICT                                        | Cambio semanal invalida un turno vigente                          |
 | 409  | APPOINTMENT_NOT_RESCHEDULABLE / APPOINTMENT_SERVICE_MISMATCH | Exclusion de turno no compatible con reprogramacion               |
-| 409  | AVAILABILITY_TIME_UNRESOLVABLE                               | Frontera horaria local ambigua/inexistente en la fecha solicitada |
+| 409  | AVAILABILITY_TIME_UNRESOLVABLE                               | Franja activa ambigua/inexistente o con cambio de offset; B04/B05 |
 | 415  | UNSUPPORTED_MEDIA_TYPE                                       | Body enviado con un tipo de contenido no admitido                 |
 | 422  | VALIDATION_ERROR                                             | Formato, rango, campos desconocidos o reglas de input invalidas   |
 | 500  | INTERNAL_ERROR                                               | Error inesperado o configuracion persistida invalida              |
@@ -400,7 +407,7 @@ Ejemplo de turno incompatible con una reduccion semanal (409):
 }
 ```
 
-Codigos: 200; 409 AVAILABILITY_CONFLICT; 422 por duplicados, solapamiento, horas o payload;
+Codigos: 200; 409 AVAILABILITY_CONFLICT o AVAILABILITY_TIME_UNRESOLVABLE (D06); 422 por duplicados, solapamiento, horas o payload;
 comunes 400/401/403/415/500/503. Duplicados/franjas del request son 422, no un conflicto SQL
 publico. A autoriza OWNER/ADMIN; C aporta reglas de ocupacion y mecanismo de serializacion.
 
@@ -414,7 +421,7 @@ Se mantienen errores/envelope de A: `NOT_FOUND` para recursos ajenos/inexistente
 Servicio inactivo: `409 SERVICE_INACTIVE`; exclusion invalida:
 `409 APPOINTMENT_SERVICE_MISMATCH` o `409 APPOINTMENT_NOT_RESCHEDULABLE`.
 
-Mientras D06 sigue pendiente, una franja activa con horas ambiguas/inexistentes
+Segun D06 resuelta para B04/B05, una franja activa con horas ambiguas/inexistentes
 o cambio interno de offset rechaza toda la consulta con
 `409 AVAILABILITY_TIME_UNRESOLVABLE`. No se selecciona una ocurrencia DST ni se
 desplaza una hora inexistente. Franjas univocas fuera de la transicion funcionan.
@@ -453,7 +460,7 @@ Permite consultar los horarios disponibles para reservar un servicio en una fech
 - Se utiliza el `timezone` del negocio, no el del navegador.
 - Los horarios semanales se expresan en hora local; los turnos se almacenan como instantes UTC.
 - No se permiten solapamientos. Un turno de 09:00 a 10:00 y otro de 10:00 a 11:00 son compatibles.
-- Las horas ambiguas o inexistentes por cambios de horario de verano quedan pendientes de la política D06; no se debe inventar una conversión hasta que A/C la aprueben.
+- D06: toda franja activa de la fecha evaluada debe ser univoca y tener offset constante, incluidos sus limites. Horas ambiguas/inexistentes y transiciones producen 409 AVAILABILITY_TIME_UNRESOLVABLE en B04/B05; no se eligen ocurrencias ni se desplazan horas. Ver [politica y ejemplos](timezones-dst.md).
 - En P0 se propone impedir cambios de zona horaria cuando existen turnos vigentes.
 
 ### Responsabilidades
@@ -503,11 +510,11 @@ Las siguientes decisiones deben acordarse con los demás módulos antes de integ
 | **D03** | Aprobada para B04: reemplazo semanal y rechazo de cambios incompatibles con turnos vigentes; coordinacion con C pendiente de D07. |
 | **D04** | Cambios en servicios no modifican turnos anteriores.                                                                              |
 | **D05** | Una agenda por negocio y comienzos cada 15 minutos.                                                                               |
-| **D06** | Manejo de fechas, UTC y zonas horarias.                                                                                           |
+| **D06** | Resuelta para B04/B05: conversion estricta IANA y 409 temporal. Adopcion por Agenda pendiente.                                    |
 | **D07** | Transacciones para evitar reservas simultáneas incompatibles.                                                                     |
 | **D08** | Evitar que accesos directos a Supabase salteen los permisos del backend.                                                          |
 
-Salvo el alcance de D03 aprobado para B04 y los acuerdos parciales de B03,
+Salvo D06 resuelta para B04/B05, el alcance de D03 aprobado para B04 y los acuerdos parciales de B03,
 estas decisiones siguen siendo propuestas que requieren acuerdo de los modulos involucrados.
 
 ---

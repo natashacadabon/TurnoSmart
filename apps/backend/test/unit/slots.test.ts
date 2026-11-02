@@ -1,7 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { slotsQuerySchema } from '@turnosmart/shared';
-import { availabilityWindows, calculateSlots } from '../../src/modules/slots/calculator.js';
+import { availabilityWindows } from '../../src/lib/business-time.js';
+import { calculateSlots } from '../../src/modules/slots/calculator.js';
 import { PrismaSlotsRepository } from '../../src/modules/slots/repository.js';
 
 const rule = { dayOfWeek: 1, startTime: '09:10', endTime: '12:10', active: true };

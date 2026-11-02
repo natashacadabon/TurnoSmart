@@ -1,11 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { replaceAvailabilityRulesSchema } from '@turnosmart/shared';
-import {
-  appointmentFits,
-  localTime,
-  PrismaAvailabilityRepository,
-} from '../../src/modules/availability/repository.js';
+import { PrismaAvailabilityRepository } from '../../src/modules/availability/repository.js';
+import { appointmentFits, localTime } from '../../src/lib/business-time.js';
 
 const rule = { dayOfWeek: 1, startTime: '09:00', endTime: '12:00', active: true };
 const parse = (rules: unknown[]) => replaceAvailabilityRulesSchema.safeParse({ rules });
@@ -112,14 +109,14 @@ describe('horas persistidas y compatibilidad D03', () => {
       false,
     );
   });
-  it('no inventa conversion DST ni acepta zona invalida', () => {
+  it('rechaza DST con el error controlado compartido y no acepta zona invalida', () => {
     expect(() =>
       appointmentFits(
         appointment('2026-11-01T05:30:00Z', '2026-11-01T07:30:00Z'),
-        [],
+        [{ ...rule, dayOfWeek: 0, startTime: '00:00', endTime: '04:00' }],
         'America/New_York',
       ),
-    ).toThrow('D06');
+    ).toThrow(expect.objectContaining({ code: 'AVAILABILITY_TIME_UNRESOLVABLE', status: 409 }));
     expect(() => appointmentFits(appointment(), [], 'invalid')).toThrow();
   });
 });

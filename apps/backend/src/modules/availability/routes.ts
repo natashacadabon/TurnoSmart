@@ -4,12 +4,9 @@ import { replaceAvailabilityRulesSchema, type AvailabilityRulesResponse } from '
 import { requirePermission } from '../../middleware/auth.js';
 import { parse } from '../../lib/http.js';
 import { AppError } from '../../lib/errors.js';
-import {
-  localTime,
-  timezoneFormatter,
-  type AvailabilityRepository,
-  type WeeklyAvailability,
-} from './repository.js';
+import { type AvailabilityRepository, type WeeklyAvailability } from './repository.js';
+
+import { localTime, timezoneFormatter } from '../../lib/business-time.js';
 
 const noQuery = z.strictObject({});
 

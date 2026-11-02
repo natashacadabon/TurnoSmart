@@ -1,5 +1,5 @@
 import type { AppointmentStatus, PrismaClient } from '@prisma/client';
-import type { Interval } from './calculator.js';
+import type { Interval } from '../../lib/business-time.js';
 
 export interface SlotAppointment extends Interval {
   id: string;

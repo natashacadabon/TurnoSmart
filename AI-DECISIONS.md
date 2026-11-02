@@ -415,6 +415,86 @@ D08 sigue pendiente para accesos directos a Supabase. Sin commit ni push.
 
 ---
 
+## 2026-11-02 - D06: politica DST resuelta para B04/B05
+
+**Problema abordado**
+
+Resolver la inconsistencia temporal entre B04 (comparacion local de extremos,
+500 en cambios de offset) y B05 (rechazo estricto 409). La conversion duplicada
+permitia que B04 aceptara franjas ambiguas que B05 no podia ofrecer. Tambien se
+detectaron errores de conversion en anios ISO 0..99 y validacion IANA dispar.
+
+**Prompt / herramienta utilizada**
+
+Codex. La desarrolladora solicito auditar y resolver D06 en availability/slots,
+definir una politica explicita, reemplazar errores temporales 500, agregar pruebas
+y documentar, sin modificar Agenda, migraciones ni Supabase Cloud.
+Se revisaron AGENTS.md (solo frontend, fuera del alcance), decisiones historicas,
+B01, schema Prisma, contratos compartidos y ambos modulos antes de modificar codigo.
+
+**Codigo / arquitectura propuesta por IA**
+
+- Adoptar el rechazo estricto ya publicado en B05 como politica definitiva para
+  B04/B05: todos los minutos de cada franja activa de la fecha, incluidos sus
+  limites, deben tener un unico instante UTC y offset constante. Gaps, folds,
+  dias omitidos o transiciones internas devuelven 409 AVAILABILITY_TIME_UNRESOLVABLE.
+  Cualquier franja afectada rechaza toda la fecha evaluada, sin resultados parciales.
+- No desplazar horas inexistentes ni seleccionar ocurrencias ambiguas. Se descartan
+  esas alternativas porque cambiarian la semantica existente de B05 y requeririan
+  definir nuevas reglas de duracion/cobertura durante la transicion. Franjas univocas
+  antes/despues del salto siguen funcionando, con la zona del negocio y fecha local.
+- Motor comun `lib/business-time.ts` con Intl/ICU/IANA y calendario gregoriano
+  proleptico/era explicitos, sin dependencias nuevas. TIME conserva HH:mm; los
+  turnos se comparan por UTC completo. setUTCFullYear evita el ajuste 1900 para
+  anios 0..99. Se rechazan offsets numericos como sustitutos de nombres IANA.
+- B04 valida contra las mismas ventanas UTC que ofrece B05, antes de escribir y
+  dentro de su transaccion. Cache por fecha solo durante esa evaluacion; no se
+  comparte entre requests/tenants. Sin franjas o cruce de fecha local conserva
+  AVAILABILITY_CONFLICT. La semana recurrente sin turnos puede guardarse; no se
+  intenta resolver un horizonte infinito de fechas futuras.
+- Cambia el resultado temporal de B04 de 500 a 409 usando el codigo ya existente;
+  se justifica por conflicto conocido de interpretacion de disponibilidad, no
+  fallo inesperado. No cambian DTOs, query, permisos, tenant ni envelope publico.
+  Configuracion persistida invalida (zona/TIME legado) sigue siendo INTERNAL_ERROR.
+
+**Validacion y correccion humana**
+
+La solicitud autoriza definir y resolver D06 en B04/B05; no se atribuye una
+aprobacion adicional a A/C ni se implementa su adopcion en Agenda. Este registro
+reemplaza las referencias historicas a D06 pendiente para estos dos modulos.
+La politica completa, ejemplos y alcance del 409 estan en docs/timezones-dst.md.
+
+Pasaron 197 pruebas unitarias y 68 de integracion en el host (Node 24), incluidas
+20 unitarias y 13 de integracion nuevas. Cubren gaps/folds de Nueva York, saltos de
+30 minutos de Lord Howe, medianoche en La Habana, dia omitido en Apia, zonas
+sin DST, offsets fraccionarios, cambio de dia UTC, limites por milisegundos,
+ausencia de slots duplicados, aislamiento y rollback sin alterar turnos/eventos.
+La prueba de anios ISO tempranos detecto que Intl con calendario iso8601 omitia
+la era en el runtime; se corrigio usando gregory explicito y se verifico 0000/0099.
+
+Se uso PostgreSQL local descartable con las migraciones existentes y bootstrap
+auth.uid() de prueba. FakeVerifier/conexion postgres no certifican tokens reales
+ni RLS. Sin cambios en .env ni uso de Supabase Cloud.
+
+Las mismas suites completas pasaron tambien en el contenedor con Node 22.23.4
+(version soportada): 197 unitarias y 68 de integracion contra la misma base local.
+Lint y typecheck del monorepo aprobados; formato comprobado para todos los archivos
+modificados y git diff --check sin errores. El chequeo global de formato detecta
+30 archivos preexistentes sin cambios respecto de HEAD; no se reformatean archivos
+ajenos a la tarea. La base temporal de pruebas se elimino al finalizar.
+
+**Resultado**
+
+D06 resuelta para B04/B05 bajo la politica estricta, sin Agenda ni cambios de
+schema/migraciones/dependencias. Documentacion API y README de ambos modulos
+actualizados. Integrar Agenda sigue requiriendo adoptar este mismo motor/politica,
+revalidacion transaccional y acuerdo de serializacion D07. A debe coordinar cambios
+de timezone con turnos vigentes y validar nombres IANA. D08 sigue independiente.
+Operar dentro de folds/gaps requerira una revision explicita de esta decision,
+no una conversion implicita. Sin commit ni push.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.

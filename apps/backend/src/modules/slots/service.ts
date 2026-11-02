@@ -1,7 +1,8 @@
 import { replaceAvailabilityRulesSchema, type SlotsQuery } from '@turnosmart/shared';
 import { AppError, notFound } from '../../lib/errors.js';
-import { localTime, type AvailabilityRepository } from '../availability/repository.js';
-import { availabilityWindows, calculateSlots } from './calculator.js';
+import type { AvailabilityRepository } from '../availability/repository.js';
+import { localTime, availabilityWindows } from '../../lib/business-time.js';
+import { calculateSlots } from './calculator.js';
 import type { SlotsRepository } from './repository.js';
 
 export class SlotsService {

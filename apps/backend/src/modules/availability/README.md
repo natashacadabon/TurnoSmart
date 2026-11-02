@@ -33,10 +33,14 @@ adquirir el bloqueo. Incluye turnos en curso y usa startsAt/endsAt persistidos,
 sin recalcular la duracion del servicio. Los limites se comparan en la zona
 del negocio y con precision de segundos/milisegundos de los turnos.
 
-D06 sigue pendiente para transiciones horarias: si un turno vigente atraviesa
-un cambio de offset, el PUT aborta con `INTERNAL_ERROR` sin escribir. No se
-elige una conversion de hora ambigua/inexistente ni se incorpora una politica
-DST no aprobada. Una zona IANA persistida invalida tambien responde 500.
+D06 resuelta para B04/B05: `lib/business-time.ts` convierte las mismas franjas
+que usa slots. Horas ambiguas/inexistentes o transiciones en cualquier franja
+activa de la fecha de un turno vigente devuelven 409
+`AVAILABILITY_TIME_UNRESOLVABLE`, antes de escribir. Ya no causan 500. Una zona
+persistida invalida o TIME legado con segundos conserva 500 `INTERNAL_ERROR`.
+Se comparan instantes UTC completos, sin redondeos, contra una unica franja.
+La semana recurrente sin turnos puede guardarse: DST se evalua por fecha concreta.
+Detalle y casos limite: [politica D06](../../../../../docs/timezones-dst.md).
 
 D07 sigue pendiente: el bloqueo de B04 no garantiza que C vuelva a comprobar
 disponibilidad despues de esperar un bloqueo. C debe acordar e implementar un
@@ -47,7 +51,9 @@ D08 sigue pendiente: RLS actual permite escrituras directas de miembros que
 pueden omitir permisos/validaciones Express. Estos tests no certifican RLS.
 
 Se mantienen los errores de A/B03: details opcionales path/message, requestId,
-JSON malformado y contenido no procesado como JSON con 422; fallos inesperados 500. Se agrega solo `AVAILABILITY_CONFLICT` (409), sin otro formato global.
+JSON malformado y contenido no procesado como JSON con 422; fallos inesperados 500.
+Se conservan `AVAILABILITY_CONFLICT` (409) y el formato global. D06 reutiliza
+`AVAILABILITY_TIME_UNRESOLVABLE` (409), ya publicado por B05, tambien en PUT.
 
 ## Verificacion
 

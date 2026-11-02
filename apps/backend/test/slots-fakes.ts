@@ -1,5 +1,5 @@
 import type { SlotsRepository, SlotAppointment } from '../src/modules/slots/repository.js';
-import type { Interval } from '../src/modules/slots/calculator.js';
+import type { Interval } from '../src/lib/business-time.js';
 import type { InMemoryServices } from './services-fakes.js';
 
 export class InMemorySlots implements SlotsRepository {
