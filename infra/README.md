@@ -14,18 +14,27 @@ npm run docker:dev
 npm run docker:down
 ```
 
-El frontend usa `NEXT_PUBLIC_API_URL=http://localhost:4000` porque el navegador accede al puerto publicado. Las variables de Supabase del frontend se leen de `apps/frontend/.env.local`, que queda montado en el contenedor.
+En `next dev`, el frontend usa `http://localhost:4000`, el puerto del backend
+publicado en el host; no hace falta definir una URL de API local. Las variables
+de Supabase del frontend se leen de `apps/frontend/.env.local`, montado en el
+contenedor. Los builds de produccion exigen origenes HTTPS publicos.
 
-- GitHub Actions: CI en pushes y pull requests, y deploy manual del frontend en Vercel (`frontend-deploy.yml`, ver README de la raíz).
+- GitHub Actions: CI en pushes y pull requests, y deploy manual del frontend en Vercel/Azure (`frontend-deploy.yml`, ver README de la raiz).
 
 ## Planificado
+
+B07 M1–M2 preparado en [azure/README.md](azure/README.md): Bicep de RG temporal,
+Plan F1 Linux/App Service Node 22, ZIP de produccion y comandos PowerShell manuales.
+No se crearon recursos Azure; B1 requiere aprobacion explicita. El frontend y los
+workflows existentes no cambian. La demo exige preflight/what-if y limpieza del RG.
 
 - Azure App Service para backend.
 - Gestion de secretos por ambiente.
 - Azure Monitor o Application Insights.
 - Imagenes y pipeline de produccion.
 
-No existe actualmente infraestructura como codigo ni CD automatico. El frontend se despliega en Vercel solo a mano, desde el workflow.
+Existe infraestructura como codigo para el backend, sin CD automatico ni despliegue
+Azure realizado por B07. El frontend se despliega en Vercel solo a mano, desde el workflow.
 
 ## Plan de evolucion
 

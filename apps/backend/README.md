@@ -140,6 +140,10 @@ apps/backend/
 
 ## Recursos útiles
 
+Preparacion Render Free (sin desplegar): [comandos, variables y prueba Linux](../../infra/render/README.md).
+Root Directory raiz; Build Command `npm run build:render`; Start Command
+`npm run start:render`; health check `/health`; autodeploy deshabilitado.
+
 - [Node.js](https://nodejs.org/)
 - [Express](https://expressjs.com/)
 - [TypeScript](https://www.typescriptlang.org/)

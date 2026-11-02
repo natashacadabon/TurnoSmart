@@ -59,7 +59,15 @@ jobs:
         run: npm run typecheck
 
       - name: Unit tests
-        run: npm test
+        run: |
+          npm test
+          npm run test:config --workspace=apps/frontend
 
       - name: Build
         run: npm run build
+        env:
+          NEXT_PUBLIC_USE_AZURE: 'false'
+          NEXT_PUBLIC_API_URL_RENDER: https://turnosmart-render.invalid
+          NEXT_PUBLIC_API_URL_AZURE: https://turnosmart-azure.invalid
+          NEXT_PUBLIC_SUPABASE_URL: https://supabase.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ci_build_only
