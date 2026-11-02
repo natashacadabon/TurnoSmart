@@ -17,6 +17,7 @@ export const PERMISSIONS = {
   // Baja definitiva: sólo quienes administran el negocio.
   'customers:delete': ['OWNER', 'ADMIN'],
   'appointments:read': ['OWNER', 'ADMIN', 'STAFF'],
+  'appointments:write': ['OWNER', 'ADMIN', 'STAFF'],
   'risk:explain': ['OWNER', 'ADMIN', 'STAFF'],
 } as const satisfies Record<string, readonly Role[]>;
 

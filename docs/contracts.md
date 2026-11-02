@@ -81,3 +81,18 @@ turnos y piden explicaciones. Gestión de miembros: fuera del checkpoint.
   `RiskExplanationResponse { risk, explanation: { summary, recommendations[] }, model, generatedAt, disclaimer }`.
 - Factores de riesgo (`RiskFactor`): `{ code, label, impact, value? }`. C persiste en `RiskScore.factors` un array con
   esa forma. Cualquier otro campo se descarta antes de enviar a Gemini.
+
+## Turnos (C01)
+
+- `GET /api/appointments?from=&to=&status=&page=&pageSize=` devuelve `AppointmentsResponse`.
+- `POST /api/appointments` recibe `{ customerId, serviceId, startsAt, notes? }`.
+- `PATCH /api/appointments/:id` permite modificar únicamente `notes`.
+- `POST /api/appointments/:id/reschedule` recibe `{ startsAt }` y mantiene el estado actual.
+- Las acciones de estado usan `POST /api/appointments/:id/{confirm,cancel,complete,no-show}`.
+- `startsAt` y `endsAt` son instantes ISO UTC terminados en `Z`; las fechas de consulta son `YYYY-MM-DD`.
+- El `businessId` nunca se acepta desde el cliente: se toma del perfil autenticado.
+- Un turno `CANCELLED`, `COMPLETED` o `NO_SHOW` es terminal y no puede volver a un estado operativo.
+- `SCHEDULED` puede pasar a `CONFIRMED`, `CANCELLED`, `COMPLETED` o `NO_SHOW`.
+- `CONFIRMED` puede pasar a `CANCELLED`, `COMPLETED` o `NO_SHOW`.
+- La reprogramación debe validar disponibilidad y solapamientos dentro de una transacción.
+- Los conflictos de horario responden `409 APPOINTMENT_TIME_CONFLICT`.
