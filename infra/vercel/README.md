@@ -60,16 +60,19 @@ No se modifican Settings de la cuenta ni se despliega desde estas comprobaciones
 
 ## Variables publicas durante el build
 
-En Vercel → Settings → Environment Variables, configurar **Production** (y solo
-si se necesita, Preview con valores propios) antes del build:
+En Vercel → Settings → Environment Variables, configurar **Production** y
+**Preview** por separado antes del build. Preview usa el Render Dev compartido
+y Supabase Dev. Production usa exclusivamente el backend y Supabase de Production.
+Si solo existe el servicio demo, reservarlo para Dev y dejar pendiente la
+publicacion de Production hasta contar con un entorno separado.
 
-| Variable                      | Valor                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------- |
-| NEXT_PUBLIC_USE_AZURE         | false (predeterminado si se omite): Render; true: Azure. Strings exactos, sin espacios |
-| NEXT_PUBLIC_API_URL_RENDER    | Origen HTTPS de Render, sin /api, query ni credenciales                                |
-| NEXT_PUBLIC_API_URL_AZURE     | Origen HTTPS de Azure, tambien obligatorio aunque este apagado                         |
-| NEXT_PUBLIC_SUPABASE_URL      | Origen HTTPS del mismo proyecto Supabase que utiliza el backend                        |
-| NEXT_PUBLIC_SUPABASE_ANON_KEY | Publishable sb_publishable_* o JWT legacy con role anon de ese proyecto                |
+| Variable                      | Valor                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| NEXT_PUBLIC_USE_AZURE         | false u omitida en ambos entornos. Azure se selecciona en el dispatch de checkpoint |
+| NEXT_PUBLIC_API_URL_RENDER    | Origen HTTPS de Render, sin /api, query ni credenciales                             |
+| NEXT_PUBLIC_API_URL_AZURE     | Origen HTTPS de Azure, tambien obligatorio aunque este apagado                      |
+| NEXT_PUBLIC_SUPABASE_URL      | Origen HTTPS del mismo proyecto Supabase que utiliza el backend                     |
+| NEXT_PUBLIC_SUPABASE_ANON_KEY | Publishable sb_publishable_* o JWT legacy con role anon de ese proyecto             |
 
 Todo NEXT_PUBLIC_* queda visible en el navegador. **Nunca** configurar service_role,
 sb_secret_*, DATABASE_URL, DIRECT_URL, claves Gemini o credenciales Azure en este
@@ -106,61 +109,112 @@ En cada backend existente que vaya a usarse (Render/Azure), CORS_ORIGIN debe con
 frontend (ej. https://turnosmart-demo.vercel.app), sin slash final ni rutas; varios
 origenes se separan por coma. No usar * ni *.vercel.app. Authorization/Content-Type
 y OPTIONS ya estan admitidos; no hacen falta cookies cross-site ni credentials.
-Previews con otro origen requieren alta explicita y limpieza posterior: preferir
-un dominio estable para la demo. No crear otra Web App ni recursos Azure.
+Cada Preview utiliza Render y Supabase de Dev. Para una PR interna elegible,
+Actions publica la URL inmutable y el **Preview estable de la PR** en el resumen.
+El alias `turnosmart-pr-<id-del-repositorio>-<numero-de-pr>.vercel.app`
+se asigna solo tras verificar proyecto, PR y SHA, y volver a comprobar el SHA.
+La URL estable no incluye bypass.
+Vercel asigna estos nombres por disponibilidad y no permite reservarlos.
+Si hay una colision detectada, el job falla sin reemplazar el alias existente.
 
-## Publicacion manual futura y validacion
+Abrir el origen HTTPS estable del resumen. Con
+[CORS automático en Render Dev](../render/README.md#cors-automático-de-preview-en-render-dev),
+el backend verifica el alias en Vercel sin editar `CORS_ORIGIN` por PR.
+Retirar el alias en Vercel cuando ya no deba tener acceso.
+Usar cuentas y datos de prueba en Dev.
+[Aliases de Vercel](https://vercel.com/docs/cli/alias).
 
-No ejecutar hasta autorizar la ventana. CLI desde la **raiz del monorepo**:
-`npx vercel@65.9.0 link` (proyecto existente correcto). Exportar al proceso las cinco
-variables publicas esperadas y VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID; no
-copiar secretos del backend. Seguir el mismo orden del workflow:
+## Activacion de CD y rollback
 
-```bash
-node apps/frontend/scripts/deploy-config.mjs validate
-npx vercel@65.9.0 pull --yes --environment=production
-node apps/frontend/scripts/deploy-config.mjs prepare
-npx vercel@65.9.0 build --prod --output .vercel/output
-npm run verify:public-build --workspace=apps/frontend
-node apps/frontend/scripts/deploy-config.mjs output
-# Solo durante la ventana autorizada:
-url=$(npx vercel@65.9.0 deploy --prebuilt --prod --yes)
-DEPLOYMENT_URL="$url" node apps/frontend/scripts/deploy-config.mjs published
-```
+1. Confirmar Hobby y el proyecto existente. Usar **GitHub Actions como unico
+   publicador** y desconectar Git en Vercel. Si el proyecto aun tiene Git conectado,
+   alinear Production Branch con la rama del dispatch. El `vercel.json`
+   mantiene los despliegues Git deshabilitados. Configurar los dos scopes publicos
+   de la tabla y mantener Node 22.
+2. En GitHub crear los environments `vercel-production` y `vercel-preview`.
+   Restringir Production a `main` al completar la transicion. Para Preview
+   permitir la rama predeterminada real del repositorio (Settings > Branches;
+   no se asume `dev`) y, si se usan checkpoints manuales, `dev`: los Previews corren en el workflow
+   confiable `Frontend preview` (`workflow_run`), no en `refs/pull/*/merge`. En `vercel-preview` definir
+   `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
+   sin slash final. Los Previews de Render fallan si el scope Preview apunta a
+   otros origenes. Verificar tambien que `DATABASE_URL` de Render Dev apunte
+   a la base Dev. La comprobacion del bundle no puede inspeccionar esa conexion.
+   En `vercel-production` definir `EXPECTED_PRODUCTION_API` y
+   `EXPECTED_PRODUCTION_SUPABASE` con los origenes exactos de Production.
+   Hacer tambien visibles en ese environment `EXPECTED_DEV_API` y
+   `EXPECTED_DEV_SUPABASE`, por ejemplo como variables del repositorio,
+   para rechazar una configuracion de Production que apunte a Dev.
+   Guardar `VERCEL_TOKEN` como secret de cada environment, con alcance al equipo
+   Hobby correspondiente. En `vercel-production` configurar el secret opcional
+   `VERCEL_AUTOMATION_BYPASS` si se protege el acceso a URLs de deploy. La
+   automatizacion solo envia ese header a la URL inmutable HTTPS de Vercel.
+   Los Previews no lo reciben: ejecutan codigo de la PR y podrian leerlo.
+   Configurar `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` como variables GitHub
+   del proyecto existente, iguales para ambos scopes. Los valores
+   `NEXT_PUBLIC_*` se mantienen en Vercel, no se duplican en GitHub.
+3. Proteger `dev` y `main` y requerir `Quality Checks`. Los PR, incluidos
+   borradores, forks y Dependabot, verifican el merge con el build ficticio.
+   Solo las PR internas elegibles publican. `Frontend preview` arranca al
+   terminar CI y su definicion proviene de la rama por defecto, por lo que una
+   PR no puede modificarla para leer secretos (debe estar fusionada en la rama
+   predeterminada para activarse). Una PR que modifica `.github/` no publica
+   Preview hasta fusionarse, para que no pueda fabricar un Quality Checks exitoso.
+   Tiene cuatro jobs: `select` valida la PR por API;
+   `settings` (con token) solo ejecuta scripts de la rama por defecto y
+   publica los `NEXT_PUBLIC_*` validados; `build` es el unico que ejecuta
+   codigo de la PR y no recibe secretos ni environment; `deploy` (con token)
+   usa solo scripts de la rama por defecto, trata el artefacto como datos y fija
+   proyecto y PR desde variables y `select`. Ningun secreto llega a codigo de
+   la PR; el codigo desplegado en Vercel sigue siendo el de la PR.
+   Las reglas y secretos de environments requieren un plan compatible con la
+   visibilidad del repo. Ver [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+4. Confirmar que el proyecto existente ya tiene un deployment Production READY.
+   Mantener el dispatch existente disponible durante el piloto. Su rama por
+   defecto es `dev` por compatibilidad. Cuando Production tenga backend y DB
+   separados, fijar `VERCEL_PRODUCTION_BRANCH=main`, alinear Vercel y restringir
+   el environment de GitHub a `main`. El dispatch requiere CI de push exitosa
+   para el SHA exacto. Si falta el deployment inicial, aplicar primero esa
+   configuracion y hacer el bootstrap manual desde `main`.
+5. Habilitar `VERCEL_CD_ENABLED=true` como variable del repositorio. Para
+   validar el cambio, comprobar una PR interna en borrador, una externa,
+   un cambio solo backend y dos pushes consecutivos a la misma PR. Revisar
+   que Vercel registre un solo deploy por revision elegible.
 
-`pull` descarga configuracion remota. `prepare` verifica el proyecto y su Root
-Directory, fija Node 22 y comandos del vercel.json versionado, y reemplaza las
-caches de entorno de Vercel por las cinco variables publicas del proceso. Asi el
-selector y las URLs de GitHub Actions prevalecen aunque Production tenga valores
-viejos; no modifica Settings remotos ni archivos .env de desarrollo. No ejecutar
-otro pull entre prepare y build. Nunca imprimir ni subir caches como artifacts.
-La vinculacion vive en .vercel/ de la raiz, ignorada por Git; no vincular una segunda
-copia desde apps/frontend. CLI local no implica publicacion hasta deploy.
+| Evento                                     | CI                            | Publicacion                                                            |
+| ------------------------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
+| Push a `feat/**` sin PR                    | Sin CI remoto                 | Sin Preview                                                            |
+| PR hacia `dev` o `main`, incluido borrador | Quality Checks sobre el merge | Preview para feature interna con cambios de frontend, salvo Dependabot |
+| Push a `dev`                               | Quality Checks                | Render Dev nativo si coincide su filtro y pasa CI                      |
+| Push a `main`                              | Quality Checks                | Production queda disponible para dispatch manual                       |
 
-El workflow existente Frontend deploy (manual) separa `target` (proveedor de API:
-render/azure) de `frontend_target` (publicacion: vercel/azure). Para publicar en
-Vercel usar `frontend_target=vercel`, seleccionar `target=render` o `azure`,
-ingresar api_url_render y api_url_azure HTTPS y confirmar hobby_eligible.
-`NEXT_PUBLIC_USE_AZURE` se deriva exclusivamente de `target`; no hay un selector
-booleano adicional. Requiere VERCEL_TOKEN como secret,
-VERCEL_ORG_ID/VERCEL_PROJECT_ID del link **raiz**, SUPABASE_URL/SUPABASE_ANON_KEY
-publicos en GitHub Variables. Requiere el ultimo run de `ci.yml` por push, para el
-SHA exacto del dispatch, completado con success (actualmente dev/main); no acepta
-CI de otro SHA, solo PR, pendiente, fallida o cancelada. Ambos checkouts fijan ese SHA.
-Los tests de configuracion se ejecutan antes del CLI. Se verifica .next y tambien
-la copia JS de `.vercel/output` que deploy --prebuilt envia. Tras publicar, se
-descarga /login de la URL inmutable y todos los chunks JS (tambien lazy) y se comparan SHA-256 contra
-ese artefacto; un bundle distinto, 401/5xx, timeout o redirect falla el workflow.
-Deployment Protection debe permitir el acceso publico de la demo. Una falla de
-verificacion posterior no revierte automaticamente la publicacion: inspeccionar y
-retirar el deployment durante la ventana autorizada. No prueba login real ni CORS.
+El filtro de frontend incluye `apps/frontend/**`, `packages/shared/**`,
+workflows y archivos de build de raiz. Se calcula respecto a la base de la
+PR. Si hay PR a ambas bases para el mismo SHA, se prioriza el PR elegible
+hacia `dev`. Las corridas obsoletas se cancelan por rama y se verifica el SHA
+del PR antes de subir el artefacto. El Preview compila el head del PR; Quality
+Checks ya valido el merge.
 
-`frontend_target=azure` falla explicitamente en preflight, incluso cuando
-`target=azure` es valido para Vercel. No hay pasos de despliegue Azure ni permiso
-OIDC. Solo habilitarlo tras contar con infraestructura, ZIP standalone y startup
-comprobados; entonces `id-token: write` debe existir exclusivamente en su job
-Azure, nunca globalmente ni en Vercel. `actions: read` solo se otorga al gate CI.
-El unico trigger es workflow_dispatch; no activar pushes automaticos.
+`pull` toma el scope correspondiente. El workflow comprueba el proyecto,
+mantiene los valores publicos, descarta el resto del cache y usa los comandos
+versionados de Node 22/workspaces. La CLI instala y compila una vez; `--prebuilt`
+sube ese artefacto. Production se sube con `--skip-domain`, se verifica /login y
+los hashes del JavaScript servido, y solo entonces se promueve. Preview exige
+una Production lista para evitar la promocion implicita del primer despliegue.
+
+Para un checkpoint con la API Azure ya disponible, usar el mismo dispatch
+desde `dev` con `target=azure` e ingresar ambas URLs HTTPS. El build usa una
+Preview con esas URLs y el Supabase del scope Preview. `frontend_target=azure`
+sigue bloqueado. Los recursos de Azure se administran con el procedimiento B07.
+
+Para pausar la publicacion automatica en Vercel, desactivar
+`VERCEL_CD_ENABLED` y cancelar los runs en curso. Si se necesita
+restaurar Production, cancelar los runs en curso y
+usar Instant Rollback en el Dashboard sobre la Production inmediatamente
+anterior, que es la admitida en Hobby. Confirmar el dominio y /login, corregir o revertir el commit en la rama de Production
+y republicar una vez validado antes de reactivar CD. Preview puede eliminarse
+desde Deployments. Revisar [cuotas Hobby](https://vercel.com/docs/plans/hobby)
+y [retencion](https://vercel.com/changelog/hobby-projects-now-retain-fewer-deployments-to-free-up-storage).
 
 Validar desde navegador publicado: /demo y /login; /customers sin sesion redirige;
 login, onboarding solo si corresponde, clientes, recarga y logout. DevTools Network

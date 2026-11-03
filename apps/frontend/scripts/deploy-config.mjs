@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseEnv } from 'node:util';
 import { validatePublicEnv } from './public-env.mjs';
 
 const publicNames = [
@@ -24,14 +25,97 @@ export function assertSuccessfulCi(runs, sha) {
   );
 }
 
-export function validateDeployment(env) {
-  validatePublicEnv(env);
-  for (const name of ['VERCEL_TOKEN', 'VERCEL_ORG_ID', 'VERCEL_PROJECT_ID'])
-    assert(env[name]?.trim() && !/[\r\n]/.test(env[name]), `Falta variable valida: ${name}`);
+export function affectsFrontend(path) {
+  return (
+    /^(apps\/frontend\/|packages\/shared\/|\.husky\/|\.github\/workflows\/(ci|frontend-deploy|frontend-preview)\.yml$)/.test(
+      path,
+    ) || /^(package(-lock)?\.json|\.npmrc|\.nvmrc|tsconfig[^/]*\.json)$/.test(path)
+  );
+}
+
+// Se ejecuta en el workflow confiable tras CI. Devuelve un contexto con forma de
+// pull_request (sha = head verificado) o null si la PR no debe publicar Preview.
+export async function selectPreview(github, context) {
+  const run = context.payload.workflow_run;
+  if (run?.event !== 'pull_request' || run.conclusion !== 'success') return null;
+  const { owner, repo } = context.repo;
+  const full = `${owner}/${repo}`;
+  if (run.head_repository?.full_name !== full) return null;
+  // Un workflow de la PR con el mismo nombre no debe contar como Quality Checks.
+  if (!/^\.github\/workflows\/ci\.yml(@.+)?$/.test(run.path ?? '')) return null;
+  const candidates = [];
+  for (const { number } of run.pull_requests ?? []) {
+    const { data } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+    candidates.push(data);
+  }
+  // Con PR a dev y a main para el mismo SHA se publica la de dev.
+  candidates.sort((a, b) => (a.base.ref === 'dev' ? -1 : 0) - (b.base.ref === 'dev' ? -1 : 0));
+  for (const pr of candidates) {
+    if (
+      pr.state !== 'open' ||
+      !['dev', 'main'].includes(pr.base.ref) ||
+      pr.head.sha !== run.head_sha ||
+      !pr.head.ref.startsWith('feat/') ||
+      pr.head.repo?.full_name !== full ||
+      pr.user.login === 'dependabot[bot]'
+    )
+      continue;
+    const files = await github.paginate(github.rest.pulls.listFiles, {
+      owner,
+      repo,
+      pull_number: pr.number,
+      per_page: 100,
+    });
+    // Una PR que edita CI o workflows podria fabricar el exito: se publica tras fusionarla.
+    const names = files.flatMap((file) => [file.filename, file.previous_filename]).filter(Boolean);
+    if (names.some((name) => name.startsWith('.github/'))) continue;
+    if (
+      !files.some((file) =>
+        [file.filename, file.previous_filename].some((p) => p && affectsFrontend(p)),
+      )
+    )
+      continue;
+    return {
+      ...context,
+      repo: context.repo,
+      eventName: 'pull_request',
+      sha: pr.head.sha,
+      payload: { ...context.payload, pull_request: pr },
+    };
+  }
+  return null;
+}
+
+export async function assertCurrentRevision(github, context) {
+  if (context.eventName === 'pull_request') {
+    const pr = context.payload.pull_request;
+    const { data } = await github.rest.pulls.get({
+      ...context.repo,
+      pull_number: pr.number,
+    });
+    assert(
+      data.state === 'open' &&
+        ['dev', 'main'].includes(pr.base.ref) &&
+        data.base.ref === pr.base.ref &&
+        data.head.sha === pr.head.sha &&
+        data.head.sha === context.sha,
+      'Preview obsoleta: ejecutar CI para la revision actual del PR.',
+    );
+    return;
+  }
+  const { data } = await github.rest.git.getRef({
+    ...context.repo,
+    ref: context.ref.slice('refs/'.length),
+  });
+  assert(data.object.sha === context.sha, 'Despliegue obsoleto: la rama cambio durante CI.');
 }
 
 export function prepareVercel(root, env) {
-  validateDeployment(env);
+  const target = env.DEPLOY_TARGET;
+  assert(target === 'preview' || target === 'production', 'Entorno Vercel invalido');
+  const checkpoint = env.CHECKPOINT === 'true';
+  assert(!checkpoint || target === 'preview', 'Checkpoint Azure solo en Preview');
+  const filename = `.env.${target}.local`;
   const projectPath = join(root, '.vercel/project.json');
   const project = JSON.parse(readFileSync(projectPath, 'utf8'));
   assert.equal(project.projectId, env.VERCEL_PROJECT_ID, 'Proyecto Vercel incorrecto');
@@ -46,19 +130,63 @@ export function prepareVercel(root, env) {
     outputDirectory: null,
   });
   writeFileSync(projectPath, JSON.stringify(project));
-  // pull descarga env remoto. Reemplazarlo por allowlist del runner antes de build.
-  // Cubrir ambos layouts del CLI para monorepos; no copiar secretos de servidor.
+  // Conservar los valores publicos del target de Vercel y descartar el resto.
+  const pulled = parseEnv(readFileSync(join(root, '.vercel', filename), 'utf8'));
+  const values = Object.fromEntries(publicNames.map((name) => [name, pulled[name]]));
+  if (checkpoint) {
+    values.NEXT_PUBLIC_USE_AZURE = 'true';
+    values.NEXT_PUBLIC_API_URL_RENDER = env.CHECKPOINT_RENDER_URL;
+    values.NEXT_PUBLIC_API_URL_AZURE = env.CHECKPOINT_AZURE_URL;
+  } else {
+    assert(
+      values.NEXT_PUBLIC_USE_AZURE === undefined || values.NEXT_PUBLIC_USE_AZURE === 'false',
+      'Configurar NEXT_PUBLIC_USE_AZURE=false en Vercel para CD.',
+    );
+  }
+  validatePublicEnv(values);
+  if (!checkpoint) {
+    assert(env.EXPECTED_DEV_API && env.EXPECTED_DEV_SUPABASE, 'Faltan los origenes Dev esperados');
+    const apiOrigin = new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin;
+    const supabaseOrigin = new URL(values.NEXT_PUBLIC_SUPABASE_URL).origin;
+    if (target === 'production') {
+      assert(
+        env.EXPECTED_PRODUCTION_API && env.EXPECTED_PRODUCTION_SUPABASE,
+        'Faltan los origenes Production esperados',
+      );
+      assert(
+        [env.EXPECTED_DEV_API, env.EXPECTED_DEV_SUPABASE].every(
+          (value) => URL.canParse(value) && new URL(value).origin === value,
+        ),
+        'Los origenes Dev esperados deben ser canonicos',
+      );
+      assert(
+        apiOrigin !== env.EXPECTED_DEV_API && supabaseOrigin !== env.EXPECTED_DEV_SUPABASE,
+        'Production no puede usar Render o Supabase de Dev',
+      );
+      assert(
+        apiOrigin === env.EXPECTED_PRODUCTION_API &&
+          supabaseOrigin === env.EXPECTED_PRODUCTION_SUPABASE,
+        'Production requiere los origenes Render y Supabase esperados',
+      );
+    } else {
+      assert(
+        apiOrigin === env.EXPECTED_DEV_API && supabaseOrigin === env.EXPECTED_DEV_SUPABASE,
+        'Preview requiere los origenes Render y Supabase de Dev',
+      );
+    }
+  }
   const contents = publicNames
     .map((name) => {
-      const value = env[name] ?? 'false';
+      const value = values[name] ?? 'false';
       assert(!/[\r\n"\\$`]/.test(value), `Valor no serializable: ${name}`);
       return `${name}="${value}"`;
     })
     .join('\n');
   for (const dir of ['.vercel', 'apps/frontend/.vercel']) {
     mkdirSync(join(root, dir), { recursive: true });
-    writeFileSync(join(root, dir, '.env.production.local'), `${contents}\n`, { mode: 0o600 });
+    writeFileSync(join(root, dir, filename), `${contents}\n`, { mode: 0o600 });
   }
+  return join('.vercel', filename);
 }
 
 function javascriptFiles(dir, prefix = '') {
@@ -87,7 +215,7 @@ export function verifyOutput(root) {
     );
 }
 
-export async function verifyPublished(root, deploymentUrl, request = fetch) {
+export async function verifyPublished(root, deploymentUrl, request = fetch, bypass) {
   const origin = new URL(deploymentUrl);
   assert(
     origin.protocol === 'https:' &&
@@ -103,6 +231,7 @@ export async function verifyPublished(root, deploymentUrl, request = fetch) {
     const response = await request(new URL(path, origin), {
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
+      headers: bypass ? { 'x-vercel-protection-bypass': bypass } : undefined,
     });
     assert(response.ok, 'Deployment inaccesible; revisar readiness y Deployment Protection');
     return Buffer.from(await response.arrayBuffer());
@@ -140,10 +269,14 @@ export async function verifyPublished(root, deploymentUrl, request = fetch) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const root = process.cwd();
   const command = process.argv[2];
-  if (command === 'validate') validateDeployment(process.env);
-  else if (command === 'prepare') prepareVercel(root, process.env);
+  if (command === 'prepare') console.log(prepareVercel(root, process.env));
   else if (command === 'output') verifyOutput(root);
-  else if (command === 'published') await verifyPublished(root, process.env.DEPLOYMENT_URL);
+  else if (command === 'published')
+    await verifyPublished(
+      root,
+      process.env.DEPLOYMENT_URL,
+      fetch,
+      process.env.VERCEL_AUTOMATION_BYPASS,
+    );
   else throw new Error('Comando de verificacion desconocido');
-  console.log(`Verificacion de deployment: ${command} OK`);
 }

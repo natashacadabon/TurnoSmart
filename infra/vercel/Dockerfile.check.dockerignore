@@ -1,6 +1,7 @@
 **
 !package.json
 !package-lock.json
+!render.yaml
 !.nvmrc
 !.husky/
 !.husky/install*.mjs
@@ -24,4 +25,5 @@
 !packages/shared/src/**
 !.github/
 !.github/workflows/
+!.github/workflows/ci.yml
 !.github/workflows/frontend-deploy.yml
