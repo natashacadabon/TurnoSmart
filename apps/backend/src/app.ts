@@ -25,6 +25,7 @@ import { getMetrics } from './lib/metrics.js';
 
 export interface AppDeps {
   corsOrigins: string[];
+  corsPreviewOrigin?: ((origin: string) => Promise<boolean>) | undefined;
   verifier: TokenVerifier;
   identity: IdentityRepository;
   customers: CustomerRepository;
@@ -54,7 +55,12 @@ export function createApp(deps: AppDeps): Express {
       origin(origin, cb) {
         // Requests sin Origin (curl, smoke tests, server-to-server) no son de navegador.
         if (!origin || deps.corsOrigins.includes(origin)) return cb(null, true);
-        cb(new Error('CORS_NOT_ALLOWED'));
+        const reject = () => cb(new Error('CORS_NOT_ALLOWED'));
+        if (!deps.corsPreviewOrigin) return reject();
+        void deps.corsPreviewOrigin(origin).then((allowed) => {
+          if (allowed) cb(null, true);
+          else reject();
+        }, reject);
       },
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],

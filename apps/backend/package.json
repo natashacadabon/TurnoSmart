@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch --import @azure/monitor-opentelemetry/loader src/index.ts",
     "build": "node scripts/ensure-prisma-client.mjs && tsc -p tsconfig.build.json",
-    "start": "node --import @azure/monitor-opentelemetry/loader dist/index.js",
+    "start": "node dist/index.js",
+    "pretypecheck": "npm run build --workspace=@turnosmart/shared",
     "typecheck": "node scripts/ensure-prisma-client.mjs && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -20,6 +21,9 @@
   "license": "ISC",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

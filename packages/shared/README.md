@@ -43,10 +43,11 @@ Esta aprobacion parcial no cierra los acuerdos con A/C documentados en
   representacion de lectura: timestamps UTC ISO 8601 con milisegundos y Z,
   horas semanales HH:mm locales y dias 0 domingo a 6 sabado.
 
-Para servicios, B03 ya implementa requests, envelopes y validadores en `services.ts`,
-usados por la API; ver [alcance B03](../../apps/backend/src/modules/services/README.md).
-Para disponibilidad y slots, requests, envelopes, errores y validadores quedan pendientes. No se agregan
-enums de roles/estados ni tipos de error alternativos. D07 (concurrencia) y D08
+Los modulos B03-B05 consumen tambien los schemas y tipos de request/response de
+`services.ts`, `availability.ts` y `slots.ts`. Se recuperan las definiciones originales
+de `d67f829` eliminadas en `18a5fc7` (PR #18), conservando los DTO y las validaciones
+existentes. No se agregan enums de roles/estados ni tipos de error alternativos.
+D07 (concurrencia) y D08
 (autorizacion de escrituras directas a Supabase) siguen pendientes y los DTOs
 no los resuelven. La frase de B01 sobre una politica DST "acordada" no se toma
 como evidencia de aprobacion mientras D06 permanezca abierto.
@@ -69,5 +70,9 @@ npm run build:shared
 ```
 
 `dev:frontend`, `dev:backend`, `build`, `typecheck` y `test` de la raíz lo compilan antes de usarlo. Después de cambiar algo en `src/`, volver a compilarlo si una app ya está corriendo.
+
+El `pretypecheck` del backend tambien lo compila cuando se ejecuta directamente
+`npm run typecheck --workspace=apps/backend`. CI y el hook pre-push mantienen el
+typecheck de raiz. `dist/` es generado e ignorado por Git; no se versiona.
 
 Cada cambio de contrato tiene que mantener alineados el backend, el frontend y, para estados y eventos, los enums de `apps/backend/prisma/schema.prisma`.

@@ -42,7 +42,7 @@ Con esta informacion, el negocio puede:
 - Errores uniformes en la API y pantalla de error recuperable en el frontend.
 - Modelo PostgreSQL multi-tenant con Prisma, migraciones, RLS y seed idempotente.
 - Pruebas unitarias, de integracion con PostgreSQL y end-to-end con Playwright.
-- CI con formato, lint, typecheck, tests unitarios y build; deploy manual del frontend.
+- CI con formato, lint, typecheck, tests unitarios y build; CD en Vercel Hobby y Render Free.
 - Docker Compose de desarrollo y Git hooks con Husky, lint-staged y Commitlint.
 
 ### En desarrollo
@@ -58,7 +58,7 @@ Con esta informacion, el negocio puede:
 - Recordatorios por email.
 - Despliegue del backend en Azure App Service y observabilidad.
 
-El frontend tiene un workflow de despliegue manual hacia Vercel (ver [Despliegue del frontend](#despliegue-del-frontend)). No hay recursos de produccion documentados todavia.
+El despliegue continuo desde `dev` se habilita con la configuracion de [Vercel](infra/vercel/README.md) y [Render](infra/render/README.md).
 
 ## Stack
 
@@ -69,7 +69,7 @@ El frontend tiene un workflow de despliegue manual hacia Vercel (ver [Despliegue
 | Datos           | Supabase PostgreSQL y Auth, migraciones, seed y RLS                            | —                                  |
 | IA              | Gemini API (`@google/genai`) con salida validada, timeout y limite por usuario | —                                  |
 | Pruebas         | Vitest, Supertest y Playwright                                                 | Pruebas de turnos y concurrencia   |
-| Infraestructura | Docker Compose, GitHub Actions (CI y deploy manual), Vercel                    | Azure App Service y observabilidad |
+| Infraestructura | Docker Compose, GitHub Actions, Vercel Hobby y Render Free                     | Azure App Service y observabilidad |
 
 ## Estructura
 
@@ -80,7 +80,7 @@ packages/shared/     Contratos, validaciones y tipos compartidos
 docs/                Arquitectura, contratos, costos y backlog
 infra/docker/        Docker de desarrollo
 tests/               Estrategia de pruebas
-.github/workflows/   CI y deploy manual del frontend
+.github/workflows/   CI y despliegue Vercel
 AI-DECISIONS.md      Decisiones asistidas por IA
 .codex/agents/       Configuraciones de agentes para revision del modulo B
 .husky/              Hooks de calidad y Conventional Commits
@@ -136,11 +136,13 @@ En las URLs de la base, reemplazar `[YOUR-PASSWORD]` (corchetes incluidos) por e
 
 **`apps/frontend/.env.local`** (plantilla: `apps/frontend/.env.example`)
 
-| Variable                        | Valor                                    |
-| ------------------------------- | ---------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | El mismo `SUPABASE_URL` del backend      |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | La misma `SUPABASE_ANON_KEY` del backend |
-| `NEXT_PUBLIC_API_URL`           | `http://localhost:4000`                  |
+| Variable                        | Valor                                                      |
+| ------------------------------- | ---------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | El mismo `SUPABASE_URL` del backend                        |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | La misma `SUPABASE_ANON_KEY` del backend                   |
+| `NEXT_PUBLIC_USE_AZURE`         | `false` (Render); `true` (Azure). Ausente equivale a false |
+| `NEXT_PUBLIC_API_URL_RENDER`    | Origen HTTPS publico Render                                |
+| `NEXT_PUBLIC_API_URL_AZURE`     | Origen HTTPS publico Azure, aun si esta apagado            |
 
 El backend valida sus variables al arrancar: si falta alguna, termina con `Configuración de entorno inválida: <variables>` sin mostrar valores.
 
@@ -236,7 +238,7 @@ npm run build
 npm test
 ```
 
-`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions ejecuta estos controles en pushes y pull requests hacia `dev` y `main`. No hay CD automatico: el deploy del frontend es manual (`.github/workflows/frontend-deploy.yml`).
+`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions valida pushes a `dev` y `main`, y PRs hacia esas ramas, incluidos borradores. Una feature sin PR no tiene CI remoto ni Preview.
 
 `format` escribe archivos; `format:check` solo verifica. Si hay cambios ajenos en curso, formatear unicamente los archivos propios con `npx prettier --write <archivos>`. No hay suites de tests propias en frontend o shared ejecutadas por `npm test`; E2E es un comando separado. Los comandos de raiz compilan shared en el orden necesario.
 
@@ -260,36 +262,18 @@ Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API
 
 ## Despliegue del frontend
 
-El frontend se despliega en Vercel solo de forma manual, con el workflow **Frontend deploy (manual)** (`.github/workflows/frontend-deploy.yml`). No se despliega en cada push. Requiere una API publica con HTTPS: desde Vercel no se puede usar `http://localhost:4000`.
+Con CD activado, **Frontend preview** (`workflow_run`, definido en la rama por
+defecto) corre tras **TurnoSmart CI**. Una PR interna elegible desde `feat/**` publica Preview si tiene
+cambios relevantes de frontend. Production se publica por dispatch desde la rama
+configurada. Render observa CI y despliega Dev desde `dev` segun sus filtros.
+Ver [Vercel Hobby](infra/vercel/README.md) y [Render Free](infra/render/README.md)
+para activacion, variables, CORS, validacion y rollback.
 
-**1. Proyecto en Vercel**, sin repositorio de Git conectado (por ejemplo, creado con `npx vercel link --cwd apps/frontend`). En Settings → Build and Deployment:
+Durante `next dev`, el frontend se conecta directamente a `http://localhost:4000`;
+los builds de produccion siguen requiriendo origenes HTTPS publicos.
 
-| Ajuste                                   | Valor                                                                    |
-| ---------------------------------------- | ------------------------------------------------------------------------ |
-| Framework Preset                         | Next.js                                                                  |
-| Root Directory                           | `apps/frontend`                                                          |
-| Include files outside the root directory | Activado                                                                 |
-| Install Command (Override)               | `cd ../.. && npm ci`                                                     |
-| Build Command (Override)                 | `cd ../.. && npm run build:shared && cd apps/frontend && npx next build` |
-| Node.js Version                          | 22.x                                                                     |
-
-**2. Secret y variables en GitHub** (repositorio → Settings → Secrets and variables → Actions):
-
-| Nombre              | Tipo     | Valor                                                     |
-| ------------------- | -------- | --------------------------------------------------------- |
-| `VERCEL_TOKEN`      | Secret   | Token de Vercel (Account Settings → Tokens)               |
-| `VERCEL_ORG_ID`     | Variable | `orgId` de `apps/frontend/.vercel/project.json` o Team ID |
-| `VERCEL_PROJECT_ID` | Variable | `projectId` de `apps/frontend/.vercel/project.json`       |
-| `SUPABASE_URL`      | Variable | URL del proyecto de Supabase                              |
-| `SUPABASE_ANON_KEY` | Variable | Anon / publishable key de Supabase                        |
-
-Nunca cargar en GitHub ni en Vercel la `service_role`, las URLs de la base ni la clave de Gemini: son solo del backend.
-
-**3. Desplegar:** Actions → **Frontend deploy (manual)** → Run workflow, con `target: vercel` y `api_url` igual a la URL HTTPS de la API. El workflow tiene que estar en la rama por defecto para que aparezca el boton. La URL publicada queda en el resumen de la ejecucion.
-
-**4. Despues de cada despliegue nuevo:** agregar la URL de Vercel a `CORS_ORIGIN` del backend y configurarla como Site URL en Supabase → Authentication → URL Configuration. Si cambia la URL de la API, volver a correr el workflow: `NEXT_PUBLIC_API_URL` queda fija en el build.
-
-El workflow tambien admite `target: azure` (Web App); requiere `output: 'standalone'` en `apps/frontend/next.config.ts`.
+La CLI usa la **raiz del monorepo** y toma las variables publicas de Production
+o Preview en Vercel antes de compilar con Node 22.
 
 ## Datos y multi-tenancy
 

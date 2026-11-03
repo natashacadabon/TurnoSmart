@@ -1,0 +1,326 @@
+# Frontend de demo — Vercel Hobby (preparado, sin desplegar)
+
+## Elegibilidad y alcance
+
+Segun [Hobby](https://vercel.com/docs/plans/hobby) y las
+[reglas de uso](https://vercel.com/docs/limits/fair-use-guidelines), Hobby se limita
+a uso personal no comercial. La demo academica declarada es compatible en principio
+si no hay monetizacion, cliente pago ni trabajo remunerado destinado al proyecto.
+El titular debe confirmar esas condiciones y las de su cuenta antes de publicar;
+si no se cumplen, detenerse y acordar destino, sin upgrade ni Azure automaticos.
+Usar un operador/titular Hobby, dominio incluido *.vercel.app y respetar cuotas;
+no activar add-ons, equipo Pro, dominios comprados ni servicios de almacenamiento.
+
+## Proyecto y monorepo
+
+Preparar/configurar **manualmente** el proyecto del titular, sin publicar ahora:
+
+| Setting Vercel                              | Valor                                                                |
+| ------------------------------------------- | -------------------------------------------------------------------- |
+| Framework                                   | Next.js                                                              |
+| Root Directory                              | apps/frontend                                                        |
+| Include source files outside Root Directory | Activado (packages/shared y lock raiz)                               |
+| Node.js                                     | 22.x (tambien declarado en frontend/package.json)                    |
+| Install Command                             | vercel.json: cd ../.. && npm ci --include=dev                        |
+| Build Command                               | vercel.json: compilar shared desde raiz y npm run build del frontend |
+| Output Directory                            | Default de Next.js (.next), sin standalone/static export             |
+| Git deployment                              | Deshabilitado en vercel.json; preferir proyecto sin Git conectado    |
+
+El lock unico se instala desde raiz; shared exporta dist y se compila primero.
+`--include=dev` conserva TypeScript y herramientas de Next/shared aun con
+NODE_ENV=production u omit=dev. No configurar NPM_CONFIG_IGNORE_SCRIPTS ni
+deshabilitar lifecycle scripts. El prepare raiz usa el
+[installer recomendado por Husky](https://typicode.github.io/husky/how-to.html#ci-server-and-docker):
+omite CI, produccion, Vercel/Render o HUSKY=0 antes de importar Husky, aunque el
+paquete no este instalado. En desarrollo local la ausencia de Husky es un error
+explicito que pide `npm ci --include=dev`; no se oculta una instalacion rota.
+Los hooks locales siguen inicializandose al instalar con devDependencies. Usar
+Node 22.23.4 (`.nvmrc`), que tambien cumple el minimo de lint-staged.
+No se construye/despliega el backend ni se ejecutan migraciones; los lifecycle
+de dependencias permanecen habilitados.
+Next detecta la raiz del workspace mediante package-lock.json, sin alias nuevos.
+[Referencia monorepos](https://vercel.com/docs/monorepos/monorepo-faq).
+
+## Si el log muestra Node 26 o prepare: husky
+
+Los cuatro workspaces declaran `engines.node: "22.x"`. Vercel usa engines para
+[seleccionar Node](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions);
+no admite un campo nodeVersion en vercel.json. En Settings → Build and Deployment,
+seleccionar Node.js 22.x y Root Directory `apps/frontend`, habilitando archivos
+fuera de esa carpeta. Conservar el Install Command y Build Command del vercel.json
+versionado; retirar overrides antiguos con `npm install` o `husky`.
+
+Antes de un despliegue manual autorizado, comprobar el SHA del deployment y que
+esa revision contiene `prepare: node .husky/install.mjs` y este vercel.json. Un
+Redeploy de un deployment viejo reutiliza su revision: no toma cambios locales ni
+automaticamente otro commit. Para la nueva revision, reconstruir sin cache viejo
+al cambiar Node o la instalacion. El log esperado muestra Node 22.x,
+`npm ci --include=dev` y `node .husky/install.mjs`, nunca `sh -c husky`.
+No se modifican Settings de la cuenta ni se despliega desde estas comprobaciones.
+
+## Variables publicas durante el build
+
+En Vercel → Settings → Environment Variables, configurar **Production** y
+**Preview** por separado antes del build. Preview usa el Render Dev compartido
+y Supabase Dev. Production usa exclusivamente el backend y Supabase de Production.
+Si solo existe el servicio demo, reservarlo para Dev y dejar pendiente la
+publicacion de Production hasta contar con un entorno separado.
+
+| Variable                      | Valor                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| NEXT_PUBLIC_USE_AZURE         | false u omitida en ambos entornos. Azure se selecciona en el dispatch de checkpoint |
+| NEXT_PUBLIC_API_URL_RENDER    | Origen HTTPS de Render, sin /api, query ni credenciales                             |
+| NEXT_PUBLIC_API_URL_AZURE     | Origen HTTPS de Azure, tambien obligatorio aunque este apagado                      |
+| NEXT_PUBLIC_SUPABASE_URL      | Origen HTTPS del mismo proyecto Supabase que utiliza el backend                     |
+| NEXT_PUBLIC_SUPABASE_ANON_KEY | Publishable sb_publishable_* o JWT legacy con role anon de ese proyecto             |
+
+Todo NEXT_PUBLIC_* queda visible en el navegador. **Nunca** configurar service_role,
+sb_secret_*, DATABASE_URL, DIRECT_URL, claves Gemini o credenciales Azure en este
+proyecto, ni siquiera como variables privadas. No copiar .env del backend.
+La [clave publica](https://supabase.com/docs/guides/api/api-keys) no reemplaza RLS,
+validacion de tokens ni aislamiento del backend.
+
+prebuild usa el cargador de entorno de Next con su precedencia y falla ante
+variables ausentes, URLs locales/no HTTPS/no origen o claves privilegiadas. El
+decode del JWT solo previene una mala configuracion; no valida firmas. El cliente
+no usa la variable antigua NEXT_PUBLIC_API_URL ni fallback a localhost. verify:public-build comprueba los
+valores esperados en JS y el origen registrado por postbuild, sin publicar claves en metadata.
+El selector vive en src/lib/backend-url.mjs y lo reutiliza el cliente HTTP. No hay
+fallback automatico: un fallo se informa sin llamar al proveedor inactivo. Ambas
+URLs se validan solo por formato/seguridad, nunca por disponibilidad de red.
+Cambiar cualquier NEXT_PUBLIC requiere **rebuild y nuevo deploy**; cambiar solo
+el entorno de runtime no reemplaza valores ya incluidos en el bundle.
+
+## Auth y CORS con el backend seleccionado
+
+El flujo implementado es signInWithPassword, sesion local/renovacion y token Bearer
+a Express. Redirects internos: sin sesion → /login; con sesion sin negocio →
+/onboarding; login con negocio → /customers. No hay OAuth, magic link, recovery ni
+ruta auth/callback implementados; no agregar un callback ficticio a Supabase.
+
+Antes de la demo, el operador debe configurar el dominio estable de Vercel en el
+Supabase existente: Authentication → URL Configuration → Site URL = origen HTTPS
+publicado; Redirect URLs exactas para ese origen y /login si se utilizan enlaces
+de Auth. El login por password no necesita redirectTo. Registrar el valor anterior
+para restaurarlo al terminar si el proyecto se comparte. Evitar wildcards amplios
+en produccion. [Referencia redirects](https://supabase.com/docs/guides/auth/redirect-urls).
+
+En cada backend existente que vaya a usarse (Render/Azure), CORS_ORIGIN debe contener el **origen exacto** del
+frontend (ej. https://turnosmart-demo.vercel.app), sin slash final ni rutas; varios
+origenes se separan por coma. No usar * ni *.vercel.app. Authorization/Content-Type
+y OPTIONS ya estan admitidos; no hacen falta cookies cross-site ni credentials.
+Cada Preview utiliza Render y Supabase de Dev. Para una PR interna elegible,
+Actions publica la URL inmutable y el **Preview estable de la PR** en el resumen.
+El alias `turnosmart-pr-<id-del-repositorio>-<numero-de-pr>.vercel.app`
+se asigna solo tras verificar proyecto, PR y SHA, y volver a comprobar el SHA.
+La URL estable no incluye bypass.
+Vercel asigna estos nombres por disponibilidad y no permite reservarlos.
+Si hay una colision detectada, el job falla sin reemplazar el alias existente.
+
+Abrir el origen HTTPS estable del resumen. Con
+[CORS automático en Render Dev](../render/README.md#cors-automático-de-preview-en-render-dev),
+el backend verifica el alias en Vercel sin editar `CORS_ORIGIN` por PR.
+Retirar el alias en Vercel cuando ya no deba tener acceso.
+Usar cuentas y datos de prueba en Dev.
+[Aliases de Vercel](https://vercel.com/docs/cli/alias).
+
+## Preview estable de la rama dev
+
+Cada push o merge a `dev` ejecuta `Quality Checks`. Cuando ese job termina
+exitosamente para el HEAD vigente, `Frontend preview` publica el commit como
+Preview con las variables de Preview para la rama `dev`. El flujo de PR sigue
+siendo independiente y conserva su alias. El despliegue manual de Production
+sigue su propio workflow.
+
+1. Antes de habilitar CD, revisar **Vercel → Project → Settings → Git** y el
+   origen de los deployments de `dev` en **Deployments**. GitHub Actions debe
+   ser el único publicador de `dev`. Si todavía hay deploys nativos, desactivar
+   esa ruta para `dev` antes de activar el publicador de Actions.
+2. Reutilizar el environment `vercel-preview`, sus credenciales y
+   `VERCEL_CD_ENABLED=true`. Confirmar que el entorno permite ejecutar el
+   publicador desde la rama predeterminada.
+3. Tras el primer merge, comprobar **Actions → TurnoSmart CI → Quality Checks**
+   y luego **Frontend preview → Summary**. Abrir la URL que informa el job.
+   El nombre solicitado es `turnosmart-dev-<id-del-repositorio>.vercel.app`,
+   sujeto a disponibilidad. En Vercel, verificar que el destino sea Preview.
+4. Agregar ese origen exacto, una sola vez, a `CORS_ORIGIN` en Render Dev.
+   Mantener las entradas existentes. Verificar `OPTIONS /api/me` con ese
+   `Origin` y el login con una cuenta Dev. Los aliases de PR siguen usando
+   CORS dinámico.
+5. Con un segundo merge, verificar que cambie el deployment inmutable y
+   que el alias siga igual. Reejecutar el publicador del mismo SHA debe
+   reutilizar el alias vigente. Un run para un HEAD anterior queda descartado.
+
+## Activacion de CD y rollback
+
+1. Confirmar Hobby y el proyecto existente. Usar **GitHub Actions como unico
+   publicador** y desconectar Git en Vercel. Si el proyecto aun tiene Git conectado,
+   alinear Production Branch con la rama del dispatch. El `vercel.json`
+   mantiene los despliegues Git deshabilitados. Configurar los dos scopes publicos
+   de la tabla y mantener Node 22.
+2. En GitHub crear los environments `vercel-production` y `vercel-preview`.
+   Restringir Production a `main` al completar la transicion. Para Preview
+   permitir la rama predeterminada real del repositorio (Settings > Branches;
+   no se asume `dev`) y, si se usan checkpoints manuales, `dev`: los Previews corren en el workflow
+   confiable `Frontend preview` (`workflow_run`), no en `refs/pull/*/merge`. En `vercel-preview` definir
+   `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
+   sin slash final. Los Previews de Render fallan si el scope Preview apunta a
+   otros origenes. Verificar tambien que `DATABASE_URL` de Render Dev apunte
+   a la base Dev. La comprobacion del bundle no puede inspeccionar esa conexion.
+   En `vercel-production` definir `EXPECTED_PRODUCTION_API` y
+   `EXPECTED_PRODUCTION_SUPABASE` con los origenes exactos de Production.
+   Hacer tambien visibles en ese environment `EXPECTED_DEV_API` y
+   `EXPECTED_DEV_SUPABASE`, por ejemplo como variables del repositorio,
+   para rechazar una configuracion de Production que apunte a Dev.
+   Guardar `VERCEL_TOKEN` como secret de cada environment, con alcance al equipo
+   Hobby correspondiente. En `vercel-production` configurar el secret opcional
+   `VERCEL_AUTOMATION_BYPASS` si se protege el acceso a URLs de deploy. La
+   automatizacion solo envia ese header a la URL inmutable HTTPS de Vercel.
+   Los Previews no lo reciben: ejecutan codigo de la PR y podrian leerlo.
+   Configurar `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` como variables GitHub
+   del proyecto existente, iguales para ambos scopes. Los valores
+   `NEXT_PUBLIC_*` se mantienen en Vercel, no se duplican en GitHub.
+3. Proteger `dev` y `main` y requerir `Quality Checks`. Los PR, incluidos
+   borradores, forks y Dependabot, verifican el merge con el build ficticio.
+   Solo las PR internas elegibles publican. `Frontend preview` arranca al
+   terminar CI y su definicion proviene de la rama por defecto, por lo que una
+   PR no puede modificarla para leer secretos (debe estar fusionada en la rama
+   predeterminada para activarse). Una PR que modifica `.github/` no publica
+   Preview hasta fusionarse, para que no pueda fabricar un Quality Checks exitoso.
+   Tiene cuatro jobs: `select` valida la PR por API;
+   `settings` (con token) solo ejecuta scripts de la rama por defecto y
+   publica los `NEXT_PUBLIC_*` validados; `build` es el unico que ejecuta
+   codigo de la PR y no recibe secretos ni environment; `deploy` (con token)
+   usa solo scripts de la rama por defecto, trata el artefacto como datos y fija
+   proyecto y PR desde variables y `select`. Ningun secreto llega a codigo de
+   la PR; el codigo desplegado en Vercel sigue siendo el de la PR.
+   Las reglas y secretos de environments requieren un plan compatible con la
+   visibilidad del repo. Ver [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+4. Confirmar que el proyecto existente ya tiene un deployment Production READY.
+   Mantener el dispatch existente disponible durante el piloto. Su rama por
+   defecto es `dev` por compatibilidad. Cuando Production tenga backend y DB
+   separados, fijar `VERCEL_PRODUCTION_BRANCH=main`, alinear Vercel y restringir
+   el environment de GitHub a `main`. El dispatch requiere CI de push exitosa
+   para el SHA exacto. Si falta el deployment inicial, aplicar primero esa
+   configuracion y hacer el bootstrap manual desde `main`.
+5. Habilitar `VERCEL_CD_ENABLED=true` como variable del repositorio. Para
+   validar el cambio, comprobar una PR interna en borrador, una externa,
+   un cambio solo backend y dos pushes consecutivos a la misma PR. Revisar
+   que Vercel registre un solo deploy por revision elegible.
+
+| Evento                                     | CI                            | Publicacion                                                            |
+| ------------------------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
+| Push a `feat/**` sin PR                    | Sin CI remoto                 | Sin Preview                                                            |
+| PR hacia `dev` o `main`, incluido borrador | Quality Checks sobre el merge | Preview para feature interna con cambios de frontend, salvo Dependabot |
+| Push a `dev`                               | Quality Checks                | Render Dev nativo si coincide su filtro y pasa CI                      |
+| Push a `main`                              | Quality Checks                | Production queda disponible para dispatch manual                       |
+
+El filtro de frontend incluye `apps/frontend/**`, `packages/shared/**`,
+workflows y archivos de build de raiz. Se calcula respecto a la base de la
+PR. Si hay PR a ambas bases para el mismo SHA, se prioriza el PR elegible
+hacia `dev`. Las corridas obsoletas se cancelan por rama y se verifica el SHA
+del PR antes de subir el artefacto. El Preview compila el head del PR; Quality
+Checks ya valido el merge.
+
+`pull` toma el scope correspondiente. El workflow comprueba el proyecto,
+mantiene los valores publicos, descarta el resto del cache y usa los comandos
+versionados de Node 22/workspaces. La CLI instala y compila una vez; `--prebuilt`
+sube ese artefacto. Production se sube con `--skip-domain`, se verifica /login y
+los hashes del JavaScript servido, y solo entonces se promueve. Preview exige
+una Production lista para evitar la promocion implicita del primer despliegue.
+
+Para un checkpoint con la API Azure ya disponible, usar el mismo dispatch
+desde `dev` con `target=azure` e ingresar ambas URLs HTTPS. El build usa una
+Preview con esas URLs y el Supabase del scope Preview. `frontend_target=azure`
+sigue bloqueado. Los recursos de Azure se administran con el procedimiento B07.
+
+Para pausar la publicacion automatica en Vercel, desactivar
+`VERCEL_CD_ENABLED` y cancelar los runs en curso. Si se necesita
+restaurar Production, cancelar los runs en curso y
+usar Instant Rollback en el Dashboard sobre la Production inmediatamente
+anterior, que es la admitida en Hobby. Confirmar el dominio y /login, corregir o revertir el commit en la rama de Production
+y republicar una vez validado antes de reactivar CD. Preview puede eliminarse
+desde Deployments. Revisar [cuotas Hobby](https://vercel.com/docs/plans/hobby)
+y [retencion](https://vercel.com/changelog/hobby-projects-now-retain-fewer-deployments-to-free-up-storage).
+
+Validar desde navegador publicado: /demo y /login; /customers sin sesion redirige;
+login, onboarding solo si corresponde, clientes, recarga y logout. DevTools Network
+debe mostrar Auth a Supabase y API solo al backend elegido, sin localhost ni mixed content.
+OPTIONS a /api/customers con Origin Vercel y Access-Control-Request-Headers:
+authorization,content-type debe responder 204 y Access-Control-Allow-Origin exacto;
+un origen ajeno debe ser 403. /health y /ready del backend elegido deben dar 200 antes de operar datos.
+
+## Pruebas locales aisladas (sin cuenta ni cambios en Cloud)
+
+```powershell
+npm run test:config --workspace=apps/frontend
+docker build -f infra/vercel/Dockerfile.check -t turnosmart-vercel-check .
+docker run -d --name turnosmart-vercel-check -p 127.0.0.1:43128:43128 -e NEXT_PUBLIC_USE_AZURE=true -e NEXT_PUBLIC_API_URL_RENDER=https://runtime-ignored.invalid turnosmart-vercel-check
+npm run test:deploy --workspace=apps/frontend
+docker rm -f turnosmart-vercel-check
+npm run typecheck
+npm run lint
+```
+
+El Dockerfile usa Node 22 Linux, allowlist sin .env y URLs/clave ficticias. Compila
+shared/Next, prueba configuracion y verifica el bundle sin tocar el dev server.
+Playwright usa Chrome instalado (E2E_BROWSER_CHANNEL=msedge como alternativa),
+intercepta Auth/API y bloquea requests externos inesperados. Prueba que cambiar la
+seleccion en runtime no altera el build. Para probar Azure, construir con
+`--build-arg USE_AZURE=true` y ejecutar Playwright con
+`E2E_API_URL=https://turnosmart-api.azurewebsites.net`. Ambos modos comprueban
+que una falla no dispara fallback. Cambiar el flag en Vercel requiere reconstruir. No reemplaza el E2E real con Supabase/cuenta
+provisionada (`test:e2e`), que queda para la ventana con configuracion real.
+
+## Eliminacion y costo
+
+Al cerrar, eliminar el proyecto de demo desde Vercel Settings → General → Delete
+Project, verificando que desaparecen deployments y aliases de esa demo (borrar
+solo el proyecto propio identificado). Desconectar Git si se hubiera conectado,
+revocar el token de despliegue temporal si era exclusivo y quitar las variables
+GitHub de ese proyecto. Retirar solo sus origenes de CORS_ORIGIN/Redirect URLs y
+restaurar Site URL previa; no borrar Supabase ni datos compartidos.
+Quitar .vercel/ local solo si ya no se usara ese vinculo; confirmar que las URLs
+de demo dejan de servir. Registrar uso/cuotas y cierre en docs/costs.md.
+Hobby no habilita gasto pago automatico; si no alcanza o deja de ser elegible,
+detener la demo y revisar alternativas con el equipo. La limpieza del backend
+Azure sigue el procedimiento B07, por separado.
+
+## Diagnóstico de artefactos Preview
+
+El build de Preview usa `vercel build --standalone` para que las dependencias
+trazadas por Vercel queden dentro de `.vercel/output`. Sin este flag, CLI
+65.9.0 puede dejar referencias `filePathMap` en los `.vc-config.json`, por
+ejemplo a `node_modules/client-only/index.js` en la raíz del monorepo. Ese
+directorio existe durante el build pero queda fuera del artefacto que recibe
+el runner de publicación.
+
+Los pasos **Build and verify prebuilt** y **Validate downloaded prebuilt
+output** comprueban la portabilidad antes y después de la transferencia.
+Si fallan, revisar la configuración de función que identifica el mensaje y
+reconstruir el artefacto. Un retry del deploy con el artefacto anterior no
+incorpora los archivos faltantes.
+
+## Limpieza al cerrar una PR
+
+GitHub Actions ejecuta **Clean up PR preview** al cerrar una PR interna, con
+o sin merge. Reutiliza el proyecto y el token del environment `vercel-preview`.
+Mantener el token en ese environment y limitar el acceso a ramas confiables
+y protegidas. Para la limpieza, permitir solo las ramas base confiables
+que reciban PRs con Preview (`dev` y, si corresponde, `main`).
+El job ejecuta el helper de la rama predeterminada y comparte la cola de
+mutaciones por PR con el publicador.
+
+1. Abrir una PR interna de prueba y publicar dos revisiones. Anotar el alias
+   estable y las dos URLs inmutables. Anotar también el alias de `dev` y el de
+   otra PR abierta.
+2. Cerrar la PR de prueba. En **Actions → Clean up PR preview**, comprobar
+   que el job informe los deployments eliminados. En **Vercel → Deployments**,
+   verificar que desaparezcan las dos revisiones y que el alias deje de resolver.
+3. Comprobar que sigan activos `dev`, el alias de la otra PR y Production.
+   Reejecutar el cleanup debe informar cero eliminaciones. Repetir la prueba
+   con una PR fusionada.
+
+Los deployments sin metadata `turnosmartPullRequest` verificable quedan fuera
+de la limpieza. También se preservan los deployments con aliases adicionales
+o con un dominio configurado, para evitar retirar una URL compartida.

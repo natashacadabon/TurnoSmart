@@ -2,9 +2,17 @@
   "name": "@turnosmart/frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "prebuild": "node scripts/check-public-env.mjs",
+    "postbuild": "node scripts/record-public-build.mjs",
+    "verify:public-build": "node scripts/verify-public-build.mjs",
+    "test:config": "node --test scripts/public-env.test.mjs scripts/deploy-config.test.mjs scripts/preview-cleanup.test.mjs",
+    "test:deploy": "playwright test --config=playwright.deploy.config.ts",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
@@ -29,7 +37,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
-    "eslint": "^9",
+    "eslint": "^9.39.5",
     "eslint-config-next": "16.4.3",
     "typescript": "^5"
   }

@@ -1,0 +1,40 @@
+name: Clean up PR preview
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [dev, main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  cleanup:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    concurrency:
+      group: vercel-preview-mutation-${{ github.event.pull_request.number }}
+      queue: max
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: vercel-preview
+    steps:
+      - name: Checkout trusted cleanup script
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Delete verified PR previews
+        uses: actions/github-script@v8
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        with:
+          script: |
+            const { cleanupPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/preview-cleanup.mjs`);
+            const count = await cleanupPreview(github, context, process.env);
+            core.info(`Deployments de PR eliminados: ${count}`);

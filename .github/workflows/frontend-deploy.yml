@@ -1,41 +1,94 @@
-# A07: deploy manual del frontend. Nunca se dispara por push.
-# Vercel Hobby solo si A11 confirmo elegibilidad; si no, usar el target "azure".
-# El target "azure" requiere `output: 'standalone'` en apps/frontend/next.config.ts.
-# B es responsable de los workflows: este archivo se integra con el CD de B08.
-name: Frontend deploy (manual)
+name: Frontend deploy
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: Destino del frontend
+        description: Proveedor de API del frontend
+        type: choice
+        options: [render, azure]
+        required: true
+      frontend_target:
+        description: Destino de publicacion del frontend
         type: choice
         options: [vercel, azure]
         required: true
-      api_url:
-        description: URL HTTPS de la API desplegada en la ventana (NEXT_PUBLIC_API_URL)
-        required: true
+      api_url_render:
+        description: Origen HTTPS de Render (solo checkpoint Azure)
+        required: false
+      api_url_azure:
+        description: Origen HTTPS de Azure (solo checkpoint Azure)
+        required: false
+      hobby_eligible:
+        description: Confirmo uso personal no comercial y elegibilidad Hobby (solo frontend_target vercel)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  id-token: write
-
-concurrency:
-  group: frontend-deploy
-  cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Bloquear Azure y confirmar Hobby
+        env:
+          FRONTEND_TARGET: ${{ inputs.frontend_target }}
+          API_TARGET: ${{ inputs.target }}
+          HOBBY_ELIGIBLE: ${{ inputs.hobby_eligible }}
+          PRODUCTION_BRANCH: ${{ vars.VERCEL_PRODUCTION_BRANCH || 'dev' }}
+        run: |
+          test "$FRONTEND_TARGET" = "vercel" || { echo "Azure frontend bloqueado: faltan infraestructura, ZIP standalone y startup comprobados."; exit 1; }
+          test "$HOBBY_ELIGIBLE" = "true" || { echo "Confirmar elegibilidad Hobby antes de desplegar; no hay upgrade automatico."; exit 1; }
+          if [[ "$API_TARGET" == azure ]]; then
+            PRODUCTION_BRANCH=dev
+          fi
+          test "$GITHUB_REF" = "refs/heads/$PRODUCTION_BRANCH" || { echo "Ref no autorizada para este deploy."; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Exigir CI aprobada para esta revision
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { assertSuccessfulCi } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'ci.yml', head_sha: context.sha,
+              event: 'push', per_page: 100
+            });
+            assertSuccessfulCi(data.workflow_runs, context.sha);
+
   deploy:
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.result == 'success' }}
+
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+    environment: vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}
+    concurrency:
+      group: vercel-${{ inputs.target == 'azure' && 'checkpoint' || 'production' }}
+      cancel-in-progress: false
     env:
-      NEXT_PUBLIC_API_URL: ${{ inputs.api_url }}
-      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
-      RELEASE_SHA: ${{ github.sha }}
+      DEPLOY_TARGET: ${{ inputs.target == 'azure' && 'preview' || 'production' }}
+      VERCEL_CLI_VERSION: '65.9.0'
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -43,55 +96,96 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build shared
-        run: npm run build:shared
-
-      - name: Deploy a Vercel
-        if: inputs.target == 'vercel'
+      - name: Pull Vercel settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: |
-          npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
-          npx vercel@latest build --prod --token="$VERCEL_TOKEN"
-          url=$(npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN")
-          echo "Frontend: $url" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Build standalone para Azure
-        if: inputs.target == 'azure'
-        run: |
-          npm run build --workspace=apps/frontend
-          cd apps/frontend
-          if [ ! -d .next/standalone ]; then
-            echo "Falta output: 'standalone' en next.config.ts" && exit 1
+          : "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}" "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_PROJECT_ID:?Configurar VERCEL_PROJECT_ID}"
+          if [[ "$DEPLOY_TARGET" == preview ]]; then
+            # Vercel puede tratar el primer deployment de un proyecto como Production.
+            scope=()
+            if [[ "$VERCEL_ORG_ID" == team_* ]]; then
+              scope=(--data-urlencode "teamId=$VERCEL_ORG_ID")
+            fi
+            curl -fsS --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" \
+              --get https://api.vercel.com/v7/deployments \
+              "${scope[@]}" --data-urlencode "projectId=$VERCEL_PROJECT_ID" \
+              --data-urlencode target=production --data-urlencode state=READY --data-urlencode limit=1 |
+              jq -e '.deployments | any(.target == "production" and .state == "READY")' >/dev/null ||
+              { echo "Preview requiere un deployment Production previo y listo."; exit 1; }
           fi
-          cp -r .next/static .next/standalone/apps/frontend/.next/static
-          [ -d public ] && cp -r public .next/standalone/apps/frontend/public || true
-          cd .next/standalone && zip -qr "$GITHUB_WORKSPACE/frontend.zip" .
+          branch=()
+          if [[ "$DEPLOY_TARGET" == preview ]]; then
+            branch=(--git-branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}")
+          fi
+          npx --yes "vercel@$VERCEL_CLI_VERSION" pull --yes --environment="$DEPLOY_TARGET" "${branch[@]}" --token="$VERCEL_TOKEN"
 
-      - name: Login Azure (OIDC)
-        if: inputs.target == 'azure'
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Deploy a Azure Web App
-        if: inputs.target == 'azure'
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ vars.AZURE_FRONTEND_APP_NAME }}
-          package: frontend.zip
-          startup-command: node apps/frontend/server.js
-
-      - name: Smoke
-        if: inputs.target == 'azure'
+      - name: Build and verify prebuilt
+        env:
+          CHECKPOINT: ${{ inputs.target == 'azure' }}
+          CHECKPOINT_RENDER_URL: ${{ inputs.api_url_render }}
+          CHECKPOINT_AZURE_URL: ${{ inputs.api_url_azure }}
+          EXPECTED_DEV_API: ${{ vars.EXPECTED_DEV_API }}
+          EXPECTED_DEV_SUPABASE: ${{ vars.EXPECTED_DEV_SUPABASE }}
+          EXPECTED_PRODUCTION_API: ${{ vars.EXPECTED_PRODUCTION_API }}
+          EXPECTED_PRODUCTION_SUPABASE: ${{ vars.EXPECTED_PRODUCTION_SUPABASE }}
         run: |
-          url="https://${{ vars.AZURE_FRONTEND_APP_NAME }}.azurewebsites.net/"
-          for i in $(seq 1 10); do curl -fsS -o /dev/null "$url" && exit 0; sleep 15; done
-          echo "Smoke fallo: $url" && exit 1
+          env_file=$(node apps/frontend/scripts/deploy-config.mjs prepare)
+          set -a
+          # shellcheck source=/dev/null
+          source "$env_file"
+          set +a
+          flags=()
+          if [[ "$DEPLOY_TARGET" == production ]]; then
+            flags=(--prod)
+          fi
+          npx --yes "vercel@$VERCEL_CLI_VERSION" build "${flags[@]}" --output .vercel/output
+          npm run verify:public-build --workspace=apps/frontend
+          node apps/frontend/scripts/deploy-config.mjs output
+
+      - name: Check current revision
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { assertCurrentRevision } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            await assertCurrentRevision(github, context);
+
+      - name: Upload prebuilt
+        id: upload
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          flags=()
+          if [[ "$DEPLOY_TARGET" == production ]]; then
+            flags=(--prod --skip-domain)
+          fi
+          url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --yes "${flags[@]}" --token="$VERCEL_TOKEN")
+          [[ "$url" =~ ^https://[a-zA-Z0-9-]+\.vercel\.app/?$ ]]
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published bundle
+        env:
+          DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
+        run: node apps/frontend/scripts/deploy-config.mjs published
+
+      - name: Check current Production branch before promotion
+        if: env.DEPLOY_TARGET == 'production'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { assertCurrentRevision } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            await assertCurrentRevision(github, context);
+
+      - name: Promote Production
+        if: env.DEPLOY_TARGET == 'production'
+        env:
+          DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes "vercel@$VERCEL_CLI_VERSION" promote "$DEPLOYMENT_URL" --yes --token="$VERCEL_TOKEN"
+
+      - name: Report deployment URL
+        env:
+          DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
+        run: |
+          echo "Frontend ($DEPLOY_TARGET): $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"

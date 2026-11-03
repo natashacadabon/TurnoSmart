@@ -14,6 +14,21 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
   SUPABASE_URL: z.url(),
+  CORS_ENVIRONMENT: z.enum(['dev', 'production']).default('production'),
+  CORS_VERCEL_PROJECT_ID: z
+    .string()
+    .regex(/^prj_[A-Za-z0-9]+$/)
+    .optional(),
+  CORS_VERCEL_TEAM_ID: z
+    .string()
+    .regex(/^team_[A-Za-z0-9]+$/)
+    .optional(),
+  CORS_VERCEL_TOKEN: z.string().trim().min(1).optional(),
+  CORS_VERCEL_REPOSITORY_ID: z
+    .string()
+    .regex(/^[1-9]\d*$/)
+    .refine((id) => Number.isSafeInteger(Number(id)))
+    .optional(),
   SUPABASE_ANON_KEY: z.string().min(1),
   DATABASE_URL: z.string().min(1),
   // Gemini (A08): sin clave, la explicación de riesgo responde 503 AI_UNAVAILABLE.
@@ -33,6 +48,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (!result.success) {
     const fields = result.error.issues.map((i) => i.path.join('.')).join(', ');
     throw new Error(`Configuración de entorno inválida: ${fields}`);
+  }
+  if (
+    result.data.CORS_ENVIRONMENT === 'dev' &&
+    (!result.data.CORS_VERCEL_PROJECT_ID || !result.data.CORS_VERCEL_TOKEN)
+  ) {
+    throw new Error('Configuración de entorno inválida: CORS_VERCEL_PROJECT_ID, CORS_VERCEL_TOKEN');
   }
   return result.data;
 }

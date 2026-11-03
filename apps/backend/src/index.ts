@@ -5,6 +5,7 @@ import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { SupabaseTokenVerifier } from './lib/supabase-verifier.js';
+import { vercelPreviewCors } from './lib/vercel-preview-cors.js';
 import { GeminiLlmClient } from './modules/ai/gemini-client.js';
 import { RiskExplainer } from './modules/ai/risk-explainer.js';
 import { PrismaRiskRepository } from './modules/ai/risk-repository.js';
@@ -28,6 +29,15 @@ const explainer = env.GEMINI_API_KEY
 
 const app = createApp({
   corsOrigins: env.CORS_ORIGIN,
+  corsPreviewOrigin:
+    env.CORS_ENVIRONMENT === 'dev' && env.CORS_VERCEL_PROJECT_ID && env.CORS_VERCEL_TOKEN
+      ? vercelPreviewCors({
+          projectId: env.CORS_VERCEL_PROJECT_ID,
+          token: env.CORS_VERCEL_TOKEN,
+          teamId: env.CORS_VERCEL_TEAM_ID,
+          repositoryId: env.CORS_VERCEL_REPOSITORY_ID,
+        })
+      : undefined,
   verifier: new SupabaseTokenVerifier(env.SUPABASE_URL, env.SUPABASE_ANON_KEY),
   identity: new PrismaIdentityRepository(prisma),
   customers: new PrismaCustomerRepository(prisma),
