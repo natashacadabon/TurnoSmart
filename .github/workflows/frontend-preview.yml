@@ -155,9 +155,10 @@ jobs:
           # shellcheck source=/dev/null
           source .vercel/.env.preview.local
           set +a
-          npx --yes "vercel@$VERCEL_CLI_VERSION" build --output .vercel/output
+          npx --yes "vercel@$VERCEL_CLI_VERSION" build --standalone --output .vercel/output
           npm run verify:public-build --workspace=apps/frontend
           node apps/frontend/scripts/deploy-config.mjs output
+          node apps/frontend/scripts/deploy-config.mjs standalone-output
 
       - name: Upload prebuilt output
         uses: actions/upload-artifact@v7
@@ -206,6 +207,9 @@ jobs:
         with:
           name: vercel-output
           path: .vercel/output
+
+      - name: Validate downloaded prebuilt output
+        run: node apps/frontend/scripts/deploy-config.mjs standalone-output
 
       - name: Check current revision
         id: revision
