@@ -156,7 +156,7 @@ describe('integración API-DB: clientes y aislamiento', () => {
     const payload = {
       customerId: customer.body.id,
       serviceId: service.body.data.id,
-      startsAt: '2099-01-05T10:00:00.000Z',
+      startsAt: '2099-01-05T13:00:00.000Z',
     };
     const results = await Promise.all(
       [1, 2].map(() => request(app).post('/api/appointments').set(ownerA).send(payload)),

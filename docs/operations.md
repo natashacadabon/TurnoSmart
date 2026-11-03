@@ -25,6 +25,18 @@ Debe ejecutarse con `DATABASE_URL` configurada y guardarse fuera del repositorio
 Los backups deben cifrarse y probarse mediante una restauración periódica en una
 base descartable.
 
+Para restaurar un backup, usar siempre una base de prueba independiente:
+
+```powershell
+./scripts/restore-db.ps1 `
+  -BackupFile ./backups/turnosmart-YYYYMMDD-HHmmss.dump `
+  -TargetDatabaseUrl $env:TEST_DATABASE_URL `
+  -ConfirmRestore RESTORE_TEST_DATABASE
+```
+
+El parámetro `-ConfirmRestore RESTORE_TEST_DATABASE` evita ejecutar por accidente
+una restauración destructiva sobre una base productiva.
+
 ## Recorrido de demo
 
 1. Iniciar sesión y completar onboarding.
@@ -37,3 +49,10 @@ base descartable.
 8. Revisar `/health`, `/ready` y `/metrics`.
 
 No se deben incluir tokens, notas privadas ni datos personales en capturas o logs.
+
+## Azure Monitor
+
+Configurar `APPLICATIONINSIGHTS_CONNECTION_STRING` únicamente en el entorno del
+backend y reiniciar el proceso. Los comandos `dev` y `start` cargan el loader de
+Azure Monitor OpenTelemetry antes de Express. Sin esa variable, la aplicación
+continúa funcionando con logs JSON y métricas locales.

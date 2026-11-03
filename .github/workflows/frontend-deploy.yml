@@ -1,6 +1,6 @@
 # A07: deploy manual del frontend. Nunca se dispara por push.
 # Vercel Hobby solo si A11 confirmo elegibilidad; si no, usar el target "azure".
-# El target "azure" requiere `output: 'standalone'` en apps/frontend/next.config.ts (pendiente).
+# El target "azure" requiere `output: 'standalone'` en apps/frontend/next.config.ts.
 # B es responsable de los workflows: este archivo se integra con el CD de B08.
 name: Frontend deploy (manual)
 
