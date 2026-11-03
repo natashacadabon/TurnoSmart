@@ -5,13 +5,12 @@ import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { runInNewContext } from 'node:vm';
 import {
   affectsFrontend,
   assertCurrentRevision,
   assertSuccessfulCi,
-  frontendChanged,
   prepareVercel,
+  selectPreview,
   verifyOutput,
   verifyPublished,
 } from './deploy-config.mjs';
@@ -41,7 +40,7 @@ function fixture(t) {
   return { root, write };
 }
 
-test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus dependencias', () => {
+test('Production manual y Render quedan limitados a dev y sus dependencias', () => {
   const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
   const workflow = yaml.load(
     readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
@@ -53,21 +52,11 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   assert.deepEqual(ci.on.pull_request.branches, ['dev', 'main']);
   const vercel = JSON.parse(readFileSync(join(repo, 'apps/frontend/vercel.json'), 'utf8'));
   assert.equal(vercel.git.deploymentEnabled, false);
-  assert.equal(ci.jobs.vercel.needs, 'quality');
-  assert.deepEqual(Object.keys(ci.jobs), ['quality', 'vercel']);
+  assert.deepEqual(Object.keys(ci.jobs), ['quality']);
   assert.equal(ci.jobs.quality.name, 'Quality Checks');
   assert.equal(ci.jobs.quality.needs, undefined);
   assert.equal(ci.jobs.quality.if, undefined);
   assert.equal(ci.on.pull_request.types, undefined);
-  assert.deepEqual(ci.jobs.vercel.secrets, {
-    VERCEL_TOKEN: '${{ secrets.VERCEL_TOKEN }}',
-    VERCEL_AUTOMATION_BYPASS: '${{ secrets.VERCEL_AUTOMATION_BYPASS }}',
-  });
-  assert.deepEqual(workflow.on.workflow_call.secrets, {
-    VERCEL_TOKEN: { required: false },
-    VERCEL_AUTOMATION_BYPASS: { required: false },
-  });
-  assert.equal(ci.jobs.vercel.uses, './.github/workflows/frontend-deploy.yml');
   assert(ci.concurrency['cancel-in-progress']);
   assert.equal(render.branch, 'dev');
   assert.equal(render.plan, 'free');
@@ -76,7 +65,7 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   assert(render.buildFilter.paths.includes('apps/backend/**'));
   assert(render.buildFilter.paths.includes('packages/shared/**'));
   assert(!render.buildFilter.paths.some((path) => path.startsWith('apps/frontend')));
-  assert.deepEqual(Object.keys(workflow.on), ['workflow_call', 'workflow_dispatch']);
+  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
   const inputs = workflow.on.workflow_dispatch.inputs;
   assert.deepEqual(inputs.target.options, ['render', 'azure']);
   assert.deepEqual(inputs.frontend_target.options, ['vercel', 'azure']);
@@ -85,10 +74,7 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   assert.deepEqual(preflight.permissions, { contents: 'read', actions: 'read' });
   assert(preflight.steps[0].run.includes('Azure frontend bloqueado'));
   assert.equal(deploy.needs, 'preflight');
-  assert(!deploy.if.includes("github.event_name == 'push'"));
-  assert(!deploy.if.includes("inputs.environment == 'production'"));
-  assert(deploy.if.includes('github.event.pull_request.head.repo.full_name == github.repository'));
-  assert(deploy.if.includes("github.event.pull_request.user.login != 'dependabot[bot]'"));
+  assert(!deploy.if.includes('pull_request'));
   assert(!Object.hasOwn(deploy.env, 'VERCEL_TOKEN'));
   for (const job of [preflight, deploy]) {
     const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
@@ -123,26 +109,12 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   }
 });
 
-test('El alias de Preview solo se actualiza despues de verificar el bundle', () => {
-  const workflow = yaml.load(
-    readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
-  );
-  const steps = workflow.jobs.deploy.steps;
-  const alias = steps.findIndex((step) => step.id === 'pr-alias');
-  assert(alias > steps.findIndex((step) => step.name === 'Verify published bundle'));
-  assert.equal(
-    steps[alias].if,
-    "github.event_name == 'pull_request' && env.DEPLOY_TARGET == 'preview'",
-  );
-  assert(steps.find((step) => step.id === 'upload').run.includes('turnosmartMergeSha=$GITHUB_SHA'));
-});
-
 test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', async () => {
   const alias = 'turnosmart-pr-123-23.vercel.app';
   const host = 'fixture-deployment.vercel.app';
   const context = {
     eventName: 'pull_request',
-    sha: 'merge-sha',
+    sha: 'head',
     repo: { owner: 'owner', repo: 'repo' },
     payload: {
       repository: { id: 123, full_name: 'owner/repo' },
@@ -184,7 +156,6 @@ test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', a
     },
     { current: { ...oldAlias, projectId: 'prj_other' }, error: /Alias ocupado/ },
     { configuredDomain: true, error: /dominio configurado/ },
-    { stale: true, error: /obsoleta/ },
     { headChanged: true, error: /obsoleta/ },
     {
       source: { ...deployment, meta: { ...deployment.meta, turnosmartMergeSha: 'old' } },
@@ -205,7 +176,6 @@ test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', a
                 state: 'open',
                 base: { ref: 'dev' },
                 head: { sha: scenario.headChanged ? 'newer' : 'head' },
-                merge_commit_sha: scenario.stale ? 'newer' : context.sha,
               },
             };
           },
@@ -244,146 +214,132 @@ test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', a
   }
 });
 
-test('Caller y workflow reutilizable protegen Preview y dispatch', () => {
-  const read = (name) => yaml.load(readFileSync(join(repo, '.github/workflows', name), 'utf8'));
-  const ci = read('ci.yml');
-  const caller = ci.jobs.vercel.if;
-  const deploy = read('frontend-deploy.yml').jobs.deploy.if;
-  const pr = {
-    head: { repo: { full_name: 'owner/repo' } },
-    user: { login: 'author' },
-  };
-  const github = {
-    event_name: 'pull_request',
-    base_ref: 'dev',
-    repository: 'owner/repo',
-    actor: 'maintainer',
-    triggering_actor: 'other-maintainer',
-    event: { pull_request: pr },
-  };
-  const evaluate = (expression, overrides = {}) =>
-    runInNewContext(expression.trim().slice(3, -2), {
-      github,
-      inputs: { environment: 'preview' },
-      needs: {
-        quality: { result: 'success', outputs: { vercel: 'preview' } },
-        preflight: { result: 'skipped' },
-      },
-      always: () => true,
-      cancelled: () => false,
-      ...overrides,
-    });
-  for (const condition of [caller, deploy]) {
-    assert.equal(evaluate(condition), true);
+test('Preview separa codigo de la PR, secretos y definicion del workflow', () => {
+  const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
+  const preview = yaml.load(
+    readFileSync(join(repo, '.github/workflows/frontend-preview.yml'), 'utf8'),
+  );
+  const text = readFileSync(join(repo, '.github/workflows/frontend-preview.yml'), 'utf8');
+  // La definicion privilegiada nunca viene de la PR: solo workflow_run tras CI.
+  assert.deepEqual(Object.keys(preview.on), ['workflow_run']);
+  assert.deepEqual(preview.on.workflow_run.workflows, [ci.name]);
+  assert.deepEqual(preview.permissions, { contents: 'read' });
+  assert(!text.includes('pull_request_target'));
+  assert(!text.includes('VERCEL_AUTOMATION_BYPASS'));
+  assert.deepEqual(Object.keys(preview.jobs), ['select', 'settings', 'build', 'deploy']);
+  const { select, settings, build, deploy } = preview.jobs;
+  assert(select.if.includes("github.event.workflow_run.conclusion == 'success'"));
+  assert(select.if.includes("github.event.workflow_run.event == 'pull_request'"));
+  assert.equal(settings.if, "needs.select.outputs.sha != ''");
+  assert.deepEqual(build.needs, ['select', 'settings']);
+  assert.deepEqual(deploy.needs, ['select', 'build']);
+  // Solo el job que ejecuta codigo de la PR carece de secretos y environment.
+  const checkout = (job) => job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
+  assert.equal(build.environment, undefined);
+  assert.equal(checkout(build).with.ref, '${{ needs.select.outputs.sha }}');
+  assert(!JSON.stringify(build).includes('secrets.'));
+  assert(!JSON.stringify(build).includes('vars.VERCEL'));
+  for (const job of [select, settings, deploy]) {
     assert.equal(
-      evaluate(condition, {
-        github: { ...github, event: { pull_request: { ...pr, draft: true } } },
-      }),
-      true,
-    );
-    for (const pull_request of [
-      { ...pr, user: { login: 'dependabot[bot]' } },
-      { ...pr, head: { repo: { full_name: 'fork/repo' } } },
-    ]) {
-      assert.equal(evaluate(condition, { github: { ...github, event: { pull_request } } }), false);
-    }
-  }
-  for (const result of ['failure', 'skipped', 'cancelled']) {
-    assert.equal(
-      evaluate(caller, { needs: { quality: { result, outputs: { vercel: 'preview' } } } }),
-      false,
+      checkout(job).with.ref,
+      undefined,
+      'Scripts con secretos salen de la rama confiable',
     );
   }
-  assert.equal(evaluate(caller, { needs: { quality: { result: 'success', outputs: {} } } }), false);
-  assert.equal(evaluate(caller, { cancelled: () => true }), false);
-  for (const base_ref of ['dev', 'main']) {
-    assert.equal(evaluate(caller, { github: { ...github, base_ref } }), true);
-    assert.equal(evaluate(deploy, { github: { ...github, base_ref } }), true);
-  }
-  assert.equal(evaluate(deploy, { cancelled: () => true }), false);
-  for (const ref of ['refs/heads/dev', 'refs/heads/main', 'refs/heads/feat/change']) {
-    const push = { ...github, event_name: 'push', ref, event: {} };
-    assert.equal(evaluate(caller, { github: push }), false);
-    assert.equal(evaluate(deploy, { github: push }), false);
-  }
-  for (const result of ['success', 'failure', 'skipped', 'cancelled']) {
-    assert.equal(
-      evaluate(deploy, {
-        github: { ...github, event_name: 'workflow_dispatch' },
-        needs: { preflight: { result } },
-      }),
-      result === 'success',
-    );
-  }
+  for (const job of [select, settings, build, deploy])
+    assert.equal(checkout(job).with['persist-credentials'], false);
+  for (const job of [settings, deploy]) assert.equal(job.environment, 'vercel-preview');
+  // Los jobs con token no instalan ni ejecutan scripts npm de la PR.
+  assert(!JSON.stringify(settings).includes('npm run'));
+  assert(!JSON.stringify(deploy).includes('npm run'));
+  assert(!JSON.stringify(deploy).includes('npm ci'));
+  // El deploy toma proyecto y PR de variables y del job select, no del artefacto.
+  assert(
+    !deploy.steps.some(
+      (step) => step.uses?.includes('download-artifact') && step.with.name === 'vercel-settings',
+    ),
+  );
+  const upload = deploy.steps.find((step) => step.id === 'upload');
+  assert(upload.run.includes('turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER'));
+  assert(upload.run.includes('turnosmartMergeSha=$PR_SHA'));
+  const names = deploy.steps.map((step) => step.name ?? step.id);
+  assert(names.indexOf('Check current revision') < names.indexOf('Upload prebuilt'));
+  assert(names.indexOf('Upload prebuilt') < names.indexOf('Update verified PR alias'));
+  // Quality Checks sigue siendo el unico job de CI; ya no recibe secretos ni llama a Vercel.
+  assert.deepEqual(Object.keys(ci.jobs), ['quality']);
+  assert(!readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8').includes('VERCEL'));
 });
 
-test('Preview tiene un publicador por rama y respeta los filtros del PR', async () => {
-  const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
-  const release = ci.jobs.quality.steps.find((step) => step.id === 'release').with.script;
-  const run = new Function(
-    'github',
-    'context',
-    'core',
-    'process',
-    'load',
-    `return (async () => {${release.replaceAll('await import(', 'await load(')}})();`,
-  );
-  const pr = {
+test('Preview solo se selecciona para PR internas elegibles y prioriza dev', async () => {
+  const sha = 'head';
+  const pr = (overrides = {}) => ({
     number: 23,
     state: 'open',
-    mergeable: true,
     user: { login: 'maintainer' },
-    base: { ref: 'dev', repo: { full_name: 'owner/repo' } },
-    head: { ref: 'feat/change', sha: 'head', repo: { full_name: 'owner/repo' } },
-  };
-  for (const [pull, devPrs, changed, expected] of [
-    [pr, [], true, 'preview'],
-    [{ ...pr, draft: true }, [], true, 'preview'],
-    [{ ...pr, user: { login: 'dependabot[bot]' } }, [], true, undefined],
-    [pr, [], false, undefined],
-    [{ ...pr, base: { ...pr.base, ref: 'main' } }, [], true, 'preview'],
-    [{ ...pr, base: { ...pr.base, ref: 'main' } }, [pr], true, undefined],
-    [{ ...pr, base: { ...pr.base, ref: 'main' } }, [{ ...pr, mergeable: false }], true, 'preview'],
-    [{ ...pr, head: { ...pr.head, repo: { full_name: 'fork/repo' } } }, [], true, undefined],
-  ]) {
-    const outputs = {};
-    const sha = 'merge';
-    await run(
+    base: { ref: 'dev' },
+    head: { ref: 'feat/change', sha, repo: { full_name: 'owner/repo' } },
+    ...overrides,
+  });
+  const run = (overrides = {}) => ({
+    event: 'pull_request',
+    conclusion: 'success',
+    head_sha: sha,
+    path: '.github/workflows/ci.yml@refs/pull/23/merge',
+    head_repository: { full_name: 'owner/repo' },
+    pull_requests: [{ number: 23 }],
+    ...overrides,
+  });
+  const select = (workflowRun, prs, files = [{ filename: 'apps/frontend/src/a.ts' }]) =>
+    selectPreview(
       {
+        paginate: async () => files,
         rest: {
           pulls: {
-            list: async () => ({ data: devPrs }),
-            get: async () => ({ data: devPrs[0] }),
+            get: async ({ pull_number }) => ({ data: prs[pull_number] }),
+            listFiles: () => {},
           },
         },
       },
       {
         repo: { owner: 'owner', repo: 'repo' },
-        eventName: 'pull_request',
-        payload: { pull_request: pull },
-        ref: 'refs/pull/23/merge',
-        sha,
+        sha: 'default-branch',
+        payload: { workflow_run: workflowRun, repository: { id: 1, full_name: 'owner/repo' } },
       },
-      { setOutput: (name, value) => (outputs[name] = value), info: () => {} },
-      { env: { GITHUB_WORKSPACE: repo } },
-      async (module) =>
-        module === 'node:child_process'
-          ? {
-              execFileSync: (_git, args) => {
-                assert.deepEqual(args, ['merge-base', `origin/${pull.base.ref}`, sha]);
-                return 'base';
-              },
-            }
-          : {
-              frontendChanged: (base, current) => {
-                assert.equal(base, 'base');
-                assert.equal(current, sha);
-                return changed;
-              },
-            },
     );
-    assert.equal(outputs.target, expected);
-  }
+  const selected = await select(run(), { 23: pr() });
+  assert.equal(selected.eventName, 'pull_request');
+  assert.equal(selected.sha, sha);
+  assert.equal(selected.payload.pull_request.number, 23);
+  assert.deepEqual(selected.repo, { owner: 'owner', repo: 'repo' });
+  const head = (value) => ({ ...pr().head, ...value });
+  for (const [workflowRun, prs, files] of [
+    [run({ conclusion: 'failure' }), { 23: pr() }],
+    [run({ event: 'push' }), { 23: pr() }],
+    [run({ head_repository: { full_name: 'fork/repo' } }), { 23: pr() }],
+    [run({ pull_requests: [] }), {}],
+    [run({ path: '.github/workflows/fake.yml' }), { 23: pr() }],
+    [
+      run(),
+      { 23: pr() },
+      [{ filename: 'apps/frontend/a.ts' }, { filename: '.github/workflows/ci.yml' }],
+    ],
+    [run(), { 23: pr() }, [{ filename: 'apps/frontend/a.ts', previous_filename: '.github/x.yml' }]],
+    [run(), { 23: pr({ state: 'closed' }) }],
+    [run(), { 23: pr({ user: { login: 'dependabot[bot]' } }) }],
+    [run(), { 23: pr({ head: head({ sha: 'other' }) }) }],
+    [run(), { 23: pr({ head: head({ ref: 'fix/change' }) }) }],
+    [run(), { 23: pr({ head: head({ repo: { full_name: 'fork/repo' } }) }) }],
+    [run(), { 23: pr({ base: { ref: 'release' } }) }],
+    [run(), { 23: pr() }, [{ filename: 'apps/backend/src/index.ts' }]],
+  ])
+    assert.equal(await select(workflowRun, prs, files), null);
+  const renamed = [{ filename: 'docs/a.ts', previous_filename: 'apps/frontend/src/a.ts' }];
+  assert((await select(run(), { 23: pr() }, renamed)) !== null);
+  const both = await select(run({ pull_requests: [{ number: 24 }, { number: 23 }] }), {
+    23: pr(),
+    24: pr({ number: 24, base: { ref: 'main' } }),
+  });
+  assert.equal(both.payload.pull_request.number, 23);
 });
 
 test('Filtro frontend incluye shared y tooling de raiz, excluye cambios solo backend y docs', () => {
@@ -396,7 +352,6 @@ test('Filtro frontend incluye shared y tooling de raiz, excluye cambios solo bac
     assert(affectsFrontend(path));
   for (const path of ['apps/backend/src/index.ts', 'render.yaml', 'README.md'])
     assert(!affectsFrontend(path));
-  assert(frontendChanged(undefined, 'HEAD'));
 });
 
 test('Rechaza corridas obsoletas para Production y Preview', async () => {
@@ -416,7 +371,6 @@ test('Rechaza corridas obsoletas para Production y Preview', async () => {
             state: 'open',
             base: { ref: 'dev' },
             head: { sha: 'head' },
-            merge_commit_sha: 'new',
           },
         }),
       },
@@ -424,6 +378,7 @@ test('Rechaza corridas obsoletas para Production y Preview', async () => {
   };
   const preview = {
     ...context,
+    sha: 'head',
     eventName: 'pull_request',
     payload: { pull_request: { number: 1, base: { ref: 'dev' }, head: { sha: 'head' } } },
   };

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -28,25 +27,63 @@ export function assertSuccessfulCi(runs, sha) {
 
 export function affectsFrontend(path) {
   return (
-    /^(apps\/frontend\/|packages\/shared\/|\.husky\/|\.github\/workflows\/(ci|frontend-deploy)\.yml$)/.test(
+    /^(apps\/frontend\/|packages\/shared\/|\.husky\/|\.github\/workflows\/(ci|frontend-deploy|frontend-preview)\.yml$)/.test(
       path,
     ) || /^(package(-lock)?\.json|\.npmrc|\.nvmrc|tsconfig[^/]*\.json)$/.test(path)
   );
 }
 
-export function frontendChanged(previous, current) {
-  // Sin una base conocida (por ejemplo, primer push o historial reescrito), reconstruir.
-  if (!previous) return true;
-  try {
-    execFileSync('git', ['merge-base', '--is-ancestor', previous, current], { stdio: 'ignore' });
-  } catch {
-    return true;
+// Se ejecuta en el workflow confiable tras CI. Devuelve un contexto con forma de
+// pull_request (sha = head verificado) o null si la PR no debe publicar Preview.
+export async function selectPreview(github, context) {
+  const run = context.payload.workflow_run;
+  if (run?.event !== 'pull_request' || run.conclusion !== 'success') return null;
+  const { owner, repo } = context.repo;
+  const full = `${owner}/${repo}`;
+  if (run.head_repository?.full_name !== full) return null;
+  // Un workflow de la PR con el mismo nombre no debe contar como Quality Checks.
+  if (!/^\.github\/workflows\/ci\.yml(@.+)?$/.test(run.path ?? '')) return null;
+  const candidates = [];
+  for (const { number } of run.pull_requests ?? []) {
+    const { data } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+    candidates.push(data);
   }
-  return execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', previous, current], {
-    encoding: 'utf8',
-  })
-    .split('\0')
-    .some(affectsFrontend);
+  // Con PR a dev y a main para el mismo SHA se publica la de dev.
+  candidates.sort((a, b) => (a.base.ref === 'dev' ? -1 : 0) - (b.base.ref === 'dev' ? -1 : 0));
+  for (const pr of candidates) {
+    if (
+      pr.state !== 'open' ||
+      !['dev', 'main'].includes(pr.base.ref) ||
+      pr.head.sha !== run.head_sha ||
+      !pr.head.ref.startsWith('feat/') ||
+      pr.head.repo?.full_name !== full ||
+      pr.user.login === 'dependabot[bot]'
+    )
+      continue;
+    const files = await github.paginate(github.rest.pulls.listFiles, {
+      owner,
+      repo,
+      pull_number: pr.number,
+      per_page: 100,
+    });
+    // Una PR que edita CI o workflows podria fabricar el exito: se publica tras fusionarla.
+    const names = files.flatMap((file) => [file.filename, file.previous_filename]).filter(Boolean);
+    if (names.some((name) => name.startsWith('.github/'))) continue;
+    if (
+      !files.some((file) =>
+        [file.filename, file.previous_filename].some((p) => p && affectsFrontend(p)),
+      )
+    )
+      continue;
+    return {
+      ...context,
+      repo: context.repo,
+      eventName: 'pull_request',
+      sha: pr.head.sha,
+      payload: { ...context.payload, pull_request: pr },
+    };
+  }
+  return null;
 }
 
 export async function assertCurrentRevision(github, context) {
@@ -61,7 +98,7 @@ export async function assertCurrentRevision(github, context) {
         ['dev', 'main'].includes(pr.base.ref) &&
         data.base.ref === pr.base.ref &&
         data.head.sha === pr.head.sha &&
-        data.merge_commit_sha === context.sha,
+        data.head.sha === context.sha,
       'Preview obsoleta: ejecutar CI para la revision actual del PR.',
     );
     return;

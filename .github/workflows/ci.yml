@@ -24,47 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-    outputs:
-      vercel: ${{ steps.release.outputs.target }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
           persist-credentials: false
-
-      - name: Select Vercel release
-        id: release
-        if: github.event_name == 'pull_request' && vars.VERCEL_CD_ENABLED == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-            if (!pr.head.ref.startsWith('feat/') ||
-                pr.head.repo.full_name !== pr.base.repo.full_name ||
-                pr.user.login === 'dependabot[bot]') return;
-            if (pr.base.ref === 'main') {
-              const { owner, repo } = context.repo;
-              const { data: devPrs } = await github.rest.pulls.list({
-                owner, repo, state: 'open', base: 'dev', head: `${owner}:${pr.head.ref}`,
-              });
-              for (const devPr of devPrs) {
-                if (devPr.head.sha !== pr.head.sha || devPr.head.repo?.full_name !== pr.head.repo.full_name) continue;
-                const { data: current } = await github.rest.pulls.get({ owner, repo, pull_number: devPr.number });
-                if (current.state === 'open' && current.base.ref === 'dev' &&
-                    current.head.sha === pr.head.sha && current.mergeable !== false &&
-                    current.user.login !== 'dependabot[bot]') return;
-              }
-            }
-            const { execFileSync } = await import('node:child_process');
-            const { frontendChanged } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
-            const base = execFileSync('git', ['merge-base', `origin/${pr.base.ref}`, context.sha], { encoding: 'utf8' }).trim();
-            if (frontendChanged(base, context.sha)) {
-              core.info('Vercel Preview seleccionado para esta revision.');
-              core.setOutput('target', 'preview');
-            }
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -84,14 +49,14 @@ jobs:
       - name: Validate Prisma schema
         run: npm run prisma:validate --workspace=apps/backend
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
-          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/turnosmart
+          DIRECT_URL: postgresql://ci:ci@localhost:5432/turnosmart
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace=apps/backend
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
-          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/turnosmart
+          DIRECT_URL: postgresql://ci:ci@localhost:5432/turnosmart
 
       - name: Type check
         run: npm run typecheck
@@ -120,21 +85,3 @@ jobs:
           NEXT_PUBLIC_API_URL_AZURE: https://turnosmart-azure.invalid
           NEXT_PUBLIC_SUPABASE_URL: https://supabase.invalid
           NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ci_build_only
-
-  vercel:
-    needs: quality
-    if: >-
-      ${{ !cancelled() && needs.quality.result == 'success' && needs.quality.outputs.vercel == 'preview' &&
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.user.login != 'dependabot[bot]' }}
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-    uses: ./.github/workflows/frontend-deploy.yml
-    with:
-      environment: ${{ needs.quality.outputs.vercel }}
-    secrets:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}

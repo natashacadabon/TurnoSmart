@@ -1,16 +1,6 @@
 name: Frontend deploy
 
 on:
-  workflow_call:
-    inputs:
-      environment:
-        type: string
-        required: true
-    secrets:
-      VERCEL_TOKEN:
-        required: false
-      VERCEL_AUTOMATION_BYPASS:
-        required: false
   workflow_dispatch:
     inputs:
       target:
@@ -39,7 +29,6 @@ permissions:
 
 jobs:
   preflight:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -76,12 +65,8 @@ jobs:
 
   deploy:
     needs: preflight
-    if: >-
-      ${{ always() && !cancelled() &&
-        ((github.event_name == 'workflow_dispatch' && needs.preflight.result == 'success') ||
-         (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && inputs.environment == 'preview' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.user.login != 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' }}
+
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -89,13 +74,12 @@ jobs:
         shell: bash
     permissions:
       contents: read
-      pull-requests: read
-    environment: vercel-${{ inputs.environment || (inputs.target == 'azure' && 'preview' || 'production') }}
+    environment: vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}
     concurrency:
-      group: vercel-${{ inputs.environment == 'preview' && (github.head_ref || github.ref_name) || (inputs.target == 'azure' && 'checkpoint' || 'production') }}
-      cancel-in-progress: ${{ inputs.environment == 'preview' }}
+      group: vercel-${{ inputs.target == 'azure' && 'checkpoint' || 'production' }}
+      cancel-in-progress: false
     env:
-      DEPLOY_TARGET: ${{ inputs.environment || (inputs.target == 'azure' && 'preview' || 'production') }}
+      DEPLOY_TARGET: ${{ inputs.target == 'azure' && 'preview' || 'production' }}
       VERCEL_CLI_VERSION: '65.9.0'
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
@@ -170,14 +154,10 @@ jobs:
         id: upload
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           flags=()
           if [[ "$DEPLOY_TARGET" == production ]]; then
             flags=(--prod --skip-domain)
-          elif [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            flags=(--meta "turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER"
-                   --meta "turnosmartMergeSha=$GITHUB_SHA")
           fi
           url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --yes "${flags[@]}" --token="$VERCEL_TOKEN")
           [[ "$url" =~ ^https://[a-zA-Z0-9-]+\.vercel\.app/?$ ]]
@@ -188,18 +168,6 @@ jobs:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
           VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
         run: node apps/frontend/scripts/deploy-config.mjs published
-
-      - name: Update verified PR alias
-        id: pr-alias
-        if: github.event_name == 'pull_request' && env.DEPLOY_TARGET == 'preview'
-        uses: actions/github-script@v8
-        env:
-          DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        with:
-          script: |
-            const { assignPreviewAlias } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/preview-alias.mjs`);
-            core.setOutput('url', await assignPreviewAlias(github, context, process.env));
 
       - name: Check current Production branch before promotion
         if: env.DEPLOY_TARGET == 'production'
@@ -219,9 +187,5 @@ jobs:
       - name: Report deployment URL
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
-          STABLE_PREVIEW_URL: ${{ steps.pr-alias.outputs.url }}
         run: |
           echo "Frontend ($DEPLOY_TARGET): $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
-          if [[ -n "$STABLE_PREVIEW_URL" ]]; then
-            echo "Preview estable de la PR: $STABLE_PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
-          fi

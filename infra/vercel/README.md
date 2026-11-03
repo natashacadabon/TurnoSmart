@@ -112,8 +112,8 @@ y OPTIONS ya estan admitidos; no hacen falta cookies cross-site ni credentials.
 Cada Preview utiliza Render y Supabase de Dev. Para una PR interna elegible,
 Actions publica la URL inmutable y el **Preview estable de la PR** en el resumen.
 El alias `turnosmart-pr-<id-del-repositorio>-<numero-de-pr>.vercel.app`
-se asigna solo despues de verificar el bundle y volver a comprobar el SHA.
-Se usan el token y la proteccion existentes. La URL estable no incluye bypass.
+se asigna solo tras verificar proyecto, PR y SHA, y volver a comprobar el SHA.
+La URL estable no incluye bypass.
 Vercel asigna estos nombres por disponibilidad y no permite reservarlos.
 Si hay una colision detectada, el job falla sin reemplazar el alias existente.
 
@@ -133,8 +133,9 @@ Usar cuentas y datos de prueba en Dev.
    de la tabla y mantener Node 22.
 2. En GitHub crear los environments `vercel-production` y `vercel-preview`.
    Restringir Production a `main` al completar la transicion. Para Preview
-   permitir `refs/pull/*/merge` para PR y conservar `dev` para checkpoints
-   manuales. Retirar la regla `feat/**` cuando se retire el flujo por push. En `vercel-preview` definir
+   permitir la rama predeterminada real del repositorio (Settings > Branches;
+   no se asume `dev`) y, si se usan checkpoints manuales, `dev`: los Previews corren en el workflow
+   confiable `Frontend preview` (`workflow_run`), no en `refs/pull/*/merge`. En `vercel-preview` definir
    `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
    sin slash final. Los Previews de Render fallan si el scope Preview apunta a
    otros origenes. Verificar tambien que `DATABASE_URL` de Render Dev apunte
@@ -145,25 +146,29 @@ Usar cuentas y datos de prueba en Dev.
    `EXPECTED_DEV_SUPABASE`, por ejemplo como variables del repositorio,
    para rechazar una configuracion de Production que apunte a Dev.
    Guardar `VERCEL_TOKEN` como secret de cada environment, con alcance al equipo
-   Hobby correspondiente. En ambos configurar el secret opcional
+   Hobby correspondiente. En `vercel-production` configurar el secret opcional
    `VERCEL_AUTOMATION_BYPASS` si se protege el acceso a URLs de deploy. La
    automatizacion solo envia ese header a la URL inmutable HTTPS de Vercel.
+   Los Previews no lo reciben: ejecutan codigo de la PR y podrian leerlo.
    Configurar `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` como variables GitHub
    del proyecto existente, iguales para ambos scopes. Los valores
    `NEXT_PUBLIC_*` se mantienen en Vercel, no se duplican en GitHub.
 3. Proteger `dev` y `main` y requerir `Quality Checks`. Los PR, incluidos
    borradores, forks y Dependabot, verifican el merge con el build ficticio.
-   Solo las PR internas elegibles publican. El caller pasa unicamente
-   `VERCEL_TOKEN` y `VERCEL_AUTOMATION_BYPASS` por nombre si estan disponibles
-   en su scope. El environment del job de deploy aporta sus propios secretos
-   y tiene precedencia sobre los del repositorio.
-   Restringir el permiso de escritura a colaboradores de confianza: los PR
-   internos pueden editar el workflow que usa el token Preview. Los secretos
-   estan limitados a pasos concretos, pero el build y la publicacion comparten
-   runner. Tratar las ramas autorizadas como codigo de confianza y proteger
-   el environment con aprobacion si sus autores no tienen esa confianza. Las reglas y
-   secretos de environments requieren un plan compatible con la visibilidad del
-   repo. Ver [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+   Solo las PR internas elegibles publican. `Frontend preview` arranca al
+   terminar CI y su definicion proviene de la rama por defecto, por lo que una
+   PR no puede modificarla para leer secretos (debe estar fusionada en la rama
+   predeterminada para activarse). Una PR que modifica `.github/` no publica
+   Preview hasta fusionarse, para que no pueda fabricar un Quality Checks exitoso.
+   Tiene cuatro jobs: `select` valida la PR por API;
+   `settings` (con token) solo ejecuta scripts de la rama por defecto y
+   publica los `NEXT_PUBLIC_*` validados; `build` es el unico que ejecuta
+   codigo de la PR y no recibe secretos ni environment; `deploy` (con token)
+   usa solo scripts de la rama por defecto, trata el artefacto como datos y fija
+   proyecto y PR desde variables y `select`. Ningun secreto llega a codigo de
+   la PR; el codigo desplegado en Vercel sigue siendo el de la PR.
+   Las reglas y secretos de environments requieren un plan compatible con la
+   visibilidad del repo. Ver [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 4. Confirmar que el proyecto existente ya tiene un deployment Production READY.
    Mantener el dispatch existente disponible durante el piloto. Su rama por
    defecto es `dev` por compatibilidad. Cuando Production tenga backend y DB
@@ -186,8 +191,9 @@ Usar cuentas y datos de prueba en Dev.
 El filtro de frontend incluye `apps/frontend/**`, `packages/shared/**`,
 workflows y archivos de build de raiz. Se calcula respecto a la base de la
 PR. Si hay PR a ambas bases para el mismo SHA, se prioriza el PR elegible
-hacia `dev`. Las corridas obsoletas se cancelan por ref y se verifica el SHA
-de merge antes de subir el artefacto.
+hacia `dev`. Las corridas obsoletas se cancelan por rama y se verifica el SHA
+del PR antes de subir el artefacto. El Preview compila el head del PR; Quality
+Checks ya valido el merge.
 
 `pull` toma el scope correspondiente. El workflow comprueba el proyecto,
 mantiene los valores publicos, descarta el resto del cache y usa los comandos

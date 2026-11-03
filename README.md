@@ -262,8 +262,8 @@ Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API
 
 ## Despliegue del frontend
 
-Con CD activado, **TurnoSmart CI** llama a **Frontend deploy** tras Quality
-Checks. Una PR interna elegible desde `feat/**` publica Preview si tiene
+Con CD activado, **Frontend preview** (`workflow_run`, definido en la rama por
+defecto) corre tras **TurnoSmart CI**. Una PR interna elegible desde `feat/**` publica Preview si tiene
 cambios relevantes de frontend. Production se publica por dispatch desde la rama
 configurada. Render observa CI y despliega Dev desde `dev` segun sus filtros.
 Ver [Vercel Hobby](infra/vercel/README.md) y [Render Free](infra/render/README.md)
