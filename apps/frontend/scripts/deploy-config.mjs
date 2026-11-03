@@ -51,12 +51,16 @@ export function frontendChanged(previous, current) {
 
 export async function assertCurrentRevision(github, context) {
   if (context.eventName === 'pull_request') {
+    const pr = context.payload.pull_request;
     const { data } = await github.rest.pulls.get({
       ...context.repo,
-      pull_number: context.payload.pull_request.number,
+      pull_number: pr.number,
     });
     assert(
-      data.state === 'open' && data.base.ref === 'dev' && data.merge_commit_sha === context.sha,
+      data.state === 'open' &&
+        ['dev', 'main'].includes(pr.base.ref) &&
+        data.base.ref === pr.base.ref &&
+        data.merge_commit_sha === context.sha,
       'Preview obsoleta: ejecutar CI para la revision actual del PR.',
     );
     return;
@@ -102,13 +106,36 @@ export function prepareVercel(root, env) {
     );
   }
   validatePublicEnv(values);
-  if (target === 'preview' && !checkpoint) {
+  if (!checkpoint) {
     assert(env.EXPECTED_DEV_API && env.EXPECTED_DEV_SUPABASE, 'Faltan los origenes Dev esperados');
-    assert(
-      new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin === env.EXPECTED_DEV_API &&
-        new URL(values.NEXT_PUBLIC_SUPABASE_URL).origin === env.EXPECTED_DEV_SUPABASE,
-      'Preview requiere los origenes Render y Supabase de Dev',
-    );
+    const apiOrigin = new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin;
+    const supabaseOrigin = new URL(values.NEXT_PUBLIC_SUPABASE_URL).origin;
+    if (target === 'production') {
+      assert(
+        env.EXPECTED_PRODUCTION_API && env.EXPECTED_PRODUCTION_SUPABASE,
+        'Faltan los origenes Production esperados',
+      );
+      assert(
+        [env.EXPECTED_DEV_API, env.EXPECTED_DEV_SUPABASE].every(
+          (value) => URL.canParse(value) && new URL(value).origin === value,
+        ),
+        'Los origenes Dev esperados deben ser canonicos',
+      );
+      assert(
+        apiOrigin !== env.EXPECTED_DEV_API && supabaseOrigin !== env.EXPECTED_DEV_SUPABASE,
+        'Production no puede usar Render o Supabase de Dev',
+      );
+      assert(
+        apiOrigin === env.EXPECTED_PRODUCTION_API &&
+          supabaseOrigin === env.EXPECTED_PRODUCTION_SUPABASE,
+        'Production requiere los origenes Render y Supabase esperados',
+      );
+    } else {
+      assert(
+        apiOrigin === env.EXPECTED_DEV_API && supabaseOrigin === env.EXPECTED_DEV_SUPABASE,
+        'Preview requiere los origenes Render y Supabase de Dev',
+      );
+    }
   }
   const contents = publicNames
     .map((name) => {

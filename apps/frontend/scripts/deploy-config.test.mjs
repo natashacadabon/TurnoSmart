@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import {
   affectsFrontend,
   assertCurrentRevision,
@@ -52,6 +53,7 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   const vercel = JSON.parse(readFileSync(join(repo, 'apps/frontend/vercel.json'), 'utf8'));
   assert.equal(vercel.git.deploymentEnabled, false);
   assert.equal(ci.jobs.vercel.needs, 'quality');
+  assert.equal(ci.jobs.quality.needs, 'feature-pr');
   assert.equal(ci.jobs.vercel.uses, './.github/workflows/frontend-deploy.yml');
   assert(ci.concurrency['cancel-in-progress']);
   assert.equal(render.branch, 'dev');
@@ -73,7 +75,7 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   assert(deploy.if.includes("startsWith(github.ref, 'refs/heads/feat/')"));
   assert(!deploy.if.includes("inputs.environment == 'production'"));
   assert(deploy.if.includes('github.event.pull_request.head.repo.full_name == github.repository'));
-  assert(deploy.if.includes("github.actor != 'dependabot[bot]'"));
+  assert(deploy.if.includes("github.event.pull_request.user.login != 'dependabot[bot]'"));
   assert(!Object.hasOwn(deploy.env, 'VERCEL_TOKEN'));
   for (const job of [preflight, deploy]) {
     const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
@@ -105,6 +107,188 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
     const index = script.indexOf(command);
     assert(index > previous, `Falta orden seguro: ${command}`);
     previous = index;
+  }
+});
+
+test('Caller y workflow reutilizable protegen Preview y dispatch', () => {
+  const read = (name) => yaml.load(readFileSync(join(repo, '.github/workflows', name), 'utf8'));
+  const caller = read('ci.yml').jobs.vercel.if;
+  const deploy = read('frontend-deploy.yml').jobs.deploy.if;
+  const pr = {
+    head: { repo: { full_name: 'owner/repo' } },
+    user: { login: 'author' },
+  };
+  const github = {
+    event_name: 'pull_request',
+    base_ref: 'dev',
+    repository: 'owner/repo',
+    actor: 'maintainer',
+    triggering_actor: 'other-maintainer',
+    event: { pull_request: pr },
+  };
+  const evaluate = (expression, overrides = {}) =>
+    runInNewContext(expression.trim().slice(3, -2), {
+      github,
+      inputs: { environment: 'preview' },
+      needs: {
+        quality: { result: 'success', outputs: { vercel: 'preview' } },
+        preflight: { result: 'skipped' },
+      },
+      always: () => true,
+      cancelled: () => false,
+      startsWith: (value, prefix) => value.startsWith(prefix),
+      ...overrides,
+    });
+  for (const condition of [caller, deploy]) {
+    assert.equal(evaluate(condition), true);
+    for (const pull_request of [
+      { ...pr, user: { login: 'dependabot[bot]' } },
+      { ...pr, head: { repo: { full_name: 'fork/repo' } } },
+    ]) {
+      assert.equal(evaluate(condition, { github: { ...github, event: { pull_request } } }), false);
+    }
+  }
+  assert.equal(evaluate(caller, { needs: { quality: { result: 'failure' } } }), false);
+  assert.equal(evaluate(deploy, { cancelled: () => true }), false);
+  assert.equal(
+    evaluate(deploy, {
+      github: { ...github, event_name: 'push', ref: 'refs/heads/feat/change', event: {} },
+    }),
+    true,
+  );
+  for (const result of ['success', 'failure', 'skipped', 'cancelled']) {
+    assert.equal(
+      evaluate(deploy, {
+        github: { ...github, event_name: 'workflow_dispatch' },
+        needs: { preflight: { result } },
+      }),
+      result === 'success',
+    );
+  }
+});
+
+test('El push delega Quality solo en un PR interno abierto y mergeable para su SHA', async () => {
+  const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
+  const lookup = ci.jobs['feature-pr'].steps[0].with.script;
+  const run = new Function('github', 'context', 'core', `return (async () => {${lookup}})();`);
+  const pr = {
+    number: 23,
+    state: 'open',
+    user: { login: 'maintainer' },
+    base: { ref: 'dev' },
+    head: { sha: 'head', repo: { full_name: 'owner/repo' } },
+    mergeable: true,
+  };
+  for (const [listed, current, expected] of [
+    [[], pr, {}],
+    [[pr], pr, { covered: 'true', 'preview-owner': 'pr' }],
+    [[{ ...pr, base: { ref: 'main' } }], pr, { covered: 'true', 'preview-owner': 'pr' }],
+    [[{ ...pr, base: { ref: 'other' } }], pr, {}],
+    [[{ ...pr, head: { ...pr.head, sha: 'old' } }], pr, {}],
+    [[{ ...pr, head: { ...pr.head, repo: { full_name: 'fork/repo' } } }], pr, {}],
+    [[pr], { ...pr, state: 'closed' }, {}],
+    [[pr], { ...pr, mergeable: false }, {}],
+    [
+      [pr],
+      { ...pr, mergeable: false, user: { login: 'dependabot[bot]' } },
+      { 'preview-owner': 'pr' },
+    ],
+    [[pr], { ...pr, mergeable: null }, { 'preview-owner': 'pr' }],
+  ]) {
+    const outputs = {};
+    await run(
+      {
+        rest: {
+          pulls: {
+            list: async (query) => {
+              assert.equal(query.state, 'open');
+              assert.equal(query.head, 'owner:feat/nested/change');
+              return { data: listed };
+            },
+            get: async () => ({ data: current }),
+          },
+        },
+      },
+      { repo: { owner: 'owner', repo: 'repo' }, ref: 'refs/heads/feat/nested/change', sha: 'head' },
+      { setOutput: (name, value) => (outputs[name] = value) },
+    );
+    assert.deepEqual(outputs, expected);
+  }
+});
+
+test('Preview tiene un publicador por rama y respeta los filtros del PR', async () => {
+  const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
+  const release = ci.jobs.quality.steps.find((step) => step.id === 'release').with.script;
+  const run = new Function(
+    'github',
+    'context',
+    'core',
+    'process',
+    'load',
+    `return (async () => {${release.replaceAll('await import(', 'await load(')}})();`,
+  );
+  const pr = {
+    number: 23,
+    state: 'open',
+    mergeable: true,
+    user: { login: 'maintainer' },
+    base: { ref: 'dev', repo: { full_name: 'owner/repo' } },
+    head: { ref: 'feat/change', sha: 'head', repo: { full_name: 'owner/repo' } },
+  };
+  for (const [pull, owner, devPrs, changed, expected] of [
+    [undefined, '', [], true, 'preview'],
+    [undefined, 'pr', [], true, undefined],
+    [pr, '', [], true, 'preview'],
+    [{ ...pr, user: { login: 'dependabot[bot]' } }, '', [], true, undefined],
+    [pr, '', [], false, undefined],
+    [{ ...pr, base: { ...pr.base, ref: 'main' } }, '', [], true, 'preview'],
+    [{ ...pr, base: { ...pr.base, ref: 'main' } }, '', [pr], true, undefined],
+    [
+      { ...pr, base: { ...pr.base, ref: 'main' } },
+      '',
+      [{ ...pr, mergeable: false }],
+      true,
+      'preview',
+    ],
+    [{ ...pr, head: { ...pr.head, repo: { full_name: 'fork/repo' } } }, '', [], true, undefined],
+  ]) {
+    const outputs = {};
+    const sha = pull ? 'merge' : 'head';
+    await run(
+      {
+        rest: {
+          pulls: {
+            list: async () => ({ data: devPrs }),
+            get: async () => ({ data: devPrs[0] }),
+          },
+        },
+      },
+      {
+        repo: { owner: 'owner', repo: 'repo' },
+        eventName: pull ? 'pull_request' : 'push',
+        payload: { pull_request: pull },
+        ref: pull ? 'refs/pull/23/merge' : 'refs/heads/feat/change',
+        sha,
+      },
+      { setOutput: (name, value) => (outputs[name] = value) },
+      { env: { FEATURE_PREVIEWS: 'true', PREVIEW_OWNER: owner } },
+      async (module) =>
+        module === 'node:child_process'
+          ? {
+              execFileSync: (_git, args) => {
+                assert.deepEqual(args, ['merge-base', `origin/${pull?.base.ref ?? 'dev'}`, sha]);
+                return 'base';
+              },
+            }
+          : {
+              frontendChanged: (base, current) => {
+                assert.equal(base, 'base');
+                assert.equal(current, sha);
+                return changed;
+              },
+            },
+    );
+    assert.equal(outputs.target, expected);
   }
 });
 
@@ -142,7 +326,7 @@ test('Rechaza corridas obsoletas para Production y Preview', async () => {
   const preview = {
     ...context,
     eventName: 'pull_request',
-    payload: { pull_request: { number: 1 } },
+    payload: { pull_request: { number: 1, base: { ref: 'dev' } } },
   };
   await assertCurrentRevision(github, context);
   await assertCurrentRevision(github, { ...context, ref: 'refs/heads/feat/nested/change' });
@@ -194,8 +378,12 @@ for (const target of ['production', 'preview'])
     const deployment = {
       ...env,
       DEPLOY_TARGET: target,
-      EXPECTED_DEV_API: new URL(env.NEXT_PUBLIC_API_URL_RENDER).origin,
-      EXPECTED_DEV_SUPABASE: new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin,
+      EXPECTED_DEV_API:
+        target === 'preview' ? env.NEXT_PUBLIC_API_URL_RENDER : 'https://dev-api.example',
+      EXPECTED_DEV_SUPABASE:
+        target === 'preview' ? env.NEXT_PUBLIC_SUPABASE_URL : 'https://dev-auth.example',
+      EXPECTED_PRODUCTION_API: env.NEXT_PUBLIC_API_URL_RENDER,
+      EXPECTED_PRODUCTION_SUPABASE: env.NEXT_PUBLIC_SUPABASE_URL,
     };
     assert.equal(prepareVercel(root, deployment), join('.vercel', filename));
     for (const path of ['.vercel', 'apps/frontend/.vercel']) {
@@ -249,6 +437,36 @@ for (const target of ['production', 'preview'])
       );
     } else {
       assert.throws(() => prepareVercel(root, checkpoint), /solo en Preview/);
+      for (const [overrides, error] of [
+        [{ EXPECTED_PRODUCTION_API: '' }, /Faltan los origenes Production/],
+        [{ EXPECTED_PRODUCTION_SUPABASE: '' }, /Faltan los origenes Production/],
+        [{ EXPECTED_PRODUCTION_API: 'https://other-api.example' }, /Production requiere/],
+        [{ EXPECTED_PRODUCTION_SUPABASE: 'https://other-auth.example' }, /Production requiere/],
+        [{ EXPECTED_DEV_API: deployment.EXPECTED_PRODUCTION_API }, /Production no puede usar/],
+        [
+          { EXPECTED_DEV_SUPABASE: deployment.EXPECTED_PRODUCTION_SUPABASE },
+          /Production no puede usar/,
+        ],
+      ]) {
+        assert.throws(() => prepareVercel(root, { ...deployment, ...overrides }), error);
+      }
+      for (const name of ['NEXT_PUBLIC_API_URL_RENDER', 'NEXT_PUBLIC_SUPABASE_URL']) {
+        write(
+          `.vercel/${filename}`,
+          pulled
+            .split('\n')
+            .filter((line) => !line.startsWith(`${name}=`))
+            .join('\n'),
+        );
+        assert.throws(() => prepareVercel(root, deployment), new RegExp(name));
+      }
+      for (const [name, devOrigin] of [
+        ['NEXT_PUBLIC_API_URL_RENDER', deployment.EXPECTED_DEV_API],
+        ['NEXT_PUBLIC_SUPABASE_URL', deployment.EXPECTED_DEV_SUPABASE],
+      ]) {
+        write(`.vercel/${filename}`, pulled.replace(env[name], devOrigin));
+        assert.throws(() => prepareVercel(root, deployment), /Production no puede usar/);
+      }
     }
     write('.vercel/project.json', { ...project, projectId: 'wrong' });
     assert.throws(() => prepareVercel(root, deployment), /Proyecto/);

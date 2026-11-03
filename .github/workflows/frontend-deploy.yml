@@ -74,9 +74,11 @@ jobs:
     if: >-
       ${{ always() && !cancelled() &&
         ((github.event_name == 'workflow_dispatch' && needs.preflight.result == 'success') ||
-         (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feat/') && inputs.environment == 'preview') ||
-         (github.event_name == 'pull_request' && github.base_ref == 'dev' && inputs.environment == 'preview' &&
-          github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+         (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feat/') &&
+          !github.event.deleted && github.actor != 'dependabot[bot]' && inputs.environment == 'preview') ||
+         (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && inputs.environment == 'preview' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.user.login != 'dependabot[bot]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -138,6 +140,8 @@ jobs:
           CHECKPOINT_AZURE_URL: ${{ inputs.api_url_azure }}
           EXPECTED_DEV_API: ${{ vars.EXPECTED_DEV_API }}
           EXPECTED_DEV_SUPABASE: ${{ vars.EXPECTED_DEV_SUPABASE }}
+          EXPECTED_PRODUCTION_API: ${{ vars.EXPECTED_PRODUCTION_API }}
+          EXPECTED_PRODUCTION_SUPABASE: ${{ vars.EXPECTED_PRODUCTION_SUPABASE }}
         run: |
           env_file=$(node apps/frontend/scripts/deploy-config.mjs prepare)
           set -a

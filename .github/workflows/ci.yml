@@ -20,13 +20,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  feature-pr:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feat/') && !github.event.deleted
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      covered: ${{ steps.lookup.outputs.covered }}
+      preview-owner: ${{ steps.lookup.outputs.preview-owner }}
+    steps:
+      - uses: actions/github-script@v8
+        id: lookup
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo, state: 'open', head: `${owner}:${context.ref.slice('refs/heads/'.length)}`,
+            });
+            for (const pr of prs) {
+              if (!['dev', 'main'].includes(pr.base.ref) || pr.head.sha !== context.sha ||
+                  pr.head.repo?.full_name !== `${owner}/${repo}`) continue;
+              const { data: current } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+              if (current.state !== 'open' || current.head.sha !== context.sha ||
+                  !['dev', 'main'].includes(current.base.ref)) continue;
+              if (current.user.login === 'dependabot[bot]') core.setOutput('preview-owner', 'pr');
+              if (current.mergeable === false) continue;
+              core.setOutput('preview-owner', 'pr');
+              if (current.mergeable === true) {
+                core.setOutput('covered', 'true');
+                return;
+              }
+            }
+
   quality:
     name: Quality Checks
+    needs: feature-pr
+    if: >-
+      ${{ always() && !cancelled() &&
+          (needs.feature-pr.result == 'skipped' ||
+           (needs.feature-pr.result == 'success' && needs.feature-pr.outputs.covered != 'true')) }}
 
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     outputs:
       vercel: ${{ steps.release.outputs.target }}
 
@@ -43,21 +81,41 @@ jobs:
         uses: actions/github-script@v8
         env:
           FEATURE_PREVIEWS: ${{ vars.VERCEL_FEATURE_PREVIEWS }}
+          PREVIEW_OWNER: ${{ needs.feature-pr.outputs.preview-owner }}
         with:
           script: |
             if (context.eventName === 'pull_request') {
               const pr = context.payload.pull_request;
-              if (process.env.FEATURE_PREVIEWS !== 'true' &&
-                  pr.base.ref === 'dev' && pr.head.repo.full_name === pr.base.repo.full_name &&
-                  context.actor !== 'dependabot[bot]') core.setOutput('target', 'preview');
+              if (pr.head.repo.full_name !== pr.base.repo.full_name ||
+                  pr.user.login === 'dependabot[bot]') return;
+              if (process.env.FEATURE_PREVIEWS !== 'true') {
+                if (pr.base.ref === 'dev') core.setOutput('target', 'preview');
+                return;
+              }
+              if (!pr.head.ref.startsWith('feat/')) return;
+              if (pr.base.ref === 'main') {
+                const { owner, repo } = context.repo;
+                const { data: devPrs } = await github.rest.pulls.list({
+                  owner, repo, state: 'open', base: 'dev', head: `${owner}:${pr.head.ref}`,
+                });
+                for (const devPr of devPrs) {
+                  if (devPr.head.sha !== pr.head.sha || devPr.head.repo?.full_name !== pr.head.repo.full_name) continue;
+                  const { data: current } = await github.rest.pulls.get({ owner, repo, pull_number: devPr.number });
+                  if (current.state === 'open' && current.base.ref === 'dev' &&
+                      current.head.sha === pr.head.sha && current.mergeable !== false &&
+                      current.user.login !== 'dependabot[bot]') return;
+                }
+              }
+            } else if (process.env.FEATURE_PREVIEWS !== 'true' ||
+                process.env.PREVIEW_OWNER === 'pr' ||
+                !context.ref.startsWith('refs/heads/feat/') ||
+                context.payload.deleted || context.actor === 'dependabot[bot]') {
               return;
             }
-            if (process.env.FEATURE_PREVIEWS !== 'true' ||
-                !context.ref.startsWith('refs/heads/feat/') ||
-                context.payload.deleted || context.actor === 'dependabot[bot]') return;
             const { execFileSync } = await import('node:child_process');
             const { frontendChanged } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
-            const base = execFileSync('git', ['merge-base', 'origin/dev', context.sha], { encoding: 'utf8' }).trim();
+            const target = context.payload.pull_request?.base.ref ?? 'dev';
+            const base = execFileSync('git', ['merge-base', `origin/${target}`, context.sha], { encoding: 'utf8' }).trim();
             if (frontendChanged(base, context.sha)) core.setOutput('target', 'preview');
 
       - name: Setup Node.js
@@ -96,7 +154,7 @@ jobs:
           npm run test:config --workspace=apps/frontend
 
       - name: Cache Next.js build
-        if: steps.release.outputs.target == ''
+        if: steps.release.outputs.target == '' || github.event_name == 'pull_request'
         uses: actions/cache@v5
         with:
           path: apps/frontend/.next/cache
@@ -108,7 +166,7 @@ jobs:
         run: npm run build --workspace=apps/backend
 
       - name: Build frontend for CI
-        if: steps.release.outputs.target == ''
+        if: steps.release.outputs.target == '' || github.event_name == 'pull_request'
         run: npm run build --workspace=apps/frontend
         env:
           NEXT_PUBLIC_USE_AZURE: 'false'
@@ -119,7 +177,11 @@ jobs:
 
   vercel:
     needs: quality
-    if: needs.quality.outputs.vercel != ''
+    if: >-
+      ${{ needs.quality.result == 'success' && needs.quality.outputs.vercel == 'preview' &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login != 'dependabot[bot]')) }}
     permissions:
       actions: read
       contents: read
