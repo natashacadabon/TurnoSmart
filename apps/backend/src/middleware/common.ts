@@ -3,6 +3,7 @@ import type { ErrorRequestHandler, RequestHandler } from 'express';
 import type { ApiErrorBody } from '@turnosmart/shared';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
+import { recordHttpRequest } from '../lib/metrics.js';
 
 export const requestId: RequestHandler = (req, res, next) => {
   const incoming = req.header('x-request-id');
@@ -10,12 +11,14 @@ export const requestId: RequestHandler = (req, res, next) => {
   res.setHeader('x-request-id', req.requestId);
   const started = performance.now();
   res.on('finish', () => {
+    const durationMs = Math.round(performance.now() - started);
+    recordHttpRequest(res.statusCode, durationMs);
     logger.info('request', {
       requestId: req.requestId,
       method: req.method,
       path: req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path,
       status: res.statusCode,
-      durationMs: Math.round(performance.now() - started),
+      durationMs,
     });
   });
   next();

@@ -16,6 +16,7 @@ export interface ServiceRecord extends ServiceData {
   updatedAt: Date;
 }
 export interface ServiceRepository {
+  findById(businessId: string, id: string): Promise<ServiceRecord | null>;
   list(
     businessId: string,
     query: ListServicesQuery,
@@ -37,6 +38,10 @@ function rethrowWriteError(error: unknown): never {
 /** Todas las operaciones requieren tenant, incluso si la conexion Prisma omite RLS. */
 export class PrismaServiceRepository implements ServiceRepository {
   constructor(private readonly prisma: PrismaClient) {}
+
+  findById(businessId: string, id: string) {
+    return this.prisma.service.findUnique({ where: { id_businessId: { id, businessId } } });
+  }
 
   async list(businessId: string, { active, limit, offset }: ListServicesQuery) {
     const where = { businessId, ...(active === 'all' ? {} : { active: active === 'true' }) };

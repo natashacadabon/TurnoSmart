@@ -46,17 +46,18 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+      # Schema validation and client generation do not connect to a database.
       - name: Validate Prisma schema
         run: npm run prisma:validate --workspace=apps/backend
         env:
-          DATABASE_URL: postgresql://ci:ci@localhost:5432/turnosmart
-          DIRECT_URL: postgresql://ci:ci@localhost:5432/turnosmart
+          DATABASE_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
+          DIRECT_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace=apps/backend
         env:
-          DATABASE_URL: postgresql://ci:ci@localhost:5432/turnosmart
-          DIRECT_URL: postgresql://ci:ci@localhost:5432/turnosmart
+          DATABASE_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
+          DIRECT_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
 
       - name: Type check
         run: npm run typecheck
