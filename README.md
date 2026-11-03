@@ -240,6 +240,14 @@ npm test
 
 `npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions ejecuta estos controles en pushes y pull requests hacia `dev` y `main`. No hay CD automatico: el deploy del frontend es manual (`.github/workflows/frontend-deploy.yml`).
 
+CI conserva un solo job `Quality Checks` y una instalacion limpia con cache npm;
+`--prefer-offline` reutiliza descargas disponibles y permite buscar las faltantes.
+Tambien persiste `apps/frontend/.next/cache` entre builds, con claves por sistema,
+arquitectura, Node 22, lockfile y fuentes. La mejora se espera en corridas posteriores
+con cache disponible; el build siempre se ejecuta. No se cachean `node_modules`
+ni `shared/dist`. El typecheck comienza por backend: su `pretypecheck` compila
+shared antes de ambos consumidores, evitando una compilacion duplicada.
+
 `format` escribe archivos; `format:check` solo verifica. Si hay cambios ajenos en curso, formatear unicamente los archivos propios con `npx prettier --write <archivos>`. No hay suites de tests propias en frontend o shared ejecutadas por `npm test`; E2E es un comando separado. Los comandos de raiz compilan shared en el orden necesario.
 
 Para comprobar los tres workspaces: `npm ls --workspaces --depth=0`. Para validar el schema sin migrar: `npm run prisma:validate --workspace=@turnosmart/backend`. Para validar Compose sin imprimir variables resueltas: `docker compose -f infra/docker/compose.dev.yml config --quiet`.

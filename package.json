@@ -17,7 +17,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "npm run build:shared && npm run typecheck --workspace=apps/frontend && npm run typecheck --workspace=apps/backend && npm run typecheck --workspace=packages/shared",
+    "typecheck": "npm run typecheck --workspace=apps/backend && npm run typecheck --workspace=apps/frontend && npm run typecheck --workspace=packages/shared",
     "build": "npm run build:shared && npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
     "test": "npm run test:install && npm run build:shared && npm run test --workspaces --if-present",
     "test:install": "node --test .husky/install.test.mjs",

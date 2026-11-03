@@ -33,9 +33,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=dev --prefer-offline
 
       - name: Check formatting
         run: npm run format:check
@@ -62,6 +63,14 @@ jobs:
         run: |
           npm test
           npm run test:config --workspace=apps/frontend
+
+      - name: Cache Next.js build
+        uses: actions/cache@v5
+        with:
+          path: apps/frontend/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node22-next-v1-${{ hashFiles('package-lock.json') }}-${{ hashFiles('package.json', 'apps/frontend/src/**', 'apps/frontend/scripts/**', 'apps/frontend/*.json', 'apps/frontend/next.config.*', 'packages/shared/src/**', 'packages/shared/*.json', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-node22-next-v1-${{ hashFiles('package-lock.json') }}-
 
       - name: Build
         run: npm run build
