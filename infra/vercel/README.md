@@ -124,6 +124,33 @@ Retirar el alias en Vercel cuando ya no deba tener acceso.
 Usar cuentas y datos de prueba en Dev.
 [Aliases de Vercel](https://vercel.com/docs/cli/alias).
 
+## Preview estable de la rama dev
+
+Cada push o merge a `dev` ejecuta `Quality Checks`. Cuando ese job termina
+exitosamente para el HEAD vigente, `Frontend preview` publica el commit como
+Preview con las variables de Preview para la rama `dev`. El flujo de PR sigue
+siendo independiente y conserva su alias. El despliegue manual de Production
+sigue su propio workflow.
+
+1. Antes de habilitar CD, revisar **Vercel → Project → Settings → Git** y el
+   origen de los deployments de `dev` en **Deployments**. GitHub Actions debe
+   ser el único publicador de `dev`. Si todavía hay deploys nativos, desactivar
+   esa ruta para `dev` antes de activar el publicador de Actions.
+2. Reutilizar el environment `vercel-preview`, sus credenciales y
+   `VERCEL_CD_ENABLED=true`. Confirmar que el entorno permite ejecutar el
+   publicador desde la rama predeterminada.
+3. Tras el primer merge, comprobar **Actions → TurnoSmart CI → Quality Checks**
+   y luego **Frontend preview → Summary**. Abrir la URL que informa el job.
+   El nombre solicitado es `turnosmart-dev-<id-del-repositorio>.vercel.app`,
+   sujeto a disponibilidad. En Vercel, verificar que el destino sea Preview.
+4. Agregar ese origen exacto, una sola vez, a `CORS_ORIGIN` en Render Dev.
+   Mantener las entradas existentes. Verificar `OPTIONS /api/me` con ese
+   `Origin` y el login con una cuenta Dev. Los aliases de PR siguen usando
+   CORS dinámico.
+5. Con un segundo merge, verificar que cambie el deployment inmutable y
+   que el alias siga igual. Reejecutar el publicador del mismo SHA debe
+   reutilizar el alias vigente. Un run para un HEAD anterior queda descartado.
+
 ## Activacion de CD y rollback
 
 1. Confirmar Hobby y el proyecto existente. Usar **GitHub Actions como unico

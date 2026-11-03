@@ -12,20 +12,22 @@ permissions:
 
 concurrency:
   group: vercel-preview-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.workflow_run.event == 'pull_request' }}
 
 jobs:
   select:
     if: >-
       ${{ vars.VERCEL_CD_ENABLED == 'true' &&
           github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-          github.event.workflow_run.event == 'pull_request' &&
+          (github.event.workflow_run.event == 'pull_request' ||
+           (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'dev')) &&
           github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     outputs:
       pr: ${{ steps.select.outputs.pr }}
       sha: ${{ steps.select.outputs.sha }}
@@ -36,18 +38,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select eligible PR
+      - name: Select eligible revision
         id: select
         uses: actions/github-script@v8
         with:
           script: |
-            const { selectPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
-            const preview = await selectPreview(github, context);
+            const { selectFrontendPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const preview = await selectFrontendPreview(github, context);
             if (!preview) return core.info('Sin Preview para esta revision.');
             const pr = preview.payload.pull_request;
-            core.setOutput('pr', pr.number);
-            core.setOutput('sha', pr.head.sha);
-            core.setOutput('branch', pr.head.ref);
+            core.setOutput('pr', pr?.number ?? '');
+            core.setOutput('sha', preview.sha);
+            core.setOutput('branch', pr?.head.ref ?? 'dev');
 
   # Unico paso con secretos antes del build: solo ejecuta codigo confiable y
   # entrega al build los valores publicos NEXT_PUBLIC_* ya validados.
@@ -129,7 +131,7 @@ jobs:
     env:
       VERCEL_CLI_VERSION: '65.9.0'
     steps:
-      - name: Checkout PR head
+      - name: Checkout selected revision
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.select.outputs.sha }}
@@ -176,6 +178,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     defaults:
       run:
         shell: bash
@@ -202,50 +205,62 @@ jobs:
           path: .vercel/output
 
       - name: Check current revision
+        id: revision
         uses: actions/github-script@v8
         with:
           script: |
-            const { selectPreview, assertCurrentRevision } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
-            const preview = await selectPreview(github, context);
-            if (preview?.payload.pull_request.number !== Number(process.env.PR_NUMBER) || preview.sha !== process.env.PR_SHA)
-              throw new Error('Preview obsoleta: ejecutar CI para la revision actual del PR.');
+            const { selectFrontendPreview, assertCurrentRevision } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const preview = await selectFrontendPreview(github, context);
+            if (!preview || String(preview.payload.pull_request?.number ?? '') !== process.env.PR_NUMBER || preview.sha !== process.env.PR_SHA)
+              throw new Error('Preview obsoleta: ejecutar CI para la revision actual.');
             await assertCurrentRevision(github, preview);
+            if (preview.eventName === 'push') {
+              const { assignPreviewAlias } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/preview-alias.mjs`);
+              core.setOutput('existing', (await assignPreviewAlias(github, preview, process.env)) ?? '');
+            }
         env:
+          VERCEL_TOKEN: ${{ github.event.workflow_run.event == 'push' && secrets.VERCEL_TOKEN || '' }}
           PR_NUMBER: ${{ needs.select.outputs.pr }}
           PR_SHA: ${{ needs.select.outputs.sha }}
 
       - name: Upload prebuilt
         id: upload
+        if: steps.revision.outputs.existing == ''
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PR_NUMBER: ${{ needs.select.outputs.pr }}
           PR_SHA: ${{ needs.select.outputs.sha }}
         run: |
           : "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}" "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_PROJECT_ID:?Configurar VERCEL_PROJECT_ID}"
+          identity="turnosmartDevRepository=$GITHUB_REPOSITORY_ID"
+          if [[ -n "$PR_NUMBER" ]]; then
+            identity="turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER"
+          fi
           url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --yes \
-            --meta "turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER" \
+            --meta "$identity" \
             --meta "turnosmartMergeSha=$PR_SHA" --token="$VERCEL_TOKEN")
           [[ "$url" =~ ^https://[a-zA-Z0-9-]+\.vercel\.app/?$ ]]
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      - name: Update verified PR alias
-        id: pr-alias
+      - name: Update verified Preview alias
+        id: preview-alias
+        if: steps.revision.outputs.existing == ''
         uses: actions/github-script@v8
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         with:
           script: |
-            const { selectPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const { selectFrontendPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
             const { assignPreviewAlias } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/preview-alias.mjs`);
-            const preview = await selectPreview(github, context);
+            const preview = await selectFrontendPreview(github, context);
             if (!preview) throw new Error('Preview obsoleta: ejecutar CI para la revision actual del PR.');
             core.setOutput('url', await assignPreviewAlias(github, preview, process.env));
 
       - name: Report deployment URL
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
-          STABLE_PREVIEW_URL: ${{ steps.pr-alias.outputs.url }}
+          STABLE_PREVIEW_URL: ${{ steps.preview-alias.outputs.url || steps.revision.outputs.existing }}
         run: |
           echo "Frontend (preview): $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
-          echo "Preview estable de la PR: $STABLE_PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Preview estable: $STABLE_PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
