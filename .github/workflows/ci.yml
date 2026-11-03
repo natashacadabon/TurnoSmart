@@ -189,3 +189,4 @@ jobs:
     uses: ./.github/workflows/frontend-deploy.yml
     with:
       environment: ${{ needs.quality.outputs.vercel }}
+    secrets: inherit
