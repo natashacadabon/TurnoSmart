@@ -21,6 +21,7 @@ import { slotsRouter } from './modules/slots/routes.js';
 import type { SlotsRepository } from './modules/slots/repository.js';
 import type { AppointmentRepository } from './modules/appointments/repository.js';
 import { appointmentsRouter } from './modules/appointments/routes.js';
+import { getMetrics } from './lib/metrics.js';
 
 export interface AppDeps {
   corsOrigins: string[];
@@ -74,6 +75,10 @@ export function createApp(deps: AppDeps): Express {
   app.get('/ready', async (_req, res) => {
     const ok = await deps.checkReady().catch(() => false);
     res.status(ok ? 200 : 503).json({ status: ok ? 'ready' : 'unavailable' });
+  });
+
+  app.get('/metrics', (_req, res) => {
+    res.json(getMetrics());
   });
 
   const authed = [authenticate(deps.verifier), requireProfile(deps.identity)];

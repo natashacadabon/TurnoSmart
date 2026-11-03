@@ -131,6 +131,49 @@ describe('integración API-DB: clientes y aislamiento', () => {
       (await request(app).post(`/api/appointments/${id}/risk/explanation`).set(ownerA)).status,
     ).toBe(404);
   });
+
+  it('persiste score, eventos y rechaza reservas concurrentes en PostgreSQL', async () => {
+    const customer = await request(app)
+      .post('/api/customers')
+      .set(ownerA)
+      .send({ fullName: `Cliente turno ${randomUUID()}` });
+    const service = await request(app)
+      .post('/api/services')
+      .set(ownerA)
+      .send({ name: `Servicio turno ${randomUUID()}`, durationMinutes: 60 });
+    expect(customer.status).toBe(201);
+    expect(service.status).toBe(201);
+
+    expect(
+      (
+        await request(app)
+          .put('/api/availability-rules')
+          .set(ownerA)
+          .send({ rules: [{ dayOfWeek: 1, startTime: '09:00', endTime: '17:00' }] })
+      ).status,
+    ).toBe(200);
+
+    const payload = {
+      customerId: customer.body.id,
+      serviceId: service.body.data.id,
+      startsAt: '2099-01-05T10:00:00.000Z',
+    };
+    const results = await Promise.all(
+      [1, 2].map(() => request(app).post('/api/appointments').set(ownerA).send(payload)),
+    );
+    expect(results.map((result) => result.status).sort()).toEqual([201, 409]);
+
+    const created = results.find((result) => result.status === 201)!;
+    const risk = await prisma.riskScore.findUnique({
+      where: {
+        appointmentId_businessId: { appointmentId: created.body.id, businessId: businessA },
+      },
+    });
+    expect(risk?.level).toBe('LOW');
+    expect(await prisma.appointmentEvent.count({ where: { appointmentId: created.body.id } })).toBe(
+      1,
+    );
+  });
 });
 
 describe('integración API-DB: servicios', () => {

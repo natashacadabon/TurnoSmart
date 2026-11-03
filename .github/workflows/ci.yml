@@ -24,6 +24,21 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: turnosmart
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d turnosmart"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -60,6 +75,18 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: Apply migrations
+        run: npm run prisma:migrate --workspace=apps/backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+
+      - name: Integration tests
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/turnosmart
 
       - name: Build
         run: npm run build
