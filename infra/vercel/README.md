@@ -126,8 +126,8 @@ entonces se puede revisar la UI publica. Usar cuentas y datos de prueba en Dev.
    de la tabla y mantener Node 22.
 2. En GitHub crear los environments `vercel-production` y `vercel-preview`.
    Restringir Production a `main` al completar la transicion. Para Preview
-   permitir pushes `feat/**` de colaboradores de confianza, los PR internos
-   durante el piloto y `dev` para checkpoints. En `vercel-preview` definir
+   permitir `refs/pull/*/merge` para PR y conservar `dev` para checkpoints
+   manuales. Retirar la regla `feat/**` cuando se retire el flujo por push. En `vercel-preview` definir
    `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
    sin slash final. Los Previews de Render fallan si el scope Preview apunta a
    otros origenes. Verificar tambien que `DATABASE_URL` de Render Dev apunte
@@ -144,9 +144,12 @@ entonces se puede revisar la UI publica. Usar cuentas y datos de prueba en Dev.
    Configurar `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` como variables GitHub
    del proyecto existente, iguales para ambos scopes. Los valores
    `NEXT_PUBLIC_*` se mantienen en Vercel, no se duplican en GitHub.
-3. Proteger `dev` y `main` y requerir `Quality Checks`. En el modo feature,
-   los PR siguen verificando la revision de merge con el build ficticio.
-   Los PR de forks y Dependabot hacen CI con valores ficticios.
+3. Proteger `dev` y `main` y requerir `Quality Checks`. Los PR, incluidos
+   borradores, forks y Dependabot, verifican el merge con el build ficticio.
+   Solo las PR internas elegibles publican. El caller pasa unicamente
+   `VERCEL_TOKEN` y `VERCEL_AUTOMATION_BYPASS` por nombre si estan disponibles
+   en su scope. El environment del job de deploy aporta sus propios secretos
+   y tiene precedencia sobre los del repositorio.
    Restringir el permiso de escritura a colaboradores de confianza: los PR
    internos pueden editar el workflow que usa el token Preview. Los secretos
    estan limitados a pasos concretos, pero el build y la publicacion comparten
@@ -161,30 +164,23 @@ entonces se puede revisar la UI publica. Usar cuentas y datos de prueba en Dev.
    el environment de GitHub a `main`. El dispatch requiere CI de push exitosa
    para el SHA exacto. Si falta el deployment inicial, aplicar primero esa
    configuracion y hacer el bootstrap manual desde `main`.
-5. Habilitar `VERCEL_CD_ENABLED=true` y `VERCEL_FEATURE_PREVIEWS=true` como
-   variables del repositorio para el piloto. Verificar un push de feature con
-   y sin PR abierto, un cambio solo backend en una rama sin delta de frontend,
-   un fallo de CI y dos pushes consecutivos. Revisar el resumen de Actions y
-   Deployments en Vercel para confirmar que solo Actions publica.
+5. Habilitar `VERCEL_CD_ENABLED=true` como variable del repositorio. Para
+   validar el cambio, comprobar una PR interna en borrador, una externa,
+   un cambio solo backend y dos pushes consecutivos a la misma PR. Revisar
+   que Vercel registre un solo deploy por revision elegible.
 
-| Evento                  | CI                                                                         | Publicacion con modo feature activo                                                                                    |
-| ----------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Push a `feat/**`        | Consulta liviana. Quality sobre el push si un PR mergeable no cubre el SHA | Preview para la rama sin PR elegible si hay delta de frontend                                                          |
-| PR hacia `dev` o `main` | Quality Checks sobre el merge                                              | Preview para feature interna si hay delta de frontend. Si existen ambos PR, prioriza el de `dev` cuando puede publicar |
-| Push a `dev`            | Quality Checks                                                             | Render Dev nativo si coincide su filtro y pasa CI                                                                      |
-| Push a `main`           | Quality Checks                                                             | Production queda disponible para dispatch manual                                                                       |
+| Evento                                     | CI                            | Publicacion                                                            |
+| ------------------------------------------ | ----------------------------- | ---------------------------------------------------------------------- |
+| Push a `feat/**` sin PR                    | Sin CI remoto                 | Sin Preview                                                            |
+| PR hacia `dev` o `main`, incluido borrador | Quality Checks sobre el merge | Preview para feature interna con cambios de frontend, salvo Dependabot |
+| Push a `dev`                               | Quality Checks                | Render Dev nativo si coincide su filtro y pasa CI                      |
+| Push a `main`                              | Quality Checks                | Production queda disponible para dispatch manual                       |
 
 El filtro de frontend incluye `apps/frontend/**`, `packages/shared/**`,
-workflows y archivos de build de raiz. Es acumulado respecto de la base del
-PR o de `dev` para un push:
-una rama con cambios frontend sigue generando Preview aunque su ultimo commit
-solo cambie backend. Asi un push posterior puede recuperar un Preview fallido.
-Las corridas obsoletas se cancelan por ref y se verifica el SHA antes de subir.
-Los PR conservan el build de CI con valores ficticios como parte del check
-requerido, incluso cuando se construye un artefacto Preview despues. Los forks
-hacen CI sin deploy. Si GitHub todavia no calculo la mergeabilidad del PR,
-el push conserva Quality y deja la publicacion al PR. Un PR cerrado no
-deduplica el siguiente push.
+workflows y archivos de build de raiz. Se calcula respecto a la base de la
+PR. Si hay PR a ambas bases para el mismo SHA, se prioriza el PR elegible
+hacia `dev`. Las corridas obsoletas se cancelan por ref y se verifica el SHA
+de merge antes de subir el artefacto.
 
 `pull` toma el scope correspondiente. El workflow comprueba el proyecto,
 mantiene los valores publicos, descarta el resto del cache y usa los comandos
@@ -198,9 +194,8 @@ desde `dev` con `target=azure` e ingresar ambas URLs HTTPS. El build usa una
 Preview con esas URLs y el Supabase del scope Preview. `frontend_target=azure`
 sigue bloqueado. Los recursos de Azure se administran con el procedimiento B07.
 
-Para volver al modo anterior de Preview por PR interno a `dev`, desactivar
-`VERCEL_FEATURE_PREVIEWS` y cancelar los runs en curso. Para pausar toda
-publicacion automatica en Vercel, desactivar `VERCEL_CD_ENABLED`. Si se necesita
+Para pausar la publicacion automatica en Vercel, desactivar
+`VERCEL_CD_ENABLED` y cancelar los runs en curso. Si se necesita
 restaurar Production, cancelar los runs en curso y
 usar Instant Rollback en el Dashboard sobre la Production inmediatamente
 anterior, que es la admitida en Hobby. Confirmar el dominio y /login, corregir o revertir el commit en la rama de Production

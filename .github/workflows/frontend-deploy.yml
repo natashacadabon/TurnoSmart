@@ -6,6 +6,11 @@ on:
       environment:
         type: string
         required: true
+    secrets:
+      VERCEL_TOKEN:
+        required: false
+      VERCEL_AUTOMATION_BYPASS:
+        required: false
   workflow_dispatch:
     inputs:
       target:
@@ -74,8 +79,6 @@ jobs:
     if: >-
       ${{ always() && !cancelled() &&
         ((github.event_name == 'workflow_dispatch' && needs.preflight.result == 'success') ||
-         (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feat/') &&
-          !github.event.deleted && github.actor != 'dependabot[bot]' && inputs.environment == 'preview') ||
          (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && inputs.environment == 'preview' &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           github.event.pull_request.user.login != 'dependabot[bot]')) }}

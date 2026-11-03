@@ -238,7 +238,7 @@ npm run build
 npm test
 ```
 
-`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions valida pushes a `feat/**`, `dev` y `main`, y PRs hacia `dev` o `main`.
+`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions valida pushes a `dev` y `main`, y PRs hacia esas ramas, incluidos borradores. Una feature sin PR no tiene CI remoto ni Preview.
 
 `format` escribe archivos; `format:check` solo verifica. Si hay cambios ajenos en curso, formatear unicamente los archivos propios con `npx prettier --write <archivos>`. No hay suites de tests propias en frontend o shared ejecutadas por `npm test`; E2E es un comando separado. Los comandos de raiz compilan shared en el orden necesario.
 
@@ -263,8 +263,8 @@ Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API
 ## Despliegue del frontend
 
 Con CD activado, **TurnoSmart CI** llama a **Frontend deploy** tras Quality
-Checks. El modo feature publica Preview para pushes a `feat/**` con cambios
-relevantes de frontend. Production se publica por dispatch desde la rama
+Checks. Una PR interna elegible desde `feat/**` publica Preview si tiene
+cambios relevantes de frontend. Production se publica por dispatch desde la rama
 configurada. Render observa CI y despliega Dev desde `dev` segun sus filtros.
 Ver [Vercel Hobby](infra/vercel/README.md) y [Render Free](infra/render/README.md)
 para activacion, variables, CORS, validacion y rollback.

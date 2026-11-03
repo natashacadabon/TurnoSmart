@@ -48,12 +48,24 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   const {
     services: [render],
   } = yaml.load(readFileSync(join(repo, 'render.yaml'), 'utf8'));
-  assert.deepEqual(ci.on.push.branches, ['feat/**', 'dev', 'main']);
+  assert.deepEqual(ci.on.push.branches, ['dev', 'main']);
   assert.deepEqual(ci.on.pull_request.branches, ['dev', 'main']);
   const vercel = JSON.parse(readFileSync(join(repo, 'apps/frontend/vercel.json'), 'utf8'));
   assert.equal(vercel.git.deploymentEnabled, false);
   assert.equal(ci.jobs.vercel.needs, 'quality');
-  assert.equal(ci.jobs.quality.needs, 'feature-pr');
+  assert.deepEqual(Object.keys(ci.jobs), ['quality', 'vercel']);
+  assert.equal(ci.jobs.quality.name, 'Quality Checks');
+  assert.equal(ci.jobs.quality.needs, undefined);
+  assert.equal(ci.jobs.quality.if, undefined);
+  assert.equal(ci.on.pull_request.types, undefined);
+  assert.deepEqual(ci.jobs.vercel.secrets, {
+    VERCEL_TOKEN: '${{ secrets.VERCEL_TOKEN }}',
+    VERCEL_AUTOMATION_BYPASS: '${{ secrets.VERCEL_AUTOMATION_BYPASS }}',
+  });
+  assert.deepEqual(workflow.on.workflow_call.secrets, {
+    VERCEL_TOKEN: { required: false },
+    VERCEL_AUTOMATION_BYPASS: { required: false },
+  });
   assert.equal(ci.jobs.vercel.uses, './.github/workflows/frontend-deploy.yml');
   assert(ci.concurrency['cancel-in-progress']);
   assert.equal(render.branch, 'dev');
@@ -72,7 +84,7 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   assert.deepEqual(preflight.permissions, { contents: 'read', actions: 'read' });
   assert(preflight.steps[0].run.includes('Azure frontend bloqueado'));
   assert.equal(deploy.needs, 'preflight');
-  assert(deploy.if.includes("startsWith(github.ref, 'refs/heads/feat/')"));
+  assert(!deploy.if.includes("github.event_name == 'push'"));
   assert(!deploy.if.includes("inputs.environment == 'production'"));
   assert(deploy.if.includes('github.event.pull_request.head.repo.full_name == github.repository'));
   assert(deploy.if.includes("github.event.pull_request.user.login != 'dependabot[bot]'"));
@@ -112,7 +124,8 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
 
 test('Caller y workflow reutilizable protegen Preview y dispatch', () => {
   const read = (name) => yaml.load(readFileSync(join(repo, '.github/workflows', name), 'utf8'));
-  const caller = read('ci.yml').jobs.vercel.if;
+  const ci = read('ci.yml');
+  const caller = ci.jobs.vercel.if;
   const deploy = read('frontend-deploy.yml').jobs.deploy.if;
   const pr = {
     head: { repo: { full_name: 'owner/repo' } },
@@ -136,11 +149,16 @@ test('Caller y workflow reutilizable protegen Preview y dispatch', () => {
       },
       always: () => true,
       cancelled: () => false,
-      startsWith: (value, prefix) => value.startsWith(prefix),
       ...overrides,
     });
   for (const condition of [caller, deploy]) {
     assert.equal(evaluate(condition), true);
+    assert.equal(
+      evaluate(condition, {
+        github: { ...github, event: { pull_request: { ...pr, draft: true } } },
+      }),
+      true,
+    );
     for (const pull_request of [
       { ...pr, user: { login: 'dependabot[bot]' } },
       { ...pr, head: { repo: { full_name: 'fork/repo' } } },
@@ -148,14 +166,24 @@ test('Caller y workflow reutilizable protegen Preview y dispatch', () => {
       assert.equal(evaluate(condition, { github: { ...github, event: { pull_request } } }), false);
     }
   }
-  assert.equal(evaluate(caller, { needs: { quality: { result: 'failure' } } }), false);
+  for (const result of ['failure', 'skipped', 'cancelled']) {
+    assert.equal(
+      evaluate(caller, { needs: { quality: { result, outputs: { vercel: 'preview' } } } }),
+      false,
+    );
+  }
+  assert.equal(evaluate(caller, { needs: { quality: { result: 'success', outputs: {} } } }), false);
+  assert.equal(evaluate(caller, { cancelled: () => true }), false);
+  for (const base_ref of ['dev', 'main']) {
+    assert.equal(evaluate(caller, { github: { ...github, base_ref } }), true);
+    assert.equal(evaluate(deploy, { github: { ...github, base_ref } }), true);
+  }
   assert.equal(evaluate(deploy, { cancelled: () => true }), false);
-  assert.equal(
-    evaluate(deploy, {
-      github: { ...github, event_name: 'push', ref: 'refs/heads/feat/change', event: {} },
-    }),
-    true,
-  );
+  for (const ref of ['refs/heads/dev', 'refs/heads/main', 'refs/heads/feat/change']) {
+    const push = { ...github, event_name: 'push', ref, event: {} };
+    assert.equal(evaluate(caller, { github: push }), false);
+    assert.equal(evaluate(deploy, { github: push }), false);
+  }
   for (const result of ['success', 'failure', 'skipped', 'cancelled']) {
     assert.equal(
       evaluate(deploy, {
@@ -164,55 +192,6 @@ test('Caller y workflow reutilizable protegen Preview y dispatch', () => {
       }),
       result === 'success',
     );
-  }
-});
-
-test('El push delega Quality solo en un PR interno abierto y mergeable para su SHA', async () => {
-  const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
-  const lookup = ci.jobs['feature-pr'].steps[0].with.script;
-  const run = new Function('github', 'context', 'core', `return (async () => {${lookup}})();`);
-  const pr = {
-    number: 23,
-    state: 'open',
-    user: { login: 'maintainer' },
-    base: { ref: 'dev' },
-    head: { sha: 'head', repo: { full_name: 'owner/repo' } },
-    mergeable: true,
-  };
-  for (const [listed, current, expected] of [
-    [[], pr, {}],
-    [[pr], pr, { covered: 'true', 'preview-owner': 'pr' }],
-    [[{ ...pr, base: { ref: 'main' } }], pr, { covered: 'true', 'preview-owner': 'pr' }],
-    [[{ ...pr, base: { ref: 'other' } }], pr, {}],
-    [[{ ...pr, head: { ...pr.head, sha: 'old' } }], pr, {}],
-    [[{ ...pr, head: { ...pr.head, repo: { full_name: 'fork/repo' } } }], pr, {}],
-    [[pr], { ...pr, state: 'closed' }, {}],
-    [[pr], { ...pr, mergeable: false }, {}],
-    [
-      [pr],
-      { ...pr, mergeable: false, user: { login: 'dependabot[bot]' } },
-      { 'preview-owner': 'pr' },
-    ],
-    [[pr], { ...pr, mergeable: null }, { 'preview-owner': 'pr' }],
-  ]) {
-    const outputs = {};
-    await run(
-      {
-        rest: {
-          pulls: {
-            list: async (query) => {
-              assert.equal(query.state, 'open');
-              assert.equal(query.head, 'owner:feat/nested/change');
-              return { data: listed };
-            },
-            get: async () => ({ data: current }),
-          },
-        },
-      },
-      { repo: { owner: 'owner', repo: 'repo' }, ref: 'refs/heads/feat/nested/change', sha: 'head' },
-      { setOutput: (name, value) => (outputs[name] = value) },
-    );
-    assert.deepEqual(outputs, expected);
   }
 });
 
@@ -235,25 +214,18 @@ test('Preview tiene un publicador por rama y respeta los filtros del PR', async 
     base: { ref: 'dev', repo: { full_name: 'owner/repo' } },
     head: { ref: 'feat/change', sha: 'head', repo: { full_name: 'owner/repo' } },
   };
-  for (const [pull, owner, devPrs, changed, expected] of [
-    [undefined, '', [], true, 'preview'],
-    [undefined, 'pr', [], true, undefined],
-    [pr, '', [], true, 'preview'],
-    [{ ...pr, user: { login: 'dependabot[bot]' } }, '', [], true, undefined],
-    [pr, '', [], false, undefined],
-    [{ ...pr, base: { ...pr.base, ref: 'main' } }, '', [], true, 'preview'],
-    [{ ...pr, base: { ...pr.base, ref: 'main' } }, '', [pr], true, undefined],
-    [
-      { ...pr, base: { ...pr.base, ref: 'main' } },
-      '',
-      [{ ...pr, mergeable: false }],
-      true,
-      'preview',
-    ],
-    [{ ...pr, head: { ...pr.head, repo: { full_name: 'fork/repo' } } }, '', [], true, undefined],
+  for (const [pull, devPrs, changed, expected] of [
+    [pr, [], true, 'preview'],
+    [{ ...pr, draft: true }, [], true, 'preview'],
+    [{ ...pr, user: { login: 'dependabot[bot]' } }, [], true, undefined],
+    [pr, [], false, undefined],
+    [{ ...pr, base: { ...pr.base, ref: 'main' } }, [], true, 'preview'],
+    [{ ...pr, base: { ...pr.base, ref: 'main' } }, [pr], true, undefined],
+    [{ ...pr, base: { ...pr.base, ref: 'main' } }, [{ ...pr, mergeable: false }], true, 'preview'],
+    [{ ...pr, head: { ...pr.head, repo: { full_name: 'fork/repo' } } }, [], true, undefined],
   ]) {
     const outputs = {};
-    const sha = pull ? 'merge' : 'head';
+    const sha = 'merge';
     await run(
       {
         rest: {
@@ -265,18 +237,18 @@ test('Preview tiene un publicador por rama y respeta los filtros del PR', async 
       },
       {
         repo: { owner: 'owner', repo: 'repo' },
-        eventName: pull ? 'pull_request' : 'push',
+        eventName: 'pull_request',
         payload: { pull_request: pull },
-        ref: pull ? 'refs/pull/23/merge' : 'refs/heads/feat/change',
+        ref: 'refs/pull/23/merge',
         sha,
       },
-      { setOutput: (name, value) => (outputs[name] = value) },
-      { env: { FEATURE_PREVIEWS: 'true', PREVIEW_OWNER: owner } },
+      { setOutput: (name, value) => (outputs[name] = value), info: () => {} },
+      { env: { GITHUB_WORKSPACE: repo } },
       async (module) =>
         module === 'node:child_process'
           ? {
               execFileSync: (_git, args) => {
-                assert.deepEqual(args, ['merge-base', `origin/${pull?.base.ref ?? 'dev'}`, sha]);
+                assert.deepEqual(args, ['merge-base', `origin/${pull.base.ref}`, sha]);
                 return 'base';
               },
             }
