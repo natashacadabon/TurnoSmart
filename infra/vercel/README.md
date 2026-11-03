@@ -124,6 +124,33 @@ Retirar el alias en Vercel cuando ya no deba tener acceso.
 Usar cuentas y datos de prueba en Dev.
 [Aliases de Vercel](https://vercel.com/docs/cli/alias).
 
+## Preview estable de la rama dev
+
+Cada push o merge a `dev` ejecuta `Quality Checks`. Cuando ese job termina
+exitosamente para el HEAD vigente, `Frontend preview` publica el commit como
+Preview con las variables de Preview para la rama `dev`. El flujo de PR sigue
+siendo independiente y conserva su alias. El despliegue manual de Production
+sigue su propio workflow.
+
+1. Antes de habilitar CD, revisar **Vercel → Project → Settings → Git** y el
+   origen de los deployments de `dev` en **Deployments**. GitHub Actions debe
+   ser el único publicador de `dev`. Si todavía hay deploys nativos, desactivar
+   esa ruta para `dev` antes de activar el publicador de Actions.
+2. Reutilizar el environment `vercel-preview`, sus credenciales y
+   `VERCEL_CD_ENABLED=true`. Confirmar que el entorno permite ejecutar el
+   publicador desde la rama predeterminada.
+3. Tras el primer merge, comprobar **Actions → TurnoSmart CI → Quality Checks**
+   y luego **Frontend preview → Summary**. Abrir la URL que informa el job.
+   El nombre solicitado es `turnosmart-dev-<id-del-repositorio>.vercel.app`,
+   sujeto a disponibilidad. En Vercel, verificar que el destino sea Preview.
+4. Agregar ese origen exacto, una sola vez, a `CORS_ORIGIN` en Render Dev.
+   Mantener las entradas existentes. Verificar `OPTIONS /api/me` con ese
+   `Origin` y el login con una cuenta Dev. Los aliases de PR siguen usando
+   CORS dinámico.
+5. Con un segundo merge, verificar que cambie el deployment inmutable y
+   que el alias siga igual. Reejecutar el publicador del mismo SHA debe
+   reutilizar el alias vigente. Un run para un HEAD anterior queda descartado.
+
 ## Activacion de CD y rollback
 
 1. Confirmar Hobby y el proyecto existente. Usar **GitHub Actions como unico
@@ -258,3 +285,27 @@ de demo dejan de servir. Registrar uso/cuotas y cierre en docs/costs.md.
 Hobby no habilita gasto pago automatico; si no alcanza o deja de ser elegible,
 detener la demo y revisar alternativas con el equipo. La limpieza del backend
 Azure sigue el procedimiento B07, por separado.
+
+## Limpieza al cerrar una PR
+
+GitHub Actions ejecuta **Clean up PR preview** al cerrar una PR interna, con
+o sin merge. Reutiliza el proyecto y el token del environment `vercel-preview`.
+Mantener el token en ese environment y limitar el acceso a ramas confiables
+y protegidas. Para la limpieza, permitir solo las ramas base confiables
+que reciban PRs con Preview (`dev` y, si corresponde, `main`).
+El job ejecuta el helper de la rama predeterminada y comparte la cola de
+mutaciones por PR con el publicador.
+
+1. Abrir una PR interna de prueba y publicar dos revisiones. Anotar el alias
+   estable y las dos URLs inmutables. Anotar también el alias de `dev` y el de
+   otra PR abierta.
+2. Cerrar la PR de prueba. En **Actions → Clean up PR preview**, comprobar
+   que el job informe los deployments eliminados. En **Vercel → Deployments**,
+   verificar que desaparezcan las dos revisiones y que el alias deje de resolver.
+3. Comprobar que sigan activos `dev`, el alias de la otra PR y Production.
+   Reejecutar el cleanup debe informar cero eliminaciones. Repetir la prueba
+   con una PR fusionada.
+
+Los deployments sin metadata `turnosmartPullRequest` verificable quedan fuera
+de la limpieza. También se preservan los deployments con aliases adicionales
+o con un dominio configurado, para evitar retirar una URL compartida.

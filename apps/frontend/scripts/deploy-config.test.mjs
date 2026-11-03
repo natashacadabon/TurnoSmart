@@ -11,6 +11,7 @@ import {
   assertSuccessfulCi,
   prepareVercel,
   selectPreview,
+  selectDevPreview,
   verifyOutput,
   verifyPublished,
 } from './deploy-config.mjs';
@@ -264,7 +265,7 @@ test('Preview separa codigo de la PR, secretos y definicion del workflow', () =>
   assert(upload.run.includes('turnosmartMergeSha=$PR_SHA'));
   const names = deploy.steps.map((step) => step.name ?? step.id);
   assert(names.indexOf('Check current revision') < names.indexOf('Upload prebuilt'));
-  assert(names.indexOf('Upload prebuilt') < names.indexOf('Update verified PR alias'));
+  assert(names.indexOf('Upload prebuilt') < names.indexOf('Update verified Preview alias'));
   // Quality Checks sigue siendo el unico job de CI; ya no recibe secretos ni llama a Vercel.
   assert.deepEqual(Object.keys(ci.jobs), ['quality']);
   assert(!readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8').includes('VERCEL'));
@@ -561,4 +562,121 @@ test('Artefacto y bundle publicado deben coincidir byte por byte', async (t) => 
   await assert.rejects(verifyPublished(root, 'https://attacker.example.com', request), /invalida/);
   write('.vercel/output/static/_next/static/chunks/app.js', 'stale');
   assert.throws(() => verifyOutput(root), /no coincide/);
+});
+
+test('Dev requires a successful Quality job for the current dev SHA and exact CI attempt', async () => {
+  const sha = 'a'.repeat(40);
+  const run = {
+    id: 10,
+    run_attempt: 2,
+    event: 'push',
+    conclusion: 'success',
+    head_branch: 'dev',
+    head_repository: { full_name: 'owner/repo' },
+    path: '.github/workflows/ci.yml',
+    head_sha: sha,
+  };
+  const context = {
+    repo: { owner: 'owner', repo: 'repo' },
+    sha: 'publisher',
+    payload: { workflow_run: run },
+  };
+  let head = sha;
+  let conclusion = 'success';
+  const github = {
+    rest: {
+      git: {
+        getRef: async ({ ref }) => {
+          assert.equal(ref, 'heads/dev');
+          return { data: { object: { sha: head } } };
+        },
+      },
+      actions: { listJobsForWorkflowRunAttempt: () => {} },
+    },
+    paginate: async (method, { run_id, attempt_number }) => {
+      assert.equal(method, github.rest.actions.listJobsForWorkflowRunAttempt);
+      assert.equal(run_id, 10);
+      assert.equal(attempt_number, 2);
+      return [{ name: 'Quality Checks', conclusion }];
+    },
+  };
+  const preview = await selectDevPreview(github, context);
+  assert.equal(preview.sha, sha);
+  assert.equal(preview.ref, 'refs/heads/dev');
+  await assertCurrentRevision(github, preview);
+  for (const override of [
+    { head_branch: 'main' },
+    { event: 'pull_request' },
+    { conclusion: 'failure' },
+    { path: '.github/workflows/other.yml' },
+    { head_repository: { full_name: 'fork/repo' } },
+  ]) {
+    assert.equal(
+      await selectDevPreview(github, {
+        ...context,
+        payload: { workflow_run: { ...run, ...override } },
+      }),
+      null,
+    );
+  }
+  conclusion = 'skipped';
+  assert.equal(await selectDevPreview(github, context), null);
+  conclusion = 'success';
+  head = 'b'.repeat(40);
+  assert.equal(await selectDevPreview(github, context), null);
+  await assert.rejects(assertCurrentRevision(github, preview), /obsoleto/);
+});
+
+test('Dev alias deduplicates the current SHA and rejects a Production collision', async () => {
+  const context = {
+    eventName: 'push',
+    ref: 'refs/heads/dev',
+    sha: 'revision',
+    payload: { repository: { id: 42, full_name: 'owner/repo' } },
+  };
+  const env = { DEPLOY_TARGET: 'preview', VERCEL_PROJECT_ID: 'prj_demo', VERCEL_TOKEN: 'fake' };
+  const github = {
+    rest: { git: { getRef: async () => ({ data: { object: { sha: context.sha } } }) } },
+  };
+  const alias = 'turnosmart-dev-42.vercel.app';
+  const candidate = {
+    id: 'dpl_demo',
+    url: 'immutable.vercel.app',
+    projectId: 'prj_demo',
+    target: 'preview',
+    readyState: 'READY',
+    meta: { turnosmartDevRepository: '42', turnosmartMergeSha: context.sha },
+  };
+  let existing = true;
+  let writes = 0;
+  const request = async (url, options) => {
+    if (options.method === 'POST') {
+      writes++;
+      assert.deepEqual(JSON.parse(options.body), { alias });
+      return Response.json({ alias });
+    }
+    if (url.pathname === `/v4/aliases/${alias}`)
+      return existing
+        ? Response.json({ alias, deploymentId: candidate.id, projectId: 'prj_demo' })
+        : new Response(null, { status: 404 });
+    if (url.pathname.includes('/domains/')) return new Response(null, { status: 404 });
+    assert.match(url.pathname, /^\/v13\/deployments\/(dpl_demo|immutable\.vercel\.app)$/);
+    return Response.json(candidate);
+  };
+  assert.equal(await assignPreviewAlias(github, context, env, request), `https://${alias}`);
+  assert.equal(writes, 0);
+  candidate.meta.turnosmartMergeSha = 'old';
+  assert.equal(await assignPreviewAlias(github, context, env, request), null);
+  candidate.target = 'production';
+  await assert.rejects(assignPreviewAlias(github, context, env, request), /Preview de dev/);
+  existing = false;
+  candidate.target = 'preview';
+  candidate.meta.turnosmartMergeSha = context.sha;
+  await assignPreviewAlias(
+    github,
+    context,
+    { ...env, DEPLOYMENT_URL: 'https://immutable.vercel.app' },
+    request,
+  );
+  assert.equal(writes, 1);
 });

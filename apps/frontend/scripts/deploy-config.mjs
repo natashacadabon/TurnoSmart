@@ -86,6 +86,43 @@ export async function selectPreview(github, context) {
   return null;
 }
 
+export async function selectDevPreview(github, context) {
+  const run = context.payload.workflow_run;
+  const { owner, repo } = context.repo;
+  if (
+    run?.event !== 'push' ||
+    run.conclusion !== 'success' ||
+    run.head_branch !== 'dev' ||
+    run.head_repository?.full_name !== `${owner}/${repo}` ||
+    !/^\.github\/workflows\/ci\.yml(@.+)?$/.test(run.path ?? '') ||
+    !/^[a-f0-9]{40}$/.test(run.head_sha)
+  )
+    return null;
+  const { data } = await github.rest.git.getRef({ owner, repo, ref: 'heads/dev' });
+  if (data.object.sha !== run.head_sha) return null;
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+    owner,
+    repo,
+    run_id: run.id,
+    attempt_number: run.run_attempt,
+  });
+  if (!jobs.some((job) => job.name === 'Quality Checks' && job.conclusion === 'success'))
+    return null;
+  return {
+    ...context,
+    repo: context.repo,
+    eventName: 'push',
+    ref: 'refs/heads/dev',
+    sha: run.head_sha,
+  };
+}
+
+export function selectFrontendPreview(github, context) {
+  return context.payload.workflow_run?.event === 'push'
+    ? selectDevPreview(github, context)
+    : selectPreview(github, context);
+}
+
 export async function assertCurrentRevision(github, context) {
   if (context.eventName === 'pull_request') {
     const pr = context.payload.pull_request;
