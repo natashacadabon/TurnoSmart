@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AppointmentStatus } from '@prisma/client';
 import type {
+  AppointmentEventInput,
   AppointmentListQuery,
   AppointmentRecord,
   AppointmentRepository,
@@ -46,6 +47,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
   async createAtomically(
     businessId: string,
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+    _event?: AppointmentEventInput,
   ) {
     if (await this.hasConflict(businessId, data.startsAt, data.endsAt)) {
       return { kind: 'conflict' as const };
@@ -68,7 +70,13 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return row;
   }
 
-  async rescheduleAtomically(businessId: string, id: string, startsAt: Date, endsAt: Date) {
+  async rescheduleAtomically(
+    businessId: string,
+    id: string,
+    startsAt: Date,
+    endsAt: Date,
+    _event?: AppointmentEventInput,
+  ) {
     const current = await this.findById(businessId, id);
     if (!current) return { kind: 'not_found' as const };
     if (await this.hasConflict(businessId, startsAt, endsAt, id)) {
@@ -93,6 +101,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     id: string,
     expectedStatus: AppointmentStatus,
     nextStatus: AppointmentStatus,
+    _event?: AppointmentEventInput,
   ) {
     const current = await this.findById(businessId, id);
     if (!current) return { kind: 'not_found' as const };

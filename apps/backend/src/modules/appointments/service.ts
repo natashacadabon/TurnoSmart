@@ -55,13 +55,17 @@ export class AppointmentService {
     );
     const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
     await this.ensureAvailable(businessId, startsAt, endsAt);
-    const result = await this.appointments.createAtomically(businessId, {
-      customerId: input.customerId,
-      serviceId: input.serviceId,
-      startsAt,
-      endsAt,
-      notes: input.notes ?? null,
-    });
+    const result = await this.appointments.createAtomically(
+      businessId,
+      {
+        customerId: input.customerId,
+        serviceId: input.serviceId,
+        startsAt,
+        endsAt,
+        notes: input.notes ?? null,
+      },
+      { type: 'CREATED' },
+    );
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
     }
@@ -89,7 +93,13 @@ export class AppointmentService {
     );
     const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
     await this.ensureAvailable(businessId, startsAt, endsAt, id);
-    const result = await this.appointments.rescheduleAtomically(businessId, id, startsAt, endsAt);
+    const result = await this.appointments.rescheduleAtomically(businessId, id, startsAt, endsAt, {
+      type: 'RESCHEDULED',
+      metadata: {
+        previousStartsAt: current.startsAt.toISOString(),
+        startsAt: startsAt.toISOString(),
+      },
+    });
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
@@ -106,11 +116,19 @@ export class AppointmentService {
         `No se puede pasar de ${current.status} a ${status}`,
       );
     }
+    const eventType =
+      status === 'NO_SHOW'
+        ? ('MARKED_NO_SHOW' as const)
+        : (status as 'CONFIRMED' | 'CANCELLED' | 'COMPLETED');
     const result = await this.appointments.transitionAtomically(
       businessId,
       id,
       current.status,
       status,
+      {
+        type: eventType,
+        metadata: { previousStatus: current.status, status },
+      },
     );
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'invalid_transition') {

@@ -1,4 +1,5 @@
 import { Prisma, type AppointmentStatus, type PrismaClient } from '@prisma/client';
+import type { AppointmentEventType } from '@turnosmart/shared';
 
 export interface AppointmentRecord {
   id: string;
@@ -30,6 +31,11 @@ export type AppointmentTransitionResult =
   | { kind: 'not_found' }
   | { kind: 'invalid_transition'; currentStatus: AppointmentStatus };
 
+export interface AppointmentEventInput {
+  type: AppointmentEventType;
+  metadata?: Record<string, unknown>;
+}
+
 export interface AppointmentRepository {
   list(
     businessId: string,
@@ -43,6 +49,7 @@ export interface AppointmentRepository {
   createAtomically(
     businessId: string,
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+    event?: AppointmentEventInput,
   ): Promise<AppointmentCreateResult>;
   updateNotes(
     businessId: string,
@@ -60,6 +67,7 @@ export interface AppointmentRepository {
     id: string,
     startsAt: Date,
     endsAt: Date,
+    event?: AppointmentEventInput,
   ): Promise<AppointmentRescheduleResult>;
   updateStatus(
     businessId: string,
@@ -71,6 +79,7 @@ export interface AppointmentRepository {
     id: string,
     expectedStatus: AppointmentStatus,
     nextStatus: AppointmentStatus,
+    event?: AppointmentEventInput,
   ): Promise<AppointmentTransitionResult>;
   hasConflict(
     businessId: string,
@@ -142,6 +151,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
   async createAtomically(
     businessId: string,
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+    event?: AppointmentEventInput,
   ) {
     return this.prisma.$transaction(async (tx) => {
       // Todas las operaciones que reservan o modifican agenda usan el mismo
@@ -161,6 +171,16 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         data: { ...data, businessId },
         select: appointmentSelect,
       });
+      if (event) {
+        await tx.appointmentEvent.create({
+          data: {
+            businessId,
+            appointmentId: row.id,
+            type: event.type,
+            ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
+          },
+        });
+      }
       return { kind: 'created' as const, row };
     });
   }
@@ -188,7 +208,13 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     }
   }
 
-  async rescheduleAtomically(businessId: string, id: string, startsAt: Date, endsAt: Date) {
+  async rescheduleAtomically(
+    businessId: string,
+    id: string,
+    startsAt: Date,
+    endsAt: Date,
+    event?: AppointmentEventInput,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
       const current = await tx.appointment.findUnique({
@@ -212,6 +238,16 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         data: { startsAt, endsAt },
         select: appointmentSelect,
       });
+      if (event) {
+        await tx.appointmentEvent.create({
+          data: {
+            businessId,
+            appointmentId: id,
+            type: event.type,
+            ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
+          },
+        });
+      }
       return { kind: 'updated' as const, row };
     });
   }
@@ -235,6 +271,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     id: string,
     expectedStatus: AppointmentStatus,
     nextStatus: AppointmentStatus,
+    event?: AppointmentEventInput,
   ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
@@ -251,6 +288,16 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         data: { status: nextStatus },
         select: appointmentSelect,
       });
+      if (event) {
+        await tx.appointmentEvent.create({
+          data: {
+            businessId,
+            appointmentId: id,
+            type: event.type,
+            ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
+          },
+        });
+      }
       return { kind: 'updated' as const, row };
     });
   }
