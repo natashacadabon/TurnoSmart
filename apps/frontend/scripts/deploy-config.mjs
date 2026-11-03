@@ -60,6 +60,7 @@ export async function assertCurrentRevision(github, context) {
       data.state === 'open' &&
         ['dev', 'main'].includes(pr.base.ref) &&
         data.base.ref === pr.base.ref &&
+        data.head.sha === pr.head.sha &&
         data.merge_commit_sha === context.sha,
       'Preview obsoleta: ejecutar CI para la revision actual del PR.',
     );

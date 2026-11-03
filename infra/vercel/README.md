@@ -109,13 +109,20 @@ En cada backend existente que vaya a usarse (Render/Azure), CORS_ORIGIN debe con
 frontend (ej. https://turnosmart-demo.vercel.app), sin slash final ni rutas; varios
 origenes se separan por coma. No usar * ni *.vercel.app. Authorization/Content-Type
 y OPTIONS ya estan admitidos; no hacen falta cookies cross-site ni credentials.
-Cada Preview utiliza Render y Supabase de Dev. Para login, preferir un alias
-estable dedicado a QA si ya existe y esta asignado al deployment correcto.
-Registrar ese origen exacto solo en el CORS_ORIGIN de Render Dev. Si no hay
-alias, autorizar temporalmente la URL del resumen del run y retirarla al
-terminar. Usar Save and deploy para aplicar la variable al build existente.
-La URL inmutable cambia por deployment y requiere autorizacion propia. Hasta
-entonces se puede revisar la UI publica. Usar cuentas y datos de prueba en Dev.
+Cada Preview utiliza Render y Supabase de Dev. Para una PR interna elegible,
+Actions publica la URL inmutable y el **Preview estable de la PR** en el resumen.
+El alias `turnosmart-pr-<id-del-repositorio>-<numero-de-pr>.vercel.app`
+se asigna solo despues de verificar el bundle y volver a comprobar el SHA.
+Se usan el token y la proteccion existentes. La URL estable no incluye bypass.
+Vercel asigna estos nombres por disponibilidad y no permite reservarlos.
+Si hay una colision detectada, el job falla sin reemplazar el alias existente.
+
+Copiar el origen HTTPS estable del resumen, sin barra final, y agregarlo una
+vez a `CORS_ORIGIN` de **Render Dev**. Aplicar con **Save and deploy** sobre
+el build existente. Los pushes siguientes conservan ese origen. Al cerrar
+la PR, retirar su entrada de CORS antes de liberar el alias en Vercel.
+Usar cuentas y datos de prueba en Dev.
+[Aliases de Vercel](https://vercel.com/docs/cli/alias).
 
 ## Activacion de CD y rollback
 

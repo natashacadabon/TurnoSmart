@@ -170,10 +170,14 @@ jobs:
         id: upload
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           flags=()
           if [[ "$DEPLOY_TARGET" == production ]]; then
             flags=(--prod --skip-domain)
+          elif [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            flags=(--meta "turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER"
+                   --meta "turnosmartMergeSha=$GITHUB_SHA")
           fi
           url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --yes "${flags[@]}" --token="$VERCEL_TOKEN")
           [[ "$url" =~ ^https://[a-zA-Z0-9-]+\.vercel\.app/?$ ]]
@@ -184,6 +188,18 @@ jobs:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
           VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
         run: node apps/frontend/scripts/deploy-config.mjs published
+
+      - name: Update verified PR alias
+        id: pr-alias
+        if: github.event_name == 'pull_request' && env.DEPLOY_TARGET == 'preview'
+        uses: actions/github-script@v8
+        env:
+          DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        with:
+          script: |
+            const { assignPreviewAlias } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/preview-alias.mjs`);
+            core.setOutput('url', await assignPreviewAlias(github, context, process.env));
 
       - name: Check current Production branch before promotion
         if: env.DEPLOY_TARGET == 'production'
@@ -203,5 +219,9 @@ jobs:
       - name: Report deployment URL
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
+          STABLE_PREVIEW_URL: ${{ steps.pr-alias.outputs.url }}
         run: |
           echo "Frontend ($DEPLOY_TARGET): $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "$STABLE_PREVIEW_URL" ]]; then
+            echo "Preview estable de la PR: $STABLE_PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+          fi

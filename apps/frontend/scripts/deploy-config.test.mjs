@@ -15,6 +15,7 @@ import {
   verifyOutput,
   verifyPublished,
 } from './deploy-config.mjs';
+import { assignPreviewAlias } from './preview-alias.mjs';
 
 // Usar el parser YAML ya requerido por ESLint, sin agregar dependencias.
 const require = createRequire(import.meta.url);
@@ -119,6 +120,127 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
     const index = script.indexOf(command);
     assert(index > previous, `Falta orden seguro: ${command}`);
     previous = index;
+  }
+});
+
+test('El alias de Preview solo se actualiza despues de verificar el bundle', () => {
+  const workflow = yaml.load(
+    readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
+  );
+  const steps = workflow.jobs.deploy.steps;
+  const alias = steps.findIndex((step) => step.id === 'pr-alias');
+  assert(alias > steps.findIndex((step) => step.name === 'Verify published bundle'));
+  assert.equal(
+    steps[alias].if,
+    "github.event_name == 'pull_request' && env.DEPLOY_TARGET == 'preview'",
+  );
+  assert(steps.find((step) => step.id === 'upload').run.includes('turnosmartMergeSha=$GITHUB_SHA'));
+});
+
+test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', async () => {
+  const alias = 'turnosmart-pr-123-23.vercel.app';
+  const host = 'fixture-deployment.vercel.app';
+  const context = {
+    eventName: 'pull_request',
+    sha: 'merge-sha',
+    repo: { owner: 'owner', repo: 'repo' },
+    payload: {
+      repository: { id: 123, full_name: 'owner/repo' },
+      pull_request: {
+        number: 23,
+        base: { ref: 'dev' },
+        head: { sha: 'head', repo: { full_name: 'owner/repo' } },
+        user: { login: 'maintainer' },
+      },
+    },
+  };
+  const previewEnv = {
+    ...env,
+    DEPLOY_TARGET: 'preview',
+    DEPLOYMENT_URL: `https://${host}`,
+    VERCEL_TOKEN: 'fixture',
+  };
+  const deployment = {
+    id: 'dpl_new',
+    url: host,
+    projectId: env.VERCEL_PROJECT_ID,
+    readyState: 'READY',
+    target: null,
+    meta: { turnosmartPullRequest: '123-23', turnosmartMergeSha: context.sha },
+  };
+  const oldAlias = { alias, projectId: deployment.projectId, deploymentId: 'dpl_old' };
+  for (const scenario of [
+    {},
+    { current: oldAlias },
+    {
+      current: oldAlias,
+      previous: { ...deployment, target: 'production' },
+      error: /no es un Preview/,
+    },
+    {
+      current: oldAlias,
+      previous: { ...deployment, meta: { turnosmartPullRequest: '123-24' } },
+      error: /no es un Preview/,
+    },
+    { current: { ...oldAlias, projectId: 'prj_other' }, error: /Alias ocupado/ },
+    { configuredDomain: true, error: /dominio configurado/ },
+    { stale: true, error: /obsoleta/ },
+    { headChanged: true, error: /obsoleta/ },
+    {
+      source: { ...deployment, meta: { ...deployment.meta, turnosmartMergeSha: 'old' } },
+      error: /artefacto verificado/,
+    },
+    { source: { ...deployment, target: 'production' }, error: /no es un Preview/ },
+    { production: true, error: /solo para Preview/ },
+  ]) {
+    let writes = 0;
+    let checked = false;
+    const github = {
+      rest: {
+        pulls: {
+          get: async () => {
+            checked = true;
+            return {
+              data: {
+                state: 'open',
+                base: { ref: 'dev' },
+                head: { sha: scenario.headChanged ? 'newer' : 'head' },
+                merge_commit_sha: scenario.stale ? 'newer' : context.sha,
+              },
+            };
+          },
+        },
+      },
+    };
+    const request = async (url, init) => {
+      assert.equal(url.origin, 'https://api.vercel.com');
+      assert.equal(url.searchParams.get('teamId'), env.VERCEL_ORG_ID);
+      switch (url.pathname) {
+        case `/v13/deployments/${host}`:
+          return Response.json(scenario.source ?? deployment);
+        case '/v13/deployments/dpl_old':
+          return Response.json(scenario.previous ?? deployment);
+        case `/v4/aliases/${alias}`:
+          return scenario.current
+            ? Response.json(scenario.current)
+            : new Response(null, { status: 404 });
+        case `/v9/projects/${deployment.projectId}/domains/${alias}`:
+          return new Response('{}', { status: scenario.configuredDomain ? 200 : 404 });
+        case '/v2/deployments/dpl_new/aliases':
+          assert(checked);
+          assert.equal(init.method, 'POST');
+          assert.deepEqual(JSON.parse(init.body), { alias });
+          writes++;
+          return Response.json({ alias });
+        default:
+          assert.fail(`Ruta inesperada: ${url.pathname}`);
+      }
+    };
+    const run = () =>
+      assignPreviewAlias(github, context, scenario.production ? env : previewEnv, request);
+    if (scenario.error) await assert.rejects(run, scenario.error);
+    else assert.equal(await run(), `https://${alias}`);
+    assert.equal(writes, scenario.error ? 0 : 1);
   }
 });
 
@@ -290,7 +412,12 @@ test('Rechaza corridas obsoletas para Production y Preview', async () => {
       },
       pulls: {
         get: async () => ({
-          data: { state: 'open', base: { ref: 'dev' }, merge_commit_sha: 'new' },
+          data: {
+            state: 'open',
+            base: { ref: 'dev' },
+            head: { sha: 'head' },
+            merge_commit_sha: 'new',
+          },
         }),
       },
     },
@@ -298,7 +425,7 @@ test('Rechaza corridas obsoletas para Production y Preview', async () => {
   const preview = {
     ...context,
     eventName: 'pull_request',
-    payload: { pull_request: { number: 1, base: { ref: 'dev' } } },
+    payload: { pull_request: { number: 1, base: { ref: 'dev' }, head: { sha: 'head' } } },
   };
   await assertCurrentRevision(github, context);
   await assertCurrentRevision(github, { ...context, ref: 'refs/heads/feat/nested/change' });
