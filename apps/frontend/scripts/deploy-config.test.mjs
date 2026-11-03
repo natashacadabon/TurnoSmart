@@ -13,6 +13,7 @@ import {
   selectPreview,
   selectDevPreview,
   verifyOutput,
+  verifyStandaloneOutput,
   verifyPublished,
 } from './deploy-config.mjs';
 import { assignPreviewAlias } from './preview-alias.mjs';
@@ -260,7 +261,11 @@ test('Preview separa codigo de la PR, secretos y definicion del workflow', () =>
       (step) => step.uses?.includes('download-artifact') && step.with.name === 'vercel-settings',
     ),
   );
+  assert(build.steps.some((step) => step.run?.includes('build --standalone')));
   const upload = deploy.steps.find((step) => step.id === 'upload');
+  const preflight = deploy.steps.find((step) => step.run?.includes('standalone-output'));
+  assert(preflight && deploy.steps.indexOf(preflight) < deploy.steps.indexOf(upload));
+  assert.equal(preflight.env, undefined);
   assert(upload.run.includes('turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER'));
   assert(upload.run.includes('turnosmartMergeSha=$PR_SHA'));
   const names = deploy.steps.map((step) => step.name ?? step.id);
@@ -679,4 +684,21 @@ test('Dev alias deduplicates the current SHA and rejects a Production collision'
     request,
   );
   assert.equal(writes, 1);
+});
+
+test('prebuilt Preview must be portable even when dependencies exist on the build runner', (t) => {
+  const { root, write } = fixture(t);
+  const config = '.vercel/output/functions/index.func/.vc-config.json';
+  write('.vercel/output/config.json', { version: 3 });
+  write('node_modules/client-only/index.js', '');
+  write(config, {
+    filePathMap: { 'node_modules/client-only/index.js': 'node_modules/client-only/index.js' },
+  });
+  assert.throws(() => verifyStandaloneOutput(root), /index.func.*1 referencias filePathMap/);
+  write(config, { handler: 'index.js', runtime: 'nodejs22.x' });
+  assert.throws(() => verifyStandaloneOutput(root), /Falta el archivo de entrada prebuilt/);
+  write('.vercel/output/functions/index.func/index.js', '');
+  write('.vercel/output/functions/index.func/node_modules/client-only/index.js', '');
+  rmSync(join(root, 'node_modules'), { recursive: true });
+  verifyStandaloneOutput(root);
 });

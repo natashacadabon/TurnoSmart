@@ -286,6 +286,21 @@ Hobby no habilita gasto pago automatico; si no alcanza o deja de ser elegible,
 detener la demo y revisar alternativas con el equipo. La limpieza del backend
 Azure sigue el procedimiento B07, por separado.
 
+## Diagnóstico de artefactos Preview
+
+El build de Preview usa `vercel build --standalone` para que las dependencias
+trazadas por Vercel queden dentro de `.vercel/output`. Sin este flag, CLI
+65.9.0 puede dejar referencias `filePathMap` en los `.vc-config.json`, por
+ejemplo a `node_modules/client-only/index.js` en la raíz del monorepo. Ese
+directorio existe durante el build pero queda fuera del artefacto que recibe
+el runner de publicación.
+
+Los pasos **Build and verify prebuilt** y **Validate downloaded prebuilt
+output** comprueban la portabilidad antes y después de la transferencia.
+Si fallan, revisar la configuración de función que identifica el mensaje y
+reconstruir el artefacto. Un retry del deploy con el artefacto anterior no
+incorpora los archivos faltantes.
+
 ## Limpieza al cerrar una PR
 
 GitHub Actions ejecuta **Clean up PR preview** al cerrar una PR interna, con

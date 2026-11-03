@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseEnv } from 'node:util';
 import { validatePublicEnv } from './public-env.mjs';
@@ -252,6 +259,54 @@ export function verifyOutput(root) {
     );
 }
 
+// The publisher receives only this directory, with no workspace dependencies.
+export function verifyStandaloneOutput(root) {
+  const output = join(root, '.vercel/output');
+  assert.equal(JSON.parse(readFileSync(join(output, 'config.json'))).version, 3);
+  const outputPath = realpathSync(output);
+  for (const entry of readdirSync(output, { recursive: true, withFileTypes: true })) {
+    const path = join(entry.parentPath, entry.name);
+    const label = JSON.stringify(relative(output, path));
+    if (entry.isSymbolicLink()) {
+      let target;
+      try {
+        target = relative(outputPath, realpathSync(path));
+      } catch {
+        throw new Error(`Enlace prebuilt sin destino: ${label}`);
+      }
+      assert(
+        !isAbsolute(target) && target !== '..' && !target.startsWith(`..${sep}`),
+        `Enlace prebuilt fuera del artefacto: ${label}`,
+      );
+    }
+    if (entry.name !== '.vc-config.json') continue;
+    let config;
+    try {
+      config = JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+      throw new Error(`Configuracion prebuilt ilegible: ${label}`);
+    }
+    const sources = Object.values(config.filePathMap ?? {});
+    assert(
+      sources.length === 0,
+      `Prebuilt no autocontenido en ${label}: ${sources.length} referencias filePathMap. Reconstruir con vercel build --standalone.`,
+    );
+    const entrypoint = config.entrypoint ?? config.handler;
+    if (typeof entrypoint === 'string') {
+      const directory = dirname(path);
+      const file = resolve(directory, entrypoint);
+      const filePath = relative(directory, file);
+      assert(
+        !isAbsolute(filePath) &&
+          filePath !== '..' &&
+          !filePath.startsWith(`..${sep}`) &&
+          statSync(file, { throwIfNoEntry: false })?.isFile(),
+        `Falta el archivo de entrada prebuilt en ${label}`,
+      );
+    }
+  }
+}
+
 export async function verifyPublished(root, deploymentUrl, request = fetch, bypass) {
   const origin = new URL(deploymentUrl);
   assert(
@@ -308,6 +363,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const command = process.argv[2];
   if (command === 'prepare') console.log(prepareVercel(root, process.env));
   else if (command === 'output') verifyOutput(root);
+  else if (command === 'standalone-output') verifyStandaloneOutput(root);
   else if (command === 'published')
     await verifyPublished(
       root,
