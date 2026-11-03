@@ -285,3 +285,27 @@ de demo dejan de servir. Registrar uso/cuotas y cierre en docs/costs.md.
 Hobby no habilita gasto pago automatico; si no alcanza o deja de ser elegible,
 detener la demo y revisar alternativas con el equipo. La limpieza del backend
 Azure sigue el procedimiento B07, por separado.
+
+## Limpieza al cerrar una PR
+
+GitHub Actions ejecuta **Clean up PR preview** al cerrar una PR interna, con
+o sin merge. Reutiliza el proyecto y el token del environment `vercel-preview`.
+Mantener el token en ese environment y limitar el acceso a ramas confiables
+y protegidas. Para la limpieza, permitir solo las ramas base confiables
+que reciban PRs con Preview (`dev` y, si corresponde, `main`).
+El job ejecuta el helper de la rama predeterminada y comparte la cola de
+mutaciones por PR con el publicador.
+
+1. Abrir una PR interna de prueba y publicar dos revisiones. Anotar el alias
+   estable y las dos URLs inmutables. Anotar también el alias de `dev` y el de
+   otra PR abierta.
+2. Cerrar la PR de prueba. En **Actions → Clean up PR preview**, comprobar
+   que el job informe los deployments eliminados. En **Vercel → Deployments**,
+   verificar que desaparezcan las dos revisiones y que el alias deje de resolver.
+3. Comprobar que sigan activos `dev`, el alias de la otra PR y Production.
+   Reejecutar el cleanup debe informar cero eliminaciones. Repetir la prueba
+   con una PR fusionada.
+
+Los deployments sin metadata `turnosmartPullRequest` verificable quedan fuera
+de la limpieza. También se preservan los deployments con aliases adicionales
+o con un dominio configurado, para evitar retirar una URL compartida.

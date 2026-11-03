@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: vercel-preview-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: ${{ github.event.workflow_run.event == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   select:
@@ -172,6 +172,9 @@ jobs:
   # de la PR se trata como datos y se sube con el proyecto y la PR resueltos aqui.
   deploy:
     needs: [select, build]
+    concurrency:
+      group: vercel-preview-mutation-${{ needs.select.outputs.pr || 'dev' }}
+      queue: max
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: vercel-preview
