@@ -91,6 +91,35 @@ reutilizando el build actual. Repetir el preflight contra la API y comprobar
 204 con `Access-Control-Allow-Origin` igual al origen solicitado.
 [Variables de entorno en Render](https://render.com/docs/configure-environment-variables).
 
+### CORS automático de Preview en Render Dev
+
+Mantener `CORS_ORIGIN` para dominios fijos. Configurar estas variables solo
+en **Render Dev**. En Production omitir `CORS_ENVIRONMENT` o usar `production`.
+
+| Variable                    | Valor                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `CORS_ENVIRONMENT`          | `dev` para habilitar la consulta de Previews.                                                          |
+| `CORS_VERCEL_PROJECT_ID`    | ID `prj_…` del proyecto de Vercel.                                                                     |
+| `CORS_VERCEL_TEAM_ID`       | ID `team_…` cuando corresponda al scope.                                                               |
+| `CORS_VERCEL_TOKEN`         | Credencial de servidor con acceso de lectura a deployments y aliases.                                  |
+| `CORS_VERCEL_REPOSITORY_ID` | `1361343811`, ID del repositorio GitHub de TurnoSmart. Si se omite, solo se verifican URLs inmutables. |
+
+Abrir la URL estable del resumen de Actions. Dev consulta el alias exacto y
+exige que apunte a un Preview READY del proyecto con metadata
+`turnosmartPullRequest=<repo-id>-<numero-de-pr>`. Los aliases sin esa
+metadata, los redirects y los deployments Production se rechazan. Los
+resultados positivos se guardan 60 segundos y los negativos 15 segundos.
+La consulta de alias y deployment comparte un timeout de tres segundos.
+Si Vercel falla, los orígenes fijos siguen funcionando. Las URLs inmutables
+se verifican por separado contra hasta 100 deployments READY recientes.
+
+Probar `OPTIONS /api/me` con el `Origin` exacto del alias y
+`Access-Control-Request-Headers: authorization`. Debe devolver 204 con
+`Access-Control-Allow-Origin` igual al alias. Un alias ajeno debe devolver
+403 sin ese header. Cerrar la PR no revoca el deployment. Para revocar un
+alias, retirarlo en Vercel y esperar el vencimiento de la caché.
+[API de aliases](https://vercel.com/docs/rest-api/aliases/get-an-alias).
+
 En Events, comprobar el SHA y la fecha del deploy Live para confirmar que
 el cambio de entorno ya se aplico. Si /health responde `version: dev`,
 ese valor es el fallback de RELEASE_SHA y no identifica el commit activo.

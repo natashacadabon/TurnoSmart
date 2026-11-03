@@ -117,10 +117,10 @@ Se usan el token y la proteccion existentes. La URL estable no incluye bypass.
 Vercel asigna estos nombres por disponibilidad y no permite reservarlos.
 Si hay una colision detectada, el job falla sin reemplazar el alias existente.
 
-Copiar el origen HTTPS estable del resumen, sin barra final, y agregarlo una
-vez a `CORS_ORIGIN` de **Render Dev**. Aplicar con **Save and deploy** sobre
-el build existente. Los pushes siguientes conservan ese origen. Al cerrar
-la PR, retirar su entrada de CORS antes de liberar el alias en Vercel.
+Abrir el origen HTTPS estable del resumen. Con
+[CORS automático en Render Dev](../render/README.md#cors-automático-de-preview-en-render-dev),
+el backend verifica el alias en Vercel sin editar `CORS_ORIGIN` por PR.
+Retirar el alias en Vercel cuando ya no deba tener acceso.
 Usar cuentas y datos de prueba en Dev.
 [Aliases de Vercel](https://vercel.com/docs/cli/alias).
 
