@@ -49,10 +49,3 @@ una restauración destructiva sobre una base productiva.
 8. Revisar `/health`, `/ready` y `/metrics`.
 
 No se deben incluir tokens, notas privadas ni datos personales en capturas o logs.
-
-## Azure Monitor
-
-Configurar `APPLICATIONINSIGHTS_CONNECTION_STRING` únicamente en el entorno del
-backend y reiniciar el proceso. Los comandos `dev` y `start` cargan el loader de
-Azure Monitor OpenTelemetry antes de Express. Sin esa variable, la aplicación
-continúa funcionando con logs JSON y métricas locales.
