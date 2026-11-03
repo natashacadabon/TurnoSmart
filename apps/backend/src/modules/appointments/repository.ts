@@ -36,6 +36,13 @@ export interface AppointmentEventInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface CustomerAppointmentStats {
+  total: number;
+  completed: number;
+  noShows: number;
+  cancelled: number;
+}
+
 export interface AppointmentRepository {
   list(
     businessId: string,
@@ -87,6 +94,11 @@ export interface AppointmentRepository {
     endsAt: Date,
     excludeId?: string,
   ): Promise<boolean>;
+  customerStats(
+    businessId: string,
+    customerId: string,
+    before: Date,
+  ): Promise<CustomerAppointmentStats>;
 }
 
 const appointmentSelect = {
@@ -314,5 +326,21 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       select: { id: true },
     });
     return row !== null;
+  }
+
+  async customerStats(businessId: string, customerId: string, before: Date) {
+    const where = {
+      businessId,
+      customerId,
+      startsAt: { lt: before },
+      status: { in: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] as AppointmentStatus[] },
+    };
+    const [total, completed, noShows, cancelled] = await this.prisma.$transaction([
+      this.prisma.appointment.count({ where }),
+      this.prisma.appointment.count({ where: { ...where, status: 'COMPLETED' } }),
+      this.prisma.appointment.count({ where: { ...where, status: 'NO_SHOW' } }),
+      this.prisma.appointment.count({ where: { ...where, status: 'CANCELLED' } }),
+    ]);
+    return { total, completed, noShows, cancelled };
   }
 }

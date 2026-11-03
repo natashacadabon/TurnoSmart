@@ -124,4 +124,20 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         row.endsAt > startsAt,
     );
   }
+
+  async customerStats(businessId: string, customerId: string, before: Date) {
+    const history = this.rows.filter(
+      (row) =>
+        row.businessId === businessId &&
+        row.customerId === customerId &&
+        row.startsAt < before &&
+        ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(row.status),
+    );
+    return {
+      total: history.length,
+      completed: history.filter((row) => row.status === 'COMPLETED').length,
+      noShows: history.filter((row) => row.status === 'NO_SHOW').length,
+      cancelled: history.filter((row) => row.status === 'CANCELLED').length,
+    };
+  }
 }

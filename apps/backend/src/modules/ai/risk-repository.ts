@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import type { RiskFactor, RiskLevel } from '@turnosmart/shared';
 
 export interface RiskRecord {
@@ -9,12 +9,20 @@ export interface RiskRecord {
   calculatedAt: Date;
 }
 
-/** Lectura del score persistido por C (C08). A no calcula ni modifica el score. */
+export interface RiskScoreInput {
+  appointmentId: string;
+  score: number;
+  level: RiskLevel;
+  factors: RiskFactor[];
+}
+
+/** Lectura y persistencia del score calculado por el dominio de reservas. */
 export interface RiskRepository {
   find(
     businessId: string,
     appointmentId: string,
   ): Promise<{ appointmentExists: false } | { appointmentExists: true; risk: RiskRecord | null }>;
+  upsert(businessId: string, input: RiskScoreInput): Promise<RiskRecord>;
 }
 
 export class PrismaRiskRepository implements RiskRepository {
@@ -37,6 +45,32 @@ export class PrismaRiskRepository implements RiskRepository {
     });
     if (!appointment) return { appointmentExists: false as const };
     return { appointmentExists: true as const, risk: appointment.riskScore };
+  }
+
+  async upsert(businessId: string, input: RiskScoreInput) {
+    return this.prisma.riskScore.upsert({
+      where: { appointmentId_businessId: { appointmentId: input.appointmentId, businessId } },
+      create: {
+        businessId,
+        appointmentId: input.appointmentId,
+        score: input.score,
+        level: input.level,
+        factors: input.factors as unknown as Prisma.InputJsonValue,
+      },
+      update: {
+        score: input.score,
+        level: input.level,
+        factors: input.factors as unknown as Prisma.InputJsonValue,
+        calculatedAt: new Date(),
+      },
+      select: {
+        appointmentId: true,
+        score: true,
+        level: true,
+        factors: true,
+        calculatedAt: true,
+      },
+    });
   }
 }
 

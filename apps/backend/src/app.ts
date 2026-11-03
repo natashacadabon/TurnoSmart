@@ -92,6 +92,7 @@ export function createApp(deps: AppDeps): Express {
       customers: deps.customers,
       services: deps.services,
       availability: deps.availability,
+      risk: deps.risk,
     }),
   );
   app.use('/api/appointments', ...authed, eventsRouter(deps));

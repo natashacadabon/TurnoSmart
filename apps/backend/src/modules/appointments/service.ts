@@ -6,6 +6,8 @@ import {
   type RescheduleAppointmentRequest,
 } from '@turnosmart/shared';
 import { AppError, notFound } from '../../lib/errors.js';
+import { calculateNoShowRisk } from '../ai/risk-calculator.js';
+import type { RiskRepository } from '../ai/risk-repository.js';
 import {
   appointmentFits,
   localTime,
@@ -23,6 +25,7 @@ export class AppointmentService {
     private readonly customers: CustomerRepository,
     private readonly services: ServiceRepository,
     private readonly availability: AvailabilityRepository,
+    private readonly risk: RiskRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -69,6 +72,7 @@ export class AppointmentService {
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
     }
+    await this.persistRiskScore(businessId, result.row);
     return result.row;
   }
 
@@ -104,6 +108,7 @@ export class AppointmentService {
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
     }
+    await this.persistRiskScore(businessId, result.row);
     return result.row;
   }
 
@@ -153,6 +158,26 @@ export class AppointmentService {
     if (!service) throw notFound('Servicio');
     if (!service.active) throw new AppError('SERVICE_INACTIVE', 'El servicio esta inactivo');
     return service;
+  }
+
+  private async persistRiskScore(
+    businessId: string,
+    appointment: { id: string; customerId: string; startsAt: Date },
+  ) {
+    const history = await this.appointments.customerStats(
+      businessId,
+      appointment.customerId,
+      appointment.startsAt,
+    );
+    const risk = calculateNoShowRisk({
+      startsAt: appointment.startsAt,
+      now: this.clock(),
+      history,
+    });
+    await this.risk.upsert(businessId, {
+      appointmentId: appointment.id,
+      ...risk,
+    });
   }
 
   private async ensureAvailable(

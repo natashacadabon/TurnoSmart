@@ -48,6 +48,15 @@ describe('API de turnos - Fase 2', () => {
       status: 'SCHEDULED',
       notes: null,
     });
+    const persistedRisk = ctx.appointments.risks.get(created.body.id as string);
+    expect(persistedRisk).toMatchObject({
+      appointmentId: created.body.id,
+      score: 10,
+      level: 'LOW',
+    });
+    expect(persistedRisk?.factors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'NO_HISTORY', impact: 10 })]),
+    );
 
     const listed = await request(ctx.app)
       .get('/api/appointments?from=2099-01-05&to=2099-01-05')

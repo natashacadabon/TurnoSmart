@@ -6,7 +6,11 @@ import type { Role } from '@turnosmart/shared';
 import { createApp, type AppDeps } from '../src/app.js';
 import type { TokenVerifier, VerifiedUser } from '../src/middleware/auth.js';
 import type { LlmClient, LlmRequest } from '../src/modules/ai/llm.js';
-import type { RiskRecord, RiskRepository } from '../src/modules/ai/risk-repository.js';
+import type {
+  RiskRecord,
+  RiskRepository,
+  RiskScoreInput,
+} from '../src/modules/ai/risk-repository.js';
 import type {
   CustomerData,
   CustomerRecord,
@@ -152,6 +156,12 @@ export class InMemoryAppointments implements EventRepository, RiskRepository {
       return { appointmentExists: false as const };
     }
     return { appointmentExists: true as const, risk: this.risks.get(appointmentId) ?? null };
+  }
+
+  async upsert(businessId: string, input: RiskScoreInput) {
+    const row: RiskRecord = { ...input, calculatedAt: new Date() };
+    this.risks.set(input.appointmentId, row);
+    return row;
   }
 }
 

@@ -40,6 +40,7 @@ export function appointmentsRouter(deps: {
   customers: ConstructorParameters<typeof AppointmentService>[1];
   services: ConstructorParameters<typeof AppointmentService>[2];
   availability: ConstructorParameters<typeof AppointmentService>[3];
+  risk: ConstructorParameters<typeof AppointmentService>[4];
 }): Router {
   const router = Router();
   const service = new AppointmentService(
@@ -47,6 +48,7 @@ export function appointmentsRouter(deps: {
     deps.customers,
     deps.services,
     deps.availability,
+    deps.risk,
   );
 
   router.get('/', requirePermission('appointments:read'), async (req, res) => {
