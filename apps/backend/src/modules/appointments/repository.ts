@@ -21,6 +21,15 @@ export interface AppointmentListQuery {
   pageSize: number;
 }
 
+export type AppointmentCreateResult =
+  { kind: 'created'; row: AppointmentRecord } | { kind: 'conflict' };
+export type AppointmentRescheduleResult =
+  { kind: 'updated'; row: AppointmentRecord } | { kind: 'conflict' } | { kind: 'not_found' };
+export type AppointmentTransitionResult =
+  | { kind: 'updated'; row: AppointmentRecord }
+  | { kind: 'not_found' }
+  | { kind: 'invalid_transition'; currentStatus: AppointmentStatus };
+
 export interface AppointmentRepository {
   list(
     businessId: string,
@@ -31,6 +40,10 @@ export interface AppointmentRepository {
     businessId: string,
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
   ): Promise<AppointmentRecord>;
+  createAtomically(
+    businessId: string,
+    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+  ): Promise<AppointmentCreateResult>;
   updateNotes(
     businessId: string,
     id: string,
@@ -42,11 +55,23 @@ export interface AppointmentRepository {
     startsAt: Date,
     endsAt: Date,
   ): Promise<AppointmentRecord | null>;
+  rescheduleAtomically(
+    businessId: string,
+    id: string,
+    startsAt: Date,
+    endsAt: Date,
+  ): Promise<AppointmentRescheduleResult>;
   updateStatus(
     businessId: string,
     id: string,
     status: AppointmentStatus,
   ): Promise<AppointmentRecord | null>;
+  transitionAtomically(
+    businessId: string,
+    id: string,
+    expectedStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): Promise<AppointmentTransitionResult>;
   hasConflict(
     businessId: string,
     startsAt: Date,
@@ -114,6 +139,32 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     });
   }
 
+  async createAtomically(
+    businessId: string,
+    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      // Todas las operaciones que reservan o modifican agenda usan el mismo
+      // lock. Así, dos solicitudes para el mismo negocio se serializan.
+      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+      const conflict = await tx.appointment.findFirst({
+        where: {
+          businessId,
+          status: { in: ['SCHEDULED', 'CONFIRMED'] },
+          startsAt: { lt: data.endsAt },
+          endsAt: { gt: data.startsAt },
+        },
+        select: { id: true },
+      });
+      if (conflict) return { kind: 'conflict' as const };
+      const row = await tx.appointment.create({
+        data: { ...data, businessId },
+        select: appointmentSelect,
+      });
+      return { kind: 'created' as const, row };
+    });
+  }
+
   async updateNotes(businessId: string, id: string, notes: string | null) {
     const result = await this.prisma.appointment.updateMany({
       where: { id, businessId },
@@ -137,6 +188,34 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     }
   }
 
+  async rescheduleAtomically(businessId: string, id: string, startsAt: Date, endsAt: Date) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+      const current = await tx.appointment.findUnique({
+        where: { id_businessId: { id, businessId } },
+        select: { id: true },
+      });
+      if (!current) return { kind: 'not_found' as const };
+      const conflict = await tx.appointment.findFirst({
+        where: {
+          businessId,
+          id: { not: id },
+          status: { in: ['SCHEDULED', 'CONFIRMED'] },
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+        },
+        select: { id: true },
+      });
+      if (conflict) return { kind: 'conflict' as const };
+      const row = await tx.appointment.update({
+        where: { id_businessId: { id, businessId } },
+        data: { startsAt, endsAt },
+        select: appointmentSelect,
+      });
+      return { kind: 'updated' as const, row };
+    });
+  }
+
   async updateStatus(businessId: string, id: string, status: AppointmentStatus) {
     try {
       return await this.prisma.appointment.update({
@@ -149,6 +228,31 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         return null;
       throw error;
     }
+  }
+
+  async transitionAtomically(
+    businessId: string,
+    id: string,
+    expectedStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+      const current = await tx.appointment.findUnique({
+        where: { id_businessId: { id, businessId } },
+        select: { status: true },
+      });
+      if (!current) return { kind: 'not_found' as const };
+      if (current.status !== expectedStatus) {
+        return { kind: 'invalid_transition' as const, currentStatus: current.status };
+      }
+      const row = await tx.appointment.update({
+        where: { id_businessId: { id, businessId } },
+        data: { status: nextStatus },
+        select: appointmentSelect,
+      });
+      return { kind: 'updated' as const, row };
+    });
   }
 
   async hasConflict(businessId: string, startsAt: Date, endsAt: Date, excludeId?: string) {

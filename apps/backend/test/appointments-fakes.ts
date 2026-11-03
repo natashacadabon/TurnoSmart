@@ -43,6 +43,16 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return row;
   }
 
+  async createAtomically(
+    businessId: string,
+    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+  ) {
+    if (await this.hasConflict(businessId, data.startsAt, data.endsAt)) {
+      return { kind: 'conflict' as const };
+    }
+    return { kind: 'created' as const, row: await this.create(businessId, data) };
+  }
+
   async updateNotes(businessId: string, id: string, notes: string | null) {
     const row = await this.findById(businessId, id);
     if (!row) return null;
@@ -58,12 +68,41 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     return row;
   }
 
+  async rescheduleAtomically(businessId: string, id: string, startsAt: Date, endsAt: Date) {
+    const current = await this.findById(businessId, id);
+    if (!current) return { kind: 'not_found' as const };
+    if (await this.hasConflict(businessId, startsAt, endsAt, id)) {
+      return { kind: 'conflict' as const };
+    }
+    return {
+      kind: 'updated' as const,
+      row: (await this.reschedule(businessId, id, startsAt, endsAt)) as AppointmentRecord,
+    };
+  }
+
   async updateStatus(businessId: string, id: string, status: AppointmentStatus) {
     const row = await this.findById(businessId, id);
     if (!row) return null;
     row.status = status;
     row.updatedAt = new Date();
     return row;
+  }
+
+  async transitionAtomically(
+    businessId: string,
+    id: string,
+    expectedStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ) {
+    const current = await this.findById(businessId, id);
+    if (!current) return { kind: 'not_found' as const };
+    if (current.status !== expectedStatus) {
+      return { kind: 'invalid_transition' as const, currentStatus: current.status };
+    }
+    return {
+      kind: 'updated' as const,
+      row: (await this.updateStatus(businessId, id, nextStatus)) as AppointmentRecord,
+    };
   }
 
   async hasConflict(businessId: string, startsAt: Date, endsAt: Date, excludeId?: string) {

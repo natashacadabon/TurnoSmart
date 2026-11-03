@@ -55,13 +55,17 @@ export class AppointmentService {
     );
     const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
     await this.ensureAvailable(businessId, startsAt, endsAt);
-    return this.appointments.create(businessId, {
+    const result = await this.appointments.createAtomically(businessId, {
       customerId: input.customerId,
       serviceId: input.serviceId,
       startsAt,
       endsAt,
       notes: input.notes ?? null,
     });
+    if (result.kind === 'conflict') {
+      throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
+    }
+    return result.row;
   }
 
   async updateNotes(businessId: string, id: string, notes: string | null) {
@@ -85,9 +89,12 @@ export class AppointmentService {
     );
     const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
     await this.ensureAvailable(businessId, startsAt, endsAt, id);
-    const row = await this.appointments.reschedule(businessId, id, startsAt, endsAt);
-    if (!row) throw notFound('Turno');
-    return row;
+    const result = await this.appointments.rescheduleAtomically(businessId, id, startsAt, endsAt);
+    if (result.kind === 'not_found') throw notFound('Turno');
+    if (result.kind === 'conflict') {
+      throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
+    }
+    return result.row;
   }
 
   async transition(businessId: string, id: string, status: AppointmentStatus) {
@@ -99,9 +106,20 @@ export class AppointmentService {
         `No se puede pasar de ${current.status} a ${status}`,
       );
     }
-    const row = await this.appointments.updateStatus(businessId, id, status);
-    if (!row) throw notFound('Turno');
-    return row;
+    const result = await this.appointments.transitionAtomically(
+      businessId,
+      id,
+      current.status,
+      status,
+    );
+    if (result.kind === 'not_found') throw notFound('Turno');
+    if (result.kind === 'invalid_transition') {
+      throw new AppError(
+        'APPOINTMENT_INVALID_TRANSITION',
+        `No se puede pasar de ${result.currentStatus} a ${status}`,
+      );
+    }
+    return result.row;
   }
 
   private async validateBooking(

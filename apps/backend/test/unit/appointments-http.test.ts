@@ -179,4 +179,21 @@ describe('API de turnos - Fase 2', () => {
       ).status,
     ).toBe(201);
   });
+
+  it('rechaza una de dos reservas simultaneas para el mismo horario', async () => {
+    const { ctx, auth, customer, service } = await setup();
+    const payload = {
+      customerId: customer.id,
+      serviceId: service.id,
+      startsAt: '2099-01-05T16:00:00.000Z',
+    };
+
+    const responses = await Promise.all(
+      [1, 2].map(() => request(ctx.app).post('/api/appointments').set(auth).send(payload)),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(responses.find((response) => response.status === 409)?.body.error.code).toBe(
+      'APPOINTMENT_TIME_CONFLICT',
+    );
+  });
 });
