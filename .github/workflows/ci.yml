@@ -8,6 +8,7 @@ on:
 
   push:
     branches:
+      - 'feat/**'
       - dev
       - main
 
@@ -23,10 +24,41 @@ jobs:
     name: Quality Checks
 
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      vercel: ${{ steps.release.outputs.target }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Vercel release
+        id: release
+        if: vars.VERCEL_CD_ENABLED == 'true'
+        uses: actions/github-script@v8
+        env:
+          FEATURE_PREVIEWS: ${{ vars.VERCEL_FEATURE_PREVIEWS }}
+        with:
+          script: |
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              if (process.env.FEATURE_PREVIEWS !== 'true' &&
+                  pr.base.ref === 'dev' && pr.head.repo.full_name === pr.base.repo.full_name &&
+                  context.actor !== 'dependabot[bot]') core.setOutput('target', 'preview');
+              return;
+            }
+            if (process.env.FEATURE_PREVIEWS !== 'true' ||
+                !context.ref.startsWith('refs/heads/feat/') ||
+                context.payload.deleted || context.actor === 'dependabot[bot]') return;
+            const { execFileSync } = await import('node:child_process');
+            const { frontendChanged } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const base = execFileSync('git', ['merge-base', 'origin/dev', context.sha], { encoding: 'utf8' }).trim();
+            if (frontendChanged(base, context.sha)) core.setOutput('target', 'preview');
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -63,11 +95,35 @@ jobs:
           npm test
           npm run test:config --workspace=apps/frontend
 
-      - name: Build
-        run: npm run build
+      - name: Cache Next.js build
+        if: steps.release.outputs.target == ''
+        uses: actions/cache@v5
+        with:
+          path: apps/frontend/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node22-next-v1-${{ hashFiles('package-lock.json') }}-${{ hashFiles('package.json', 'apps/frontend/src/**', 'apps/frontend/scripts/**', 'apps/frontend/*.json', 'apps/frontend/next.config.*', 'packages/shared/src/**', 'packages/shared/*.json', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-node22-next-v1-${{ hashFiles('package-lock.json') }}-
+
+      - name: Build backend
+        run: npm run build --workspace=apps/backend
+
+      - name: Build frontend for CI
+        if: steps.release.outputs.target == ''
+        run: npm run build --workspace=apps/frontend
         env:
           NEXT_PUBLIC_USE_AZURE: 'false'
           NEXT_PUBLIC_API_URL_RENDER: https://turnosmart-render.invalid
           NEXT_PUBLIC_API_URL_AZURE: https://turnosmart-azure.invalid
           NEXT_PUBLIC_SUPABASE_URL: https://supabase.invalid
           NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ci_build_only
+
+  vercel:
+    needs: quality
+    if: needs.quality.outputs.vercel != ''
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/frontend-deploy.yml
+    with:
+      environment: ${{ needs.quality.outputs.vercel }}

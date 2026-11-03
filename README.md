@@ -42,7 +42,7 @@ Con esta informacion, el negocio puede:
 - Errores uniformes en la API y pantalla de error recuperable en el frontend.
 - Modelo PostgreSQL multi-tenant con Prisma, migraciones, RLS y seed idempotente.
 - Pruebas unitarias, de integracion con PostgreSQL y end-to-end con Playwright.
-- CI con formato, lint, typecheck, tests unitarios y build; deploy manual del frontend.
+- CI con formato, lint, typecheck, tests unitarios y build; CD en Vercel Hobby y Render Free.
 - Docker Compose de desarrollo y Git hooks con Husky, lint-staged y Commitlint.
 
 ### En desarrollo
@@ -58,7 +58,7 @@ Con esta informacion, el negocio puede:
 - Recordatorios por email.
 - Despliegue del backend en Azure App Service y observabilidad.
 
-El frontend tiene un workflow de despliegue manual hacia Vercel (ver [Despliegue del frontend](#despliegue-del-frontend)). No hay recursos de produccion documentados todavia.
+El despliegue continuo desde `dev` se habilita con la configuracion de [Vercel](infra/vercel/README.md) y [Render](infra/render/README.md).
 
 ## Stack
 
@@ -69,7 +69,7 @@ El frontend tiene un workflow de despliegue manual hacia Vercel (ver [Despliegue
 | Datos           | Supabase PostgreSQL y Auth, migraciones, seed y RLS                            | —                                  |
 | IA              | Gemini API (`@google/genai`) con salida validada, timeout y limite por usuario | —                                  |
 | Pruebas         | Vitest, Supertest y Playwright                                                 | Pruebas de turnos y concurrencia   |
-| Infraestructura | Docker Compose, GitHub Actions (CI y deploy manual), Vercel                    | Azure App Service y observabilidad |
+| Infraestructura | Docker Compose, GitHub Actions, Vercel Hobby y Render Free                     | Azure App Service y observabilidad |
 
 ## Estructura
 
@@ -80,7 +80,7 @@ packages/shared/     Contratos, validaciones y tipos compartidos
 docs/                Arquitectura, contratos, costos y backlog
 infra/docker/        Docker de desarrollo
 tests/               Estrategia de pruebas
-.github/workflows/   CI y deploy manual del frontend
+.github/workflows/   CI y despliegue Vercel
 AI-DECISIONS.md      Decisiones asistidas por IA
 .codex/agents/       Configuraciones de agentes para revision del modulo B
 .husky/              Hooks de calidad y Conventional Commits
@@ -238,7 +238,7 @@ npm run build
 npm test
 ```
 
-`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions ejecuta estos controles en pushes y pull requests hacia `dev` y `main`. No hay CD automatico: el deploy del frontend es manual (`.github/workflows/frontend-deploy.yml`).
+`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions valida pushes a `feat/**`, `dev` y `main`, y PRs hacia `dev` o `main`.
 
 `format` escribe archivos; `format:check` solo verifica. Si hay cambios ajenos en curso, formatear unicamente los archivos propios con `npx prettier --write <archivos>`. No hay suites de tests propias en frontend o shared ejecutadas por `npm test`; E2E es un comando separado. Los comandos de raiz compilan shared en el orden necesario.
 
@@ -262,23 +262,18 @@ Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API
 
 ## Despliegue del frontend
 
-El frontend se despliega manualmente en Vercel o Azure, con el workflow **Frontend deploy (manual)** (`.github/workflows/frontend-deploy.yml`). No se despliega en cada push. En produccion requiere una API publica con HTTPS: desde Vercel no se puede usar `http://localhost:4000`.
-
-Preparacion y procedimiento completo: [Vercel Hobby para la demo](infra/vercel/README.md).
-El proyecto usa Root Directory apps/frontend, Node 22 y vercel.json versionado;
-compila shared desde la raiz y valida ambos origenes HTTPS y las variables Supabase antes de construir.
-El workflow separa `target` (API Render/Azure) de `frontend_target` (publicacion Vercel/Azure) y deriva `NEXT_PUBLIC_USE_AZURE` del primero.
-Cambiar el proveedor requiere rebuild, sin fallback automatico ni uso de `NEXT_PUBLIC_API_URL` legacy.
-Hobby exige uso personal no comercial y confirmacion explicita antes de publicar.
-No hay deploy por push ni fallback a infraestructura paga.
+Con CD activado, **TurnoSmart CI** llama a **Frontend deploy** tras Quality
+Checks. El modo feature publica Preview para pushes a `feat/**` con cambios
+relevantes de frontend. Production se publica por dispatch desde la rama
+configurada. Render observa CI y despliega Dev desde `dev` segun sus filtros.
+Ver [Vercel Hobby](infra/vercel/README.md) y [Render Free](infra/render/README.md)
+para activacion, variables, CORS, validacion y rollback.
 
 Durante `next dev`, el frontend se conecta directamente a `http://localhost:4000`;
 los builds de produccion siguen requiriendo origenes HTTPS publicos.
 
-La CLI y .vercel/project.json se utilizan desde la **raiz del monorepo**.
-Configurar el entorno publico en Production antes del build; los valores de
-GitHub Variables del workflow deben coincidir con Vercel.
-La guia incluye redirects Supabase, CORS Azure, pruebas y eliminacion.
+La CLI usa la **raiz del monorepo** y toma las variables publicas de Production
+o Preview en Vercel antes de compilar con Node 22.
 
 ## Datos y multi-tenancy
 

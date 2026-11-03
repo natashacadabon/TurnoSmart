@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseEnv } from 'node:util';
 import { validatePublicEnv } from './public-env.mjs';
 
 const publicNames = [
@@ -24,14 +26,54 @@ export function assertSuccessfulCi(runs, sha) {
   );
 }
 
-export function validateDeployment(env) {
-  validatePublicEnv(env);
-  for (const name of ['VERCEL_TOKEN', 'VERCEL_ORG_ID', 'VERCEL_PROJECT_ID'])
-    assert(env[name]?.trim() && !/[\r\n]/.test(env[name]), `Falta variable valida: ${name}`);
+export function affectsFrontend(path) {
+  return (
+    /^(apps\/frontend\/|packages\/shared\/|\.husky\/|\.github\/workflows\/(ci|frontend-deploy)\.yml$)/.test(
+      path,
+    ) || /^(package(-lock)?\.json|\.npmrc|\.nvmrc|tsconfig[^/]*\.json)$/.test(path)
+  );
+}
+
+export function frontendChanged(previous, current) {
+  // Sin una base conocida (por ejemplo, primer push o historial reescrito), reconstruir.
+  if (!previous) return true;
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', previous, current], { stdio: 'ignore' });
+  } catch {
+    return true;
+  }
+  return execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', previous, current], {
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .some(affectsFrontend);
+}
+
+export async function assertCurrentRevision(github, context) {
+  if (context.eventName === 'pull_request') {
+    const { data } = await github.rest.pulls.get({
+      ...context.repo,
+      pull_number: context.payload.pull_request.number,
+    });
+    assert(
+      data.state === 'open' && data.base.ref === 'dev' && data.merge_commit_sha === context.sha,
+      'Preview obsoleta: ejecutar CI para la revision actual del PR.',
+    );
+    return;
+  }
+  const { data } = await github.rest.git.getRef({
+    ...context.repo,
+    ref: context.ref.slice('refs/'.length),
+  });
+  assert(data.object.sha === context.sha, 'Despliegue obsoleto: la rama cambio durante CI.');
 }
 
 export function prepareVercel(root, env) {
-  validateDeployment(env);
+  const target = env.DEPLOY_TARGET;
+  assert(target === 'preview' || target === 'production', 'Entorno Vercel invalido');
+  const checkpoint = env.CHECKPOINT === 'true';
+  assert(!checkpoint || target === 'preview', 'Checkpoint Azure solo en Preview');
+  const filename = `.env.${target}.local`;
   const projectPath = join(root, '.vercel/project.json');
   const project = JSON.parse(readFileSync(projectPath, 'utf8'));
   assert.equal(project.projectId, env.VERCEL_PROJECT_ID, 'Proyecto Vercel incorrecto');
@@ -46,19 +88,40 @@ export function prepareVercel(root, env) {
     outputDirectory: null,
   });
   writeFileSync(projectPath, JSON.stringify(project));
-  // pull descarga env remoto. Reemplazarlo por allowlist del runner antes de build.
-  // Cubrir ambos layouts del CLI para monorepos; no copiar secretos de servidor.
+  // Conservar los valores publicos del target de Vercel y descartar el resto.
+  const pulled = parseEnv(readFileSync(join(root, '.vercel', filename), 'utf8'));
+  const values = Object.fromEntries(publicNames.map((name) => [name, pulled[name]]));
+  if (checkpoint) {
+    values.NEXT_PUBLIC_USE_AZURE = 'true';
+    values.NEXT_PUBLIC_API_URL_RENDER = env.CHECKPOINT_RENDER_URL;
+    values.NEXT_PUBLIC_API_URL_AZURE = env.CHECKPOINT_AZURE_URL;
+  } else {
+    assert(
+      values.NEXT_PUBLIC_USE_AZURE === undefined || values.NEXT_PUBLIC_USE_AZURE === 'false',
+      'Configurar NEXT_PUBLIC_USE_AZURE=false en Vercel para CD.',
+    );
+  }
+  validatePublicEnv(values);
+  if (target === 'preview' && env.GITHUB_EVENT_NAME === 'push') {
+    assert(env.EXPECTED_DEV_API && env.EXPECTED_DEV_SUPABASE, 'Faltan los origenes Dev esperados');
+    assert(
+      new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin === env.EXPECTED_DEV_API &&
+        new URL(values.NEXT_PUBLIC_SUPABASE_URL).origin === env.EXPECTED_DEV_SUPABASE,
+      'Preview requiere los origenes Render y Supabase de Dev',
+    );
+  }
   const contents = publicNames
     .map((name) => {
-      const value = env[name] ?? 'false';
+      const value = values[name] ?? 'false';
       assert(!/[\r\n"\\$`]/.test(value), `Valor no serializable: ${name}`);
       return `${name}="${value}"`;
     })
     .join('\n');
   for (const dir of ['.vercel', 'apps/frontend/.vercel']) {
     mkdirSync(join(root, dir), { recursive: true });
-    writeFileSync(join(root, dir, '.env.production.local'), `${contents}\n`, { mode: 0o600 });
+    writeFileSync(join(root, dir, filename), `${contents}\n`, { mode: 0o600 });
   }
+  return join('.vercel', filename);
 }
 
 function javascriptFiles(dir, prefix = '') {
@@ -87,7 +150,7 @@ export function verifyOutput(root) {
     );
 }
 
-export async function verifyPublished(root, deploymentUrl, request = fetch) {
+export async function verifyPublished(root, deploymentUrl, request = fetch, bypass) {
   const origin = new URL(deploymentUrl);
   assert(
     origin.protocol === 'https:' &&
@@ -103,6 +166,7 @@ export async function verifyPublished(root, deploymentUrl, request = fetch) {
     const response = await request(new URL(path, origin), {
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
+      headers: bypass ? { 'x-vercel-protection-bypass': bypass } : undefined,
     });
     assert(response.ok, 'Deployment inaccesible; revisar readiness y Deployment Protection');
     return Buffer.from(await response.arrayBuffer());
@@ -140,10 +204,14 @@ export async function verifyPublished(root, deploymentUrl, request = fetch) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const root = process.cwd();
   const command = process.argv[2];
-  if (command === 'validate') validateDeployment(process.env);
-  else if (command === 'prepare') prepareVercel(root, process.env);
+  if (command === 'prepare') console.log(prepareVercel(root, process.env));
   else if (command === 'output') verifyOutput(root);
-  else if (command === 'published') await verifyPublished(root, process.env.DEPLOYMENT_URL);
+  else if (command === 'published')
+    await verifyPublished(
+      root,
+      process.env.DEPLOYMENT_URL,
+      fetch,
+      process.env.VERCEL_AUTOMATION_BYPASS,
+    );
   else throw new Error('Comando de verificacion desconocido');
-  console.log(`Verificacion de deployment: ${command} OK`);
 }

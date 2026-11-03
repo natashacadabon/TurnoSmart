@@ -1,7 +1,7 @@
-# Backend Express/Prisma en Render Free — preparado, sin desplegar
+# Backend Express/Prisma en Render Free
 
 Un Web Service nativo Node 22 desde GitHub, con Supabase Cloud existente. Sin
-Render Postgres, discos, frontend ni servicios pagos. Azure y Vercel no cambian.
+Render Postgres, discos, frontend ni servicios pagos.
 `render.yaml` en la raiz documenta el servicio; crear/sincronizar un Blueprint
 inicia el primer deploy, por lo que no hacerlo hasta autorizar la ventana.
 
@@ -15,15 +15,31 @@ En New → Web Service → Git Provider → GitHub, elegir repo/rama autorizados
 | Instance Type      | Free                                                                                   |
 | Region             | Virginia (verificar disponibilidad en la cuenta; cerca del Supabase East US existente) |
 | Root Directory     | **Vacio**, raiz del repo; no apps/backend                                              |
+| Branch             | `dev`                                                                                  |
 | Build Command      | `npm run build:render`                                                                 |
 | Start Command      | `npm run start:render`                                                                 |
 | Health Check Path  | `/health`                                                                              |
-| Auto-Deploy        | Off (`autoDeployTrigger: off`)                                                         |
+| Auto-Deploy        | After CI Checks Pass (`autoDeployTrigger: checksPass`)                                 |
+| Build Filters      | Included Paths de `render.yaml`                                                        |
 | Pre-Deploy Command | Vacio                                                                                  |
 
-No habilitar previews, hooks iniciales, cron, keep-alive ni autoupgrades. El primer
-deploy al crear el servicio sigue siendo manual; los siguientes se disparan desde
-Manual Deploy solo cuando hagan falta. No se agregan workflows de GitHub Actions.
+En el servicio existente, aplicar los settings manualmente despues de validar
+la CI de `dev`. Si se usa Blueprint, revisar el plan de sincronizacion porque
+aplicarlo puede iniciar un deploy. Los filtros incluyen backend, shared y
+configuracion de build/lock de la raiz. Los cambios solo frontend no disparan
+Render. Mantener deshabilitados Service Previews, Preview Environments, deploy
+hooks, cron, keep-alive y upgrades. Render observa los checks de GitHub del
+commit. Un check fallido bloquea el despliegue de Render. La publicacion de
+Vercel Preview corre en ramas feature y no forma parte de ese push. El modo nativo evita tokens de Render
+en GitHub. Ver [integracion con CI](https://render.com/docs/deploys#integrating-with-ci)
+y [filtros](https://render.com/docs/monorepo-support#setting-build-filters).
+
+Este servicio es Dev compartido. Confirmar que DATABASE_URL, SUPABASE_URL y
+SUPABASE_ANON_KEY sean del entorno Dev antes de habilitar Previews en Vercel.
+Production, si ya existe, requiere un servicio y una base separados.
+Para pausar CD, elegir Auto-Deploy Off y desactivar cualquier automatizacion
+externa que llame al servicio. Si se revierte un deploy desde Render, revisar
+el estado de Auto-Deploy antes de reactivarlo.
 
 Build Command expande exactamente a:
 
@@ -65,6 +81,25 @@ actualiza durante siguientes sincronizaciones. No pegar .env completos ni imprim
 configuracion. DIRECT_URL no es necesaria para este build/start; se reserva para
 migraciones manuales fuera de esta tarea. No configurar NEXT_PUBLIC_* en Render.
 
+Ante un 403 `Origen no permitido` en `OPTIONS /api/me`, comparar el header
+`Origin` de Network con `CORS_ORIGIN` del **Web Service que recibe el request**.
+Pegar el origen exacto, sin comillas, rutas ni barra final. Si hay otros origenes
+permitidos, conservarlos separados por coma. Un valor propio del servicio tiene
+prioridad sobre los grupos de entorno. `Save only` guarda el valor para el
+proximo deploy; cuando este autorizado, `Save and deploy` aplica el cambio
+reutilizando el build actual. Repetir el preflight contra la API y comprobar
+204 con `Access-Control-Allow-Origin` igual al origen solicitado.
+[Variables de entorno en Render](https://render.com/docs/configure-environment-variables).
+
+Para diagnosticar la instancia activa, desplegar la revision que incorpora el
+diagnostico con `CORS_DIAGNOSTICS=true` en el servicio. En Logs buscar
+`cors_startup_diagnostic`: `origins` muestra la lista efectiva de origenes
+canonicos, `nonCanonicalEntries` cuenta entradas con formato incorrecto sin
+imprimirlas y `source` distingue una variable ausente del valor de entorno.
+Comparar `renderCommit` con el SHA del deploy Live en Events. En revisiones
+anteriores, `version: dev` de /health solo indica que no se fijo RELEASE_SHA.
+Quitar `CORS_DIAGNOSTICS` despues de la comprobacion.
+
 Preferir el pooler **Session** IPv4 de Supabase (normalmente puerto 5432) si la
 conexion directa IPv6 no es accesible desde Render. Usar la URL real del panel del
 proyecto, con password URL-encoded y sslmode=require. Si se elige Transaction
@@ -72,9 +107,8 @@ pooler (6543), revisar compatibilidad Prisma/pgbouncer y limites antes de cambia
 no probar credenciales reales en logs ni ejecutar migraciones para comprobarlo.
 
 GEMINI_API_KEY es opcional: omitirla deja explicaciones en 503 AI_UNAVAILABLE,
-sin impedir startup; no habilitar consumo pago para esta demo. El resto de limites
-IA conserva defaults existentes. Nunca configurar claves privilegiadas del backend
-en el frontend; no se cambia aqui su NEXT_PUBLIC_API_URL ni su despliegue.
+sin impedir startup. El resto de limites IA conserva defaults existentes.
+Las credenciales privilegiadas del backend se configuran solo en Render.
 
 ## Validacion local Linux, sin secretos ni BD remota
 
@@ -96,11 +130,18 @@ No valida credenciales/conectividad reales ni reemplaza la validacion de Render.
 
 ## Ventana autorizada y limites Free
 
-Antes de demo: confirmar Free/Node/raiz/comandos/variables/autodeploy Off. Desplegar
-manualmente y verificar `https://<servicio>.onrender.com/health` (200) y /ready (200
+Antes de demo: confirmar Free/Node/raiz/comandos/variables y Auto-Deploy
+After CI Checks Pass. Verificar `https://<servicio>.onrender.com/health` (200) y /ready (200
 con Supabase), CORS desde el origen permitido, sin token 401 y login real contra el
 backend. /health solo verifica proceso; no prueba BD, auth remota ni aislamiento RLS.
 No usar /ready como health check de plataforma para evitar reinicios por BD pausada.
+
+Para rollback, poner Auto-Deploy en Off y volver a un deploy exitoso desde
+Events (o seleccionar su SHA mediante Manual Deploy → Deploy a specific commit).
+Verificar /health y /ready, revertir o corregir `dev` y restablecer checksPass
+cuando CI este verde. Si fallaron corridas o Render no detecto un cambio tras
+una pausa, comparar el SHA desplegado con `dev` y recuperar manualmente desde
+un SHA validado. El build Linux de Render instala y genera Prisma en su entorno.
 
 Free se suspende tras 15 minutos sin trafico y el primer request puede tardar cerca
 de un minuto; hay limites de horas compartidas, memoria, trafico y minutos de build.

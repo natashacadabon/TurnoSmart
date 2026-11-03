@@ -169,7 +169,8 @@ test('hosting incluye devDependencies y permite lifecycle scripts npm', () => {
     assert(!command.includes('--ignore-scripts'));
   }
   const workflow = read('../.github/workflows/frontend-deploy.yml');
-  assert(workflow.includes('HUSKY=0 npm ci --include=dev'));
+  // Vercel CLI instala con vercel.installCommand. CI instala desde la raiz.
+  assert.match(read('../.github/workflows/ci.yml'), /run: npm ci --include=dev/);
   assert(!workflow.includes('--ignore-scripts'));
   assert.match(root.scripts['build:render'], /npm run prisma:generate/);
   assert(!/migrate|seed|db push/.test(root.scripts['build:render']));

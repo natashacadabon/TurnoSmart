@@ -4,12 +4,24 @@ services:
     name: turnosmart-backend-demo
     runtime: node
     plan: free
+    branch: dev
     region: virginia
     # Sin rootDir: Root Directory es la raiz del monorepo, no apps/backend.
     buildCommand: npm run build:render
     startCommand: npm run start:render
     healthCheckPath: /health
-    autoDeployTrigger: 'off'
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - apps/backend/**
+        - packages/shared/**
+        - package.json
+        - package-lock.json
+        - .npmrc
+        - .nvmrc
+        - .husky/**
+        - tsconfig*.json
+        - render.yaml
     envVars:
       - key: NODE_VERSION
         value: 22.23.4
