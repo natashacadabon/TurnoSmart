@@ -129,7 +129,7 @@ entonces se puede revisar la UI publica. Usar cuentas y datos de prueba en Dev.
    permitir pushes `feat/**` de colaboradores de confianza, los PR internos
    durante el piloto y `dev` para checkpoints. En `vercel-preview` definir
    `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
-   sin slash final. El build de feature falla si el scope Preview apunta a
+   sin slash final. Los Previews de Render fallan si el scope Preview apunta a
    otros origenes. Verificar tambien que `DATABASE_URL` de Render Dev apunte
    a la base Dev. La comprobacion del bundle no puede inspeccionar esa conexion.
    Guardar `VERCEL_TOKEN` como secret de cada environment, con alcance al equipo

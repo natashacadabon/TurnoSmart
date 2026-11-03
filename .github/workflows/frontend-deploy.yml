@@ -72,7 +72,7 @@ jobs:
   deploy:
     needs: preflight
     if: >-
-      ${{ !cancelled() &&
+      ${{ always() && !cancelled() &&
         ((github.event_name == 'workflow_dispatch' && needs.preflight.result == 'success') ||
          (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feat/') && inputs.environment == 'preview') ||
          (github.event_name == 'pull_request' && github.base_ref == 'dev' && inputs.environment == 'preview' &&
@@ -144,7 +144,11 @@ jobs:
           # shellcheck source=/dev/null
           source "$env_file"
           set +a
-          npx --yes "vercel@$VERCEL_CLI_VERSION" build --environment="$DEPLOY_TARGET" --output .vercel/output
+          flags=()
+          if [[ "$DEPLOY_TARGET" == production ]]; then
+            flags=(--prod)
+          fi
+          npx --yes "vercel@$VERCEL_CLI_VERSION" build "${flags[@]}" --output .vercel/output
           npm run verify:public-build --workspace=apps/frontend
           node apps/frontend/scripts/deploy-config.mjs output
 
@@ -160,7 +164,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          flags=(--environment="$DEPLOY_TARGET")
+          flags=()
           if [[ "$DEPLOY_TARGET" == production ]]; then
             flags=(--prod --skip-domain)
           fi

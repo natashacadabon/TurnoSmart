@@ -102,7 +102,7 @@ export function prepareVercel(root, env) {
     );
   }
   validatePublicEnv(values);
-  if (target === 'preview' && env.GITHUB_EVENT_NAME === 'push') {
+  if (target === 'preview' && !checkpoint) {
     assert(env.EXPECTED_DEV_API && env.EXPECTED_DEV_SUPABASE, 'Faltan los origenes Dev esperados');
     assert(
       new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin === env.EXPECTED_DEV_API &&

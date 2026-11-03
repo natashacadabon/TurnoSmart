@@ -91,14 +91,9 @@ reutilizando el build actual. Repetir el preflight contra la API y comprobar
 204 con `Access-Control-Allow-Origin` igual al origen solicitado.
 [Variables de entorno en Render](https://render.com/docs/configure-environment-variables).
 
-Para diagnosticar la instancia activa, desplegar la revision que incorpora el
-diagnostico con `CORS_DIAGNOSTICS=true` en el servicio. En Logs buscar
-`cors_startup_diagnostic`: `origins` muestra la lista efectiva de origenes
-canonicos, `nonCanonicalEntries` cuenta entradas con formato incorrecto sin
-imprimirlas y `source` distingue una variable ausente del valor de entorno.
-Comparar `renderCommit` con el SHA del deploy Live en Events. En revisiones
-anteriores, `version: dev` de /health solo indica que no se fijo RELEASE_SHA.
-Quitar `CORS_DIAGNOSTICS` despues de la comprobacion.
+En Events, comprobar el SHA y la fecha del deploy Live para confirmar que
+el cambio de entorno ya se aplico. Si /health responde `version: dev`,
+ese valor es el fallback de RELEASE_SHA y no identifica el commit activo.
 
 Preferir el pooler **Session** IPv4 de Supabase (normalmente puerto 5432) si la
 conexion directa IPv6 no es accesible desde Render. Usar la URL real del panel del

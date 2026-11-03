@@ -93,7 +93,7 @@ test('CD reutiliza el workflow tras Quality y Render queda limitado a dev y sus 
   const commands = [
     'pull --yes',
     'deploy-config.mjs prepare',
-    'build --environment=',
+    'build "${flags[@]}" --output .vercel/output',
     'verify:public-build',
     'deploy-config.mjs output',
     'deploy --prebuilt',
@@ -191,7 +191,12 @@ for (const target of ['production', 'preview'])
       .map(([name, value]) => `${name}="${value}"`)
       .join('\n');
     write(`.vercel/${filename}`, `${pulled}\nSERVER_SECRET=private`);
-    const deployment = { ...env, DEPLOY_TARGET: target };
+    const deployment = {
+      ...env,
+      DEPLOY_TARGET: target,
+      EXPECTED_DEV_API: new URL(env.NEXT_PUBLIC_API_URL_RENDER).origin,
+      EXPECTED_DEV_SUPABASE: new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin,
+    };
     assert.equal(prepareVercel(root, deployment), join('.vercel', filename));
     for (const path of ['.vercel', 'apps/frontend/.vercel']) {
       const cache = readFileSync(join(root, path, filename), 'utf8');
@@ -219,23 +224,21 @@ for (const target of ['production', 'preview'])
       CHECKPOINT_AZURE_URL: env.NEXT_PUBLIC_API_URL_AZURE,
     };
     if (target === 'preview') {
-      const push = {
-        ...deployment,
-        GITHUB_EVENT_NAME: 'push',
-        EXPECTED_DEV_API: new URL(env.NEXT_PUBLIC_API_URL_RENDER).origin,
-        EXPECTED_DEV_SUPABASE: new URL(env.NEXT_PUBLIC_SUPABASE_URL).origin,
-      };
-      assert.equal(prepareVercel(root, push), join('.vercel', filename));
       assert.throws(
-        () => prepareVercel(root, { ...push, EXPECTED_DEV_API: '' }),
+        () => prepareVercel(root, { ...deployment, EXPECTED_DEV_API: '' }),
         /Faltan los origenes Dev/,
       );
       assert.throws(
-        () => prepareVercel(root, { ...push, EXPECTED_DEV_API: 'https://production.example' }),
+        () =>
+          prepareVercel(root, { ...deployment, EXPECTED_DEV_API: 'https://production.example' }),
         /origenes Render y Supabase de Dev/,
       );
       assert.throws(
-        () => prepareVercel(root, { ...push, EXPECTED_DEV_SUPABASE: 'https://production.example' }),
+        () =>
+          prepareVercel(root, {
+            ...deployment,
+            EXPECTED_DEV_SUPABASE: 'https://production.example',
+          }),
         /origenes Render y Supabase de Dev/,
       );
       prepareVercel(root, checkpoint);
