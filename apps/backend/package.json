@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "node scripts/ensure-prisma-client.mjs && tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
+    "pretypecheck": "npm run build --workspace=@turnosmart/shared",
     "typecheck": "node scripts/ensure-prisma-client.mjs && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
