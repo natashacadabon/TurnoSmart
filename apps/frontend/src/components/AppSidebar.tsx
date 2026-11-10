@@ -11,6 +11,7 @@ import { Box, Button, Chip, Stack, Typography } from '@mui/material';
 import type { Role } from '@turnosmart/shared';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useUnsavedChanges } from './UnsavedChangesProvider';
 import { useAuth } from './AuthProvider';
 import { softDangerButtonSx } from './ui';
 import styles from './AppSidebar.module.css';
@@ -18,6 +19,7 @@ import styles from './AppSidebar.module.css';
 /** Mismas secciones que el dashboard; Agenda, Predicciones y Reportes siguen siendo la vista demo de /. */
 const NAV = [
   { href: '/', label: 'Agenda', icon: <CalendarMonthRoundedIcon fontSize="small" /> },
+  { href: '/services', label: 'Servicios', icon: <StorefrontRoundedIcon fontSize="small" /> },
   { href: '/customers', label: 'Clientes', icon: <GroupsRoundedIcon fontSize="small" /> },
   { href: '/#riesgo', label: 'Predicciones IA', icon: <AutoAwesomeRoundedIcon fontSize="small" /> },
   { href: '/#reportes', label: 'Reportes', icon: <QueryStatsRoundedIcon fontSize="small" /> },
@@ -33,6 +35,7 @@ function isActive(href: string, pathname: string): boolean {
 /** Sidebar del dashboard, compartido por todas las pantallas. Abajo: cuenta y cierre de sesión. */
 export function AppSidebar() {
   const pathname = usePathname();
+  const { allowNavigation } = useUnsavedChanges();
   const { status, me, signOut } = useAuth();
   const onboarded = me?.onboarded ? me : null;
   const account = onboarded
@@ -57,6 +60,9 @@ export function AppSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onNavigate={(event: { preventDefault: () => void }) => {
+                if (!allowNavigation()) event.preventDefault();
+              }}
               className={active ? styles.navActive : undefined}
               aria-current={active ? 'page' : undefined}
             >
@@ -85,6 +91,9 @@ export function AppSidebar() {
               <Button
                 component={Link}
                 href="/settings"
+                onNavigate={(event: { preventDefault: () => void }) => {
+                  if (!allowNavigation()) event.preventDefault();
+                }}
                 variant={pathname.startsWith('/settings') ? 'contained' : 'outlined'}
                 size="small"
                 startIcon={<StorefrontRoundedIcon />}
@@ -95,7 +104,9 @@ export function AppSidebar() {
                 variant="outlined"
                 size="small"
                 startIcon={<LogoutRoundedIcon />}
-                onClick={signOut}
+                onClick={() => {
+                  if (allowNavigation()) void signOut();
+                }}
                 data-testid="logout"
                 sx={softDangerButtonSx}
               >

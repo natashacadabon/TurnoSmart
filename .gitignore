@@ -12,6 +12,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!/.env.dev.example
 
 # Logs
 *.log
@@ -40,3 +41,5 @@ playwright/.cache/
 *.pem
 *.key
 
+
+.local/

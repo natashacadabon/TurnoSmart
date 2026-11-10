@@ -37,7 +37,7 @@ Con esta informacion, el negocio puede:
 - Configuracion del negocio (nombre y zona horaria).
 - API de servicios: listado paginado, alta y edicion/desactivacion (`GET/POST /api/services`, `PATCH /api/services/:id`); sin borrado fisico ni pantalla de servicios.
 - Historial de eventos de un turno y explicacion del riesgo con Gemini, bajo demanda.
-- Agenda con el diseño del dashboard y datos reales del negocio; dashboard de ejemplo en `/demo`.
+- Agenda con el diseÃ±o del dashboard y datos reales del negocio; dashboard de ejemplo en `/demo`.
 - Aislamiento entre negocios en la API (cada consulta filtra por `businessId`) y RLS en la base.
 - Errores uniformes en la API y pantalla de error recuperable en el frontend.
 - Modelo PostgreSQL multi-tenant con Prisma, migraciones, RLS y seed idempotente.
@@ -54,7 +54,7 @@ Con esta informacion, el negocio puede:
 
 - Pantallas de servicios, disponibilidad semanal y consulta de horarios libres.
 - Reserva, confirmacion, reprogramacion y cancelacion de turnos; calculo del score de riesgo.
-- Registro publico, recuperacion de contraseña e invitaciones de miembros.
+- Registro publico, recuperacion de contraseÃ±a e invitaciones de miembros.
 - Recordatorios por email.
 - Despliegue del backend en Azure App Service y observabilidad.
 
@@ -66,8 +66,8 @@ El despliegue continuo desde `dev` se habilita con la configuracion de [Vercel](
 | --------------- | ------------------------------------------------------------------------------ | ---------------------------------- |
 | Frontend        | Next.js 16, React 19, TypeScript, Material UI, CSS Modules, Supabase JS (Auth) | Calendario de agenda               |
 | Backend         | Node.js 22, Express 5, TypeScript 5, Zod 4, helmet, Prisma 6.12                | Disponibilidad, turnos y score     |
-| Datos           | Supabase PostgreSQL y Auth, migraciones, seed y RLS                            | —                                  |
-| IA              | Gemini API (`@google/genai`) con salida validada, timeout y limite por usuario | —                                  |
+| Datos           | Supabase PostgreSQL y Auth, migraciones, seed y RLS                            | â€”                                |
+| IA              | Gemini API (`@google/genai`) con salida validada, timeout y limite por usuario | â€”                                |
 | Pruebas         | Vitest, Supertest y Playwright                                                 | Pruebas de turnos y concurrencia   |
 | Infraestructura | Docker Compose, GitHub Actions, Vercel Hobby y Render Free                     | Azure App Service y observabilidad |
 
@@ -121,16 +121,16 @@ Copiar `.env.example` a `apps/backend/.env` y `apps/frontend/.env.example` a `ap
 
 **`apps/backend/.env`** (plantilla: `.env.example` de la raiz)
 
-| Variable            | Donde se obtiene                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------- |
-| `SUPABASE_URL`      | Supabase → Project Settings → API → Project URL                                                           |
-| `SUPABASE_ANON_KEY` | Supabase → Project Settings → API → `anon` / publishable key                                              |
-| `DATABASE_URL`      | Supabase → Connect → ORMs → Prisma: transaction pooler, puerto **6543**, con `?pgbouncer=true`            |
-| `DIRECT_URL`        | Supabase → Connect → ORMs → Prisma: conexion directa o session pooler, puerto **5432** (solo migraciones) |
-| `CORS_ORIGIN`       | `http://localhost:3000` (varios origenes separados por coma)                                              |
-| `GEMINI_API_KEY`    | Google AI Studio. Opcional                                                                                |
+| Variable            | Donde se obtiene                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `SUPABASE_URL`      | Supabase â†’ Project Settings â†’ API â†’ Project URL                                                           |
+| `SUPABASE_ANON_KEY` | Supabase â†’ Project Settings â†’ API â†’ `anon` / publishable key                                              |
+| `DATABASE_URL`      | Supabase â†’ Connect â†’ ORMs â†’ Prisma: transaction pooler, puerto **6543**, con `?pgbouncer=true`            |
+| `DIRECT_URL`        | Supabase â†’ Connect â†’ ORMs â†’ Prisma: conexion directa o session pooler, puerto **5432** (solo migraciones) |
+| `CORS_ORIGIN`       | `http://localhost:3000` (varios origenes separados por coma)                                                    |
+| `GEMINI_API_KEY`    | Google AI Studio. Opcional                                                                                      |
 
-En las URLs de la base, reemplazar `[YOUR-PASSWORD]` (corchetes incluidos) por el password de la base y codificar los caracteres especiales (`@` → `%40`, `#` → `%23`, `/` → `%2F`). No hacen falta comillas. El backend no usa la `service_role` key.
+En las URLs de la base, reemplazar `[YOUR-PASSWORD]` (corchetes incluidos) por el password de la base y codificar los caracteres especiales (`@` â†’ `%40`, `#` â†’ `%23`, `/` â†’ `%2F`). No hacen falta comillas. El backend no usa la `service_role` key.
 
 `PORT` vale 4000 por defecto. Las opciones `GEMINI_*` y `AI_RATE_LIMIT_*` de la plantilla controlan modelo, timeout, salida y cuota. `SUPABASE_SERVICE_ROLE_KEY` se usa exclusivamente en el seed de desarrollo, nunca en el frontend ni para iniciar la API. `EMAIL_PROVIDER` y `EMAIL_FROM` estan reservadas: no hay envio de recordatorios implementado.
 
@@ -144,7 +144,7 @@ En las URLs de la base, reemplazar `[YOUR-PASSWORD]` (corchetes incluidos) por e
 | `NEXT_PUBLIC_API_URL_RENDER`    | Origen HTTPS publico Render                                |
 | `NEXT_PUBLIC_API_URL_AZURE`     | Origen HTTPS publico Azure, aun si esta apagado            |
 
-El backend valida sus variables al arrancar: si falta alguna, termina con `Configuración de entorno inválida: <variables>` sin mostrar valores.
+El backend valida sus variables al arrancar: si falta alguna, termina con `ConfiguraciÃ³n de entorno invÃ¡lida: <variables>` sin mostrar valores.
 
 ### 3. Base de datos
 
@@ -169,7 +169,7 @@ npm run prisma:seed --workspace=@turnosmart/backend
 
 ### 4. Usuario para ingresar
 
-La app no tiene registro publico. En Supabase → Authentication → Add user, crear un usuario con email y contraseña y tildar "Auto confirm". La primera vez que ingresa pasa por el onboarding, que crea el negocio y lo asigna como OWNER.
+La app no tiene registro publico. En Supabase â†’ Authentication â†’ Add user, crear un usuario con email y contraseÃ±a y tildar "Auto confirm". La primera vez que ingresa pasa por el onboarding, que crea el negocio y lo asigna como OWNER.
 
 ## Desarrollo
 
@@ -199,33 +199,26 @@ npm run dev:frontend
 
 `dev:backend` y `dev:frontend` compilan `packages/shared` antes de arrancar; el paso `build:shared` de arriba solo hace falta si se levanta una app con `npm run dev --workspace=...`. `build` y `typecheck` generan el cliente de Prisma solo si falta (por ejemplo, despues de `npm ci`) o si cambio el schema; asi funcionan aunque la API este corriendo, que en Windows bloquea el motor de Prisma.
 
-Con Docker (usa el mismo `apps/backend/.env` y el Supabase configurado ahi; no crea PostgreSQL local):
+Con Docker Desktop, levantÃ¡ PostgreSQL, Supabase Auth y las dos apps locales:
 
 ```bash
 npm run docker:dev
 ```
 
-El servicio `dependencies` sincroniza el volumen compartido `node_modules` con
-`npm ci --include=dev` antes de iniciar ambas apps. Reconstruir la imagen no
-actualiza por si solo un volumen existente; esto evita `prisma: not found` tras
-cambios de dependencias. No hace falta borrar volúmenes ni datos de Supabase.
-Si las apps ya estan corriendo, detenerlas antes de volver a ejecutar el comando
-para que no lean dependencias mientras se reinstalan:
-
-```bash
-docker compose -f infra/docker/compose.dev.yml stop
-npm run docker:dev
-```
+AbrÃ­ `http://localhost:3000/login`. La cuenta ficticia es
+`admin@turnosmart.test` con la contraseÃ±a `TS_SEED_PASSWORD` de `.env.dev`.
+El archivo es opcional y se copia de `.env.dev.example` si necesitás cambiar puertos. Los comandos de logs, apagado y
+reset, y los puertos internos y publicados, estÃ¡n en la guÃ­a de [infraestructura](infra/README.md).
 
 ### Problemas frecuentes
 
-| Sintoma                                              | Causa y solucion                                                                                                  |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `/ready` responde 503                                | El backend no llega a la base: revisar `DATABASE_URL` (password, puerto 6543, `?pgbouncer=true`).                 |
-| "No se pudo cargar tu cuenta" despues del login      | La API no pudo leer la cuenta. Si el log del backend muestra `P2021`, faltan las tablas: correr `prisma:migrate`. |
-| "Email o contraseña incorrectos" con datos correctos | El usuario no existe en ese proyecto de Supabase o no esta confirmado.                                            |
-| Error de CORS en la consola del navegador            | `CORS_ORIGIN` no incluye la URL del frontend.                                                                     |
-| `Another next dev server is already running`         | Ya hay un `next dev` en esa carpeta: usar `localhost:3000` o cerrarlo (`taskkill /PID <pid> /F`).                 |
+| Sintoma                                               | Causa y solucion                                                                                                  |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `/ready` responde 503                                 | El backend no llega a la base: revisar `DATABASE_URL` (password, puerto 6543, `?pgbouncer=true`).                 |
+| "No se pudo cargar tu cuenta" despues del login       | La API no pudo leer la cuenta. Si el log del backend muestra `P2021`, faltan las tablas: correr `prisma:migrate`. |
+| "Email o contraseÃ±a incorrectos" con datos correctos | El usuario no existe en ese proyecto de Supabase o no esta confirmado.                                            |
+| Error de CORS en la consola del navegador             | `CORS_ORIGIN` no incluye la URL del frontend.                                                                     |
+| `Another next dev server is already running`          | Ya hay un `next dev` en esa carpeta: usar `localhost:3000` o cerrarlo (`taskkill /PID <pid> /F`).                 |
 
 ## Calidad, pruebas y CI
 
@@ -242,7 +235,7 @@ npm test
 
 `format` escribe archivos; `format:check` solo verifica. Si hay cambios ajenos en curso, formatear unicamente los archivos propios con `npx prettier --write <archivos>`. No hay suites de tests propias en frontend o shared ejecutadas por `npm test`; E2E es un comando separado. Los comandos de raiz compilan shared en el orden necesario.
 
-Para comprobar los tres workspaces: `npm ls --workspaces --depth=0`. Para validar el schema sin migrar: `npm run prisma:validate --workspace=@turnosmart/backend`. Para validar Compose sin imprimir variables resueltas: `docker compose -f infra/docker/compose.dev.yml config --quiet`.
+Para comprobar los tres workspaces: `npm ls --workspaces --depth=0`. Para validar el schema sin migrar: `npm run prisma:validate --workspace=@turnosmart/backend`. Para validar Compose sin imprimir variables resueltas: `npm run docker:config`.
 
 **Integracion** (API + PostgreSQL real). Crea y borra negocios de prueba: usar una base descartable con las migraciones aplicadas, nunca la del equipo ni la de la demo.
 
@@ -258,7 +251,7 @@ La suite `tenant-isolation.test.ts` requiere PostgreSQL real. `services-http.tes
 npm run test:e2e --workspace=@turnosmart/frontend
 ```
 
-Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API caida (error visible, reintento y cierre de sesion) y el recorrido alta → recarga → edicion → baja → logout de un cliente.
+Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API caida (error visible, reintento y cierre de sesion) y el recorrido alta â†’ recarga â†’ edicion â†’ baja â†’ logout de un cliente.
 
 ## Despliegue del frontend
 

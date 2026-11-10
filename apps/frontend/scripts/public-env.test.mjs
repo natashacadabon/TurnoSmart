@@ -111,6 +111,18 @@ test('selector: desarrollo usa exclusivamente la API local', () => {
   );
   assert.equal(selectBackendUrl('true', undefined, undefined, true), 'http://localhost:4000');
 });
+test('selector: el puerto de Compose sólo se usa en desarrollo', () => {
+  const local = 'http://localhost:4001/';
+  assert.equal(
+    selectBackendUrl('false', undefined, undefined, true, undefined, local),
+    'http://localhost:4001',
+  );
+  assert.equal(
+    selectBackendUrl('false', valid.NEXT_PUBLIC_API_URL_RENDER, undefined, false, undefined, local),
+    valid.NEXT_PUBLIC_API_URL_RENDER,
+  );
+});
+
 test('selector rechaza valores distintos a strings true/false', () => {
   for (const flag of ['', 'TRUE', 'False', '0', '1', ' true ', true, false])
     assert.throws(() => validatePublicEnv({ ...valid, NEXT_PUBLIC_USE_AZURE: flag }), {

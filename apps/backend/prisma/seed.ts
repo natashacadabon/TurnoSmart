@@ -9,7 +9,9 @@ import { checkSeedSchema } from './seed-checks.js';
 import { seedStep, reportSeedFailure, withSeedCleanup } from './seed-diagnostics.js';
 
 // Mantiene la ubicacion del seed anterior. Variables de la terminal tienen prioridad.
-config({ path: fileURLToPath(new URL('../.env', import.meta.url)), override: false });
+if (process.env.TURNOSMART_DOCKER_SEED !== 'true') {
+  config({ path: fileURLToPath(new URL('../.env', import.meta.url)), override: false });
+}
 
 async function main() {
   const env = await seedStep('configuration', () => readSeedConfig(process.env)); // Destino autorizado y confirmado antes de toda red/escritura.

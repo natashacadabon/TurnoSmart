@@ -19,11 +19,14 @@
     "format:check": "prettier --check .",
     "typecheck": "npm run build:shared && npm run typecheck --workspace=apps/frontend && npm run typecheck --workspace=apps/backend && npm run typecheck --workspace=packages/shared",
     "build": "npm run build:shared && npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
-    "test": "npm run test:install && npm run build:shared && npm run test --workspaces --if-present",
+    "test": "npm run test:install && node --test infra/docker/dev.test.mjs && npm run build:shared && npm run test --workspaces --if-present",
     "test:install": "node --test .husky/install.test.mjs",
     "test:integration": "npm run build:shared && npm run test:integration --workspace=apps/backend",
-    "docker:dev": "docker compose -f infra/docker/compose.dev.yml up --build",
-    "docker:down": "docker compose -f infra/docker/compose.dev.yml down",
+    "docker:dev": "node infra/docker/dev.mjs up",
+    "docker:down": "node infra/docker/dev.mjs down",
+    "docker:logs": "node infra/docker/dev.mjs logs",
+    "docker:reset": "node infra/docker/dev.mjs reset",
+    "docker:config": "node infra/docker/dev.mjs config",
     "prepare": "node .husky/install.mjs"
   },
   "engines": {

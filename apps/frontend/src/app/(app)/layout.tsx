@@ -6,6 +6,7 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import { Button, Card, CardContent, CircularProgress, Stack, Typography } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { UnsavedChangesProvider } from '@/components/UnsavedChangesProvider';
 import { AppSidebar } from '@/components/AppSidebar';
 import { useAuth } from '@/components/AuthProvider';
 import { Brand, softDangerButtonSx } from '@/components/ui';
@@ -32,10 +33,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main className={styles.shell}>
-      <AppSidebar />
-      <section className={styles.content}>{children}</section>
-    </main>
+    <UnsavedChangesProvider>
+      <main className={styles.shell}>
+        <AppSidebar />
+        <section className={styles.content}>{children}</section>
+      </main>
+    </UnsavedChangesProvider>
   );
 }
 

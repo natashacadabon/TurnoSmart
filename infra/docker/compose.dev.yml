@@ -1,78 +1,70 @@
+name: turnosmart-local
+
 services:
-  # Un volumen existente oculta las dependencias de la imagen reconstruida.
-  # Sincronizarlo una sola vez antes de iniciar los dos consumidores.
-  dependencies:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.dev
-    command: npm ci --include=dev
+  postgres:
+    image: postgres:16-alpine@sha256:890480b08124ce7f79960a9bb16fe39729aa302bd384bfd7c408fee6c8f7adb7
     environment:
-      NODE_ENV: development
-      HUSKY: '0'
-    volumes:
-      - ../..:/workspace
-      - node_modules:/workspace/node_modules
-
-  frontend:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.dev
-
-    container_name: turnosmart-frontend
-
-    # shared se consume desde dist: se compila antes de levantar Next.
-    command: >
-      sh -c "npm run build:shared &&
-      npm run dev --workspace=apps/frontend -- --hostname 0.0.0.0"
-
+      POSTGRES_USER: turnosmart_local
+      POSTGRES_PASSWORD: turnosmart-local-db
+      POSTGRES_DB: turnosmart_local
     ports:
-      - '3000:3000'
-
-    environment:
-      NODE_ENV: development
-      WATCHPACK_POLLING: 'true'
-
+      - '127.0.0.1:${TS_POSTGRES_PORT:-54325}:5432'
     volumes:
-      - ../..:/workspace
-      - node_modules:/workspace/node_modules
-      - next_cache:/workspace/apps/frontend/.next
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-local.sql:/docker-entrypoint-initdb.d/10-turnosmart.sql:ro
+    healthcheck:
+      test: [CMD, pg_isready, -h, '127.0.0.1', -U, turnosmart_local, -d, turnosmart_local]
+      interval: 10s
+      start_period: 30s
+      start_interval: 2s
+      timeout: 3s
+      retries: 30
 
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.197.0
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:${TS_AUTH_PORT:-54326}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://turnosmart_local:turnosmart-local-db@postgres:5432/turnosmart_local?search_path=auth
+      DB_NAMESPACE: auth
+      GOTRUE_SITE_URL: http://localhost:${TS_FRONTEND_PORT:-3000}
+      GOTRUE_DISABLE_SIGNUP: 'true'
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
+      GOTRUE_JWT_SECRET: ${TS_JWT_SECRET:?run npm run docker:dev}
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
     depends_on:
-      dependencies:
-        condition: service_completed_successfully
-      backend:
-        condition: service_started
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:9999/health']
+      interval: 10s
+      start_period: 30s
+      start_interval: 2s
+      timeout: 3s
+      retries: 30
 
-  backend:
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.dev
-
-    container_name: turnosmart-backend
-
-    # Cliente de Prisma y shared compilados antes de arrancar (no estan en la imagen).
-    command: >
-      sh -c "npm run prisma:generate --workspace=apps/backend &&
-      npm run dev:backend"
-
+  auth-gateway:
+    image: nginx:alpine@sha256:8b1e78743a03dbb2c95171cc58639fef29abc8816598e27fb910ed2e621e589a
     ports:
-      - '4000:4000'
-
-    env_file:
-      - ../../apps/backend/.env
-
-    environment:
-      NODE_ENV: development
-      PORT: 4000
-
+      - '127.0.0.1:${TS_AUTH_PORT:-54326}:8080'
     volumes:
-      - ../..:/workspace
-      - node_modules:/workspace/node_modules
-
+      - ./auth-gateway.conf:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      TS_FRONTEND_ORIGIN: http://localhost:${TS_FRONTEND_PORT:-3000}
     depends_on:
-      dependencies:
-        condition: service_completed_successfully
+      auth:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:8080/auth/v1/health']
+      interval: 10s
+      start_period: 30s
+      start_interval: 2s
+      timeout: 3s
+      retries: 30
 
 volumes:
-  node_modules:
-  next_cache:
+  postgres_data:
