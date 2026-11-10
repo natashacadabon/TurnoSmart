@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -111,6 +112,102 @@ test('Production manual y Render quedan limitados a dev y sus dependencias', () 
   }
 });
 
+test('Preview descarga settings y publica sin consultar Production; Production conserva sus flags', (t) => {
+  const automatic = yaml.load(
+    readFileSync(join(repo, '.github/workflows/frontend-preview.yml'), 'utf8'),
+  );
+  const manual = yaml.load(
+    readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
+  );
+  const gitBash = join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe');
+  const bash = process.platform === 'win32' && existsSync(gitBash) ? gitBash : 'bash';
+  for (const [target, pull, upload] of [
+    [
+      'preview',
+      automatic.jobs.settings.steps.find(
+        (step) => step.name === 'Pull and sanitize Vercel settings',
+      ),
+      automatic.jobs.deploy.steps.find((step) => step.id === 'upload'),
+    ],
+    ...['preview', 'production'].map((target) => [
+      target,
+      manual.jobs.deploy.steps.find((step) => step.name === 'Pull Vercel settings'),
+      manual.jobs.deploy.steps.find((step) => step.id === 'upload'),
+    ]),
+  ]) {
+    const { root, write } = fixture(t);
+    for (const dir of ['.vercel', 'apps/frontend/.vercel'])
+      write(`${dir}/.env.preview.local`, 'NEXT_PUBLIC_USE_AZURE="false"\n');
+    // Se ejecuta el shell real del workflow; la CLI y prepare se simulan sin red ni credenciales reales.
+    const stubs = `
+      npx() {
+        printf '%s\\n' "$*" >> commands.log
+        if [[ "$*" == *' deploy '* ]]; then printf '%s\\n' 'https://fixture.vercel.app'; fi
+      }
+      node() { test "$*" = 'apps/frontend/scripts/deploy-config.mjs prepare'; }
+      curl() { echo 'Consulta remota inesperada' >&2; return 97; }
+      jq() { return 97; }
+    `;
+    const run = (token) =>
+      spawnSync(
+        bash,
+        ['--noprofile', '--norc', '-euo', 'pipefail', '-c', `${stubs}\n${pull.run}\n${upload.run}`],
+        {
+          cwd: root,
+          env: {
+            ...process.env,
+            DEPLOY_TARGET: target,
+            VERCEL_TOKEN: token,
+            VERCEL_ORG_ID: 'team_fixture',
+            VERCEL_PROJECT_ID: 'prj_fixture',
+            VERCEL_CLI_VERSION: '65.9.0',
+            HEAD_REF: 'dev',
+            GITHUB_REF_NAME: 'dev',
+            GITHUB_HEAD_REF: '',
+            GITHUB_REPOSITORY_ID: '42',
+            PR_NUMBER: '',
+            PR_SHA: 'fixture-sha',
+            GITHUB_OUTPUT: 'output.log',
+          },
+          encoding: 'utf8',
+          timeout: 10000,
+        },
+      );
+    const missing = run('');
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /Configurar VERCEL_TOKEN/);
+    assert(!existsSync(join(root, 'commands.log')));
+    const result = run('fixture-token');
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    const commands = readFileSync(join(root, 'commands.log'), 'utf8').trim().split('\n');
+    assert.equal(commands.length, 2);
+    assert.match(commands[0], new RegExp(`pull --yes --environment=${target}`));
+    assert.match(commands[1], /deploy --prebuilt --yes/);
+    if (target === 'preview') {
+      assert.match(commands[0], /--git-branch dev/);
+      assert.match(commands[1], /--environment=preview/);
+      assert(!commands.join('\n').includes('--prod'));
+    } else {
+      assert.match(commands[1], /--prod --skip-domain/);
+      assert(!commands[1].includes('--environment=preview'));
+    }
+    assert.match(
+      readFileSync(join(root, 'output.log'), 'utf8'),
+      /url=https:\/\/fixture.vercel.app/,
+    );
+  }
+  const deploy = manual.jobs.deploy;
+  assert.equal(
+    deploy.steps.find((step) => step.name === 'Promote Production').if,
+    "env.DEPLOY_TARGET == 'production'",
+  );
+  assert.equal(
+    deploy.steps.find((step) => step.name === 'Check current Production branch before promotion')
+      .if,
+    "env.DEPLOY_TARGET == 'production'",
+  );
+});
+
 test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', async () => {
   const alias = 'turnosmart-pr-123-23.vercel.app';
   const host = 'fixture-deployment.vercel.app';
@@ -164,6 +261,8 @@ test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', a
       error: /artefacto verificado/,
     },
     { source: { ...deployment, target: 'production' }, error: /no es un Preview/ },
+    { source: { ...deployment, readyState: 'BUILDING' }, error: /artefacto verificado/ },
+    { source: { ...deployment, readyState: 'ERROR' }, error: /artefacto verificado/ },
     { production: true, error: /solo para Preview/ },
   ]) {
     let writes = 0;
