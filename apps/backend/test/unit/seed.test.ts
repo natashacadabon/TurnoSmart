@@ -35,6 +35,48 @@ const remoteEnv = () => ({
   SEED_CONFIRM_REMOTE: `seed:${authorizedRef}`,
 });
 
+it('limita el modo Docker a los servicios locales exactos y requiere desarrollo', () => {
+  const database = 'postgresql://turnosmart_local@postgres:5432/turnosmart_local';
+  const env = {
+    ...localEnv(),
+    TURNOSMART_DOCKER_SEED: 'true',
+    DATABASE_URL: database,
+    DIRECT_URL: database,
+    SUPABASE_URL: 'http://auth-gateway:8080',
+  };
+  expect(readSeedConfig(env).projectRef).toBeNull();
+  for (const invalid of [
+    { ...env, DIRECT_URL: localEnv().DIRECT_URL },
+    { ...env, SUPABASE_URL: 'https://example.com' },
+    { ...env, NODE_ENV: 'test' },
+    { ...remoteEnv(), TURNOSMART_DOCKER_SEED: 'true' },
+  ]) {
+    expect(() => readSeedConfig(invalid)).toThrow(/Compose local/);
+  }
+  expect(() => readSeedConfig({ ...env, TURNOSMART_DOCKER_SEED: 'false' })).toThrow(
+    /ALLOW_REMOTE_SEED/,
+  );
+});
+
+it('permite el seed local desde Windows pero rechaza destinos remotos y parametros de redireccion', () => {
+  const database = 'postgresql://turnosmart_local@127.0.0.1:54325/turnosmart_local';
+  const env = {
+    ...localEnv(),
+    TURNOSMART_DOCKER_SEED: 'true',
+    DATABASE_URL: database,
+    DIRECT_URL: database,
+    SUPABASE_URL: 'http://127.0.0.1:54326',
+  };
+  expect(readSeedConfig(env).projectRef).toBeNull();
+  for (const invalid of [
+    { ...env, DATABASE_URL: database.replace('127.0.0.1', 'remote.test') },
+    { ...env, DATABASE_URL: database + '?host=remote.test' },
+    { ...env, SUPABASE_URL: 'https://remote.test' },
+    { ...env, NODE_ENV: 'test' },
+  ])
+    expect(() => readSeedConfig(invalid)).toThrow(/Compose local/);
+});
+
 describe('seed: autorizacion Cloud sin red', () => {
   it('admite unicamente el proyecto autorizado con triple coincidencia y confirmacion', () => {
     expect(readSeedConfig(remoteEnv()).projectRef).toBe(authorizedRef);

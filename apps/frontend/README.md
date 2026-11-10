@@ -104,3 +104,31 @@ apps/frontend/
 - [Documentación de Next.js](https://nextjs.org/docs)
 - [Next.js App Router](https://nextjs.org/docs/app)
 - [TypeScript](https://www.typescriptlang.org/)
+
+## Servicios y disponibilidad (B03)
+
+Abrir **Servicios** en el dashboard autenticado. OWNER y ADMIN pueden gestionar
+servicios y reemplazar la disponibilidad semanal. STAFF puede consultar ambos
+listados y los horarios. La consulta usa la fecha local y el servicio activo,
+y presenta los intervalos UTC de la API en la zona del negocio.
+
+La agenda de reservas usará FullCalendar Standard (MIT) con la integración
+oficial de React. B03 no requiere el calendario y no instala paquetes. Para
+incorporar la línea v6 en una tarea futura, usar versiones coordinadas de
+`@fullcalendar/react`, `@fullcalendar/core`, `@fullcalendar/daygrid`,
+`@fullcalendar/timegrid` y `@fullcalendar/interaction`. Para zonas IANA usar
+`@fullcalendar/luxon3` y `luxon` con esa línea. Verificar los peers de la versión
+elegida y ejecutar un build y un smoke de Next.js al integrar. El paquete React
+de v6.1.22 declara compatibilidad con React 19. No se necesitan
+plugins Premium.
+
+`src/lib/calendar-events.ts` adapta `SlotDto` y `AppointmentDto` a eventos sin
+reinterpretar sus instantes UTC. La agenda deberá pasar `Business.timezone` al
+calendario. Express sigue siendo la fuente de verdad para slots y reservas.
+Tras una mutación, volver a consultar los datos. Ante un 409 en drag & drop,
+revertir el movimiento visual y refrescar. Este recorrido corresponde al
+futuro frontend de reservas.
+
+Los casos de UI de Servicios interceptan Auth y Express con fixtures. El smoke
+real requiere `E2E_USER_EMAIL` y `E2E_USER_PASSWORD`, servidores levantados y
+un negocio con al menos un servicio activo y disponibilidad semanal.

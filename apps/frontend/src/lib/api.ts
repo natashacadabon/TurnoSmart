@@ -22,6 +22,8 @@ const API_URL = selectBackendUrl(
   process.env.NEXT_PUBLIC_API_URL_RENDER,
   process.env.NEXT_PUBLIC_API_URL_AZURE,
   process.env.NODE_ENV === 'development',
+  undefined,
+  process.env.NODE_ENV === 'development' ? process.env.NEXT_PUBLIC_API_URL : undefined,
 );
 
 /** Cliente HTTP común: adjunta el access token vigente y normaliza errores del contrato A01. */

@@ -72,9 +72,41 @@ export function readSeedConfig(env: NodeJS.ProcessEnv) {
   const db = seedUrl(env, 'DATABASE_URL', ['postgres:', 'postgresql:']);
   const api = seedUrl(env, 'SUPABASE_URL', ['http:', 'https:']);
   const direct = env.DIRECT_URL ? seedUrl(env, 'DIRECT_URL', ['postgres:', 'postgresql:']) : null;
-  const local = [db.url, api.url, ...(direct ? [direct.url] : [])].every((url) =>
-    LOCAL_HOSTS.has(url.hostname),
-  );
+  const hostLocal =
+    env.TURNOSMART_DOCKER_SEED === 'true' &&
+    env.NODE_ENV === 'development' &&
+    db.url.hostname === '127.0.0.1' &&
+    db.url.username === 'turnosmart_local' &&
+    db.url.pathname === '/turnosmart_local' &&
+    !db.url.search &&
+    !db.url.hash &&
+    direct?.raw === db.raw &&
+    api.url.hostname === '127.0.0.1' &&
+    api.url.protocol === 'http:' &&
+    !api.url.username &&
+    !api.url.password &&
+    api.url.pathname === '/' &&
+    !api.url.search &&
+    !api.url.hash;
+  const compose =
+    env.TURNOSMART_DOCKER_SEED === 'true' &&
+    env.NODE_ENV === 'development' &&
+    db.url.hostname === 'postgres' &&
+    db.url.username === 'turnosmart_local' &&
+    !db.url.search &&
+    !db.url.hash &&
+    db.url.port === '5432' &&
+    db.url.pathname === '/turnosmart_local' &&
+    direct?.raw === db.raw &&
+    api.raw === 'http://auth-gateway:8080';
+  if (env.TURNOSMART_DOCKER_SEED === 'true' && !compose && !hostLocal) {
+    throw new SeedError('El seed Docker requiere PostgreSQL y Auth del Compose local.');
+  }
+  const local =
+    compose ||
+    [db.url, api.url, ...(direct ? [direct.url] : [])].every((url) =>
+      LOCAL_HOSTS.has(url.hostname),
+    );
   let projectRef: string | null = null;
   if (!local) {
     if (env.ALLOW_REMOTE_SEED !== 'true')

@@ -55,7 +55,11 @@ const app = createApp({
   },
 });
 
-const server = app.listen(env.PORT, '0.0.0.0', () => {
+const host =
+  env.NODE_ENV === 'development' && process.env.TURNOSMART_LOCAL_DEV === 'true'
+    ? '127.0.0.1'
+    : '0.0.0.0';
+const server = app.listen(env.PORT, host, () => {
   logger.info('server_started', {
     port: env.PORT,
     ai: explainer ? env.GEMINI_MODEL : 'disabled',
