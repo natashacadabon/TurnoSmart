@@ -184,7 +184,11 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
   const availability = new InMemoryAvailability(identity);
   const slots = new InMemorySlots(services);
   const appointments = new InMemoryAppointments();
-  const appointmentRepository = new InMemoryAppointmentRepository();
+  const appointmentRepository = new InMemoryAppointmentRepository(
+    overrides.customers ?? customers,
+    overrides.services ?? services,
+    overrides.availability ?? availability,
+  );
   const deps: AppDeps = {
     corsOrigins: ['http://localhost:3000'],
     verifier,

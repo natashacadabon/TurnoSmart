@@ -1,4 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { AppError } from '../../lib/errors.js';
+import { appointmentFits, localTime } from '../availability/repository.js';
 import type { Role } from '@turnosmart/shared';
 
 export interface BusinessRecord {
@@ -103,6 +105,36 @@ export class PrismaIdentityRepository implements IdentityRepository {
     businessId: string,
     data: { name?: string; timezone?: string },
   ): Promise<BusinessRecord> {
-    return this.prisma.business.update({ where: { id: businessId }, data, select: businessSelect });
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+        if (data.timezone !== undefined) {
+          const timezone = data.timezone;
+          const rules = await tx.availabilityRule.findMany({ where: { businessId } });
+          const appointments = await tx.appointment.findMany({
+            where: {
+              businessId,
+              status: { in: ['SCHEDULED', 'CONFIRMED'] },
+              endsAt: { gt: new Date() },
+            },
+            select: { startsAt: true, endsAt: true },
+          });
+          const inputs = rules.map((rule) => ({
+            dayOfWeek: rule.dayOfWeek,
+            startTime: localTime(rule.startTime),
+            endTime: localTime(rule.endTime),
+            active: rule.active,
+          }));
+          if (appointments.some((appointment) => !appointmentFits(appointment, inputs, timezone))) {
+            throw new AppError(
+              'AVAILABILITY_CONFLICT',
+              'La zona horaria deja turnos vigentes fuera de disponibilidad',
+            );
+          }
+        }
+        return tx.business.update({ where: { id: businessId }, data, select: businessSelect });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
   }
 }

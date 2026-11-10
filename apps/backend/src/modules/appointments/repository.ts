@@ -1,4 +1,7 @@
 import { Prisma, type AppointmentStatus, type PrismaClient } from '@prisma/client';
+import { AppError } from '../../lib/errors.js';
+import { localTime } from '../availability/repository.js';
+import { bookingEnd } from './booking.js';
 import type { AppointmentEventType } from '@turnosmart/shared';
 
 export interface AppointmentRecord {
@@ -55,8 +58,9 @@ export interface AppointmentRepository {
   ): Promise<AppointmentRecord>;
   createAtomically(
     businessId: string,
-    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'notes'>,
     event?: AppointmentEventInput,
+    clock?: () => Date,
   ): Promise<AppointmentCreateResult>;
   updateNotes(
     businessId: string,
@@ -73,8 +77,8 @@ export interface AppointmentRepository {
     businessId: string,
     id: string,
     startsAt: Date,
-    endsAt: Date,
     event?: AppointmentEventInput,
+    clock?: () => Date,
   ): Promise<AppointmentRescheduleResult>;
   updateStatus(
     businessId: string,
@@ -113,6 +117,37 @@ const appointmentSelect = {
   createdAt: true,
   updatedAt: true,
 } as const;
+
+async function loadBookingConfiguration(
+  tx: Prisma.TransactionClient,
+  businessId: string,
+  customerId: string,
+  serviceId: string,
+) {
+  const business = await tx.business.findUniqueOrThrow({
+    where: { id: businessId },
+    select: { timezone: true, availabilityRules: true },
+  });
+  const customer = await tx.customer.findUnique({
+    where: { id_businessId: { id: customerId, businessId } },
+    select: { id: true },
+  });
+  const service = await tx.service.findUnique({
+    where: { id_businessId: { id: serviceId, businessId } },
+    select: { active: true, durationMinutes: true },
+  });
+  return {
+    timezone: business.timezone,
+    rules: business.availabilityRules.map((rule) => ({
+      dayOfWeek: rule.dayOfWeek,
+      startTime: localTime(rule.startTime),
+      endTime: localTime(rule.endTime),
+      active: rule.active,
+    })),
+    customerExists: customer !== null,
+    service,
+  };
+}
 
 export class PrismaAppointmentRepository implements AppointmentRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -162,39 +197,50 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
 
   async createAtomically(
     businessId: string,
-    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'endsAt' | 'notes'>,
+    data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'notes'>,
     event?: AppointmentEventInput,
+    clock?: () => Date,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      // Todas las operaciones que reservan o modifican agenda usan el mismo
-      // lock. Así, dos solicitudes para el mismo negocio se serializan.
-      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
-      const conflict = await tx.appointment.findFirst({
-        where: {
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Todas las operaciones que reservan o modifican agenda usan el mismo
+        // lock. Así, dos solicitudes para el mismo negocio se serializan.
+        await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+        const configuration = await loadBookingConfiguration(
+          tx,
           businessId,
-          status: { in: ['SCHEDULED', 'CONFIRMED'] },
-          startsAt: { lt: data.endsAt },
-          endsAt: { gt: data.startsAt },
-        },
-        select: { id: true },
-      });
-      if (conflict) return { kind: 'conflict' as const };
-      const row = await tx.appointment.create({
-        data: { ...data, businessId },
-        select: appointmentSelect,
-      });
-      if (event) {
-        await tx.appointmentEvent.create({
-          data: {
+          data.customerId,
+          data.serviceId,
+        );
+        const endsAt = bookingEnd(configuration, data.startsAt, clock?.() ?? new Date());
+        const conflict = await tx.appointment.findFirst({
+          where: {
             businessId,
-            appointmentId: row.id,
-            type: event.type,
-            ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
+            status: { in: ['SCHEDULED', 'CONFIRMED'] },
+            startsAt: { lt: endsAt },
+            endsAt: { gt: data.startsAt },
           },
+          select: { id: true },
         });
-      }
-      return { kind: 'created' as const, row };
-    });
+        if (conflict) return { kind: 'conflict' as const };
+        const row = await tx.appointment.create({
+          data: { ...data, endsAt, businessId },
+          select: appointmentSelect,
+        });
+        if (event) {
+          await tx.appointmentEvent.create({
+            data: {
+              businessId,
+              appointmentId: row.id,
+              type: event.type,
+              ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
+            },
+          });
+        }
+        return { kind: 'created' as const, row };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
   }
 
   async updateNotes(businessId: string, id: string, notes: string | null) {
@@ -224,44 +270,65 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     businessId: string,
     id: string,
     startsAt: Date,
-    endsAt: Date,
     event?: AppointmentEventInput,
+    clock?: () => Date,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
-      const current = await tx.appointment.findUnique({
-        where: { id_businessId: { id, businessId } },
-        select: { id: true },
-      });
-      if (!current) return { kind: 'not_found' as const };
-      const conflict = await tx.appointment.findFirst({
-        where: {
-          businessId,
-          id: { not: id },
-          status: { in: ['SCHEDULED', 'CONFIRMED'] },
-          startsAt: { lt: endsAt },
-          endsAt: { gt: startsAt },
-        },
-        select: { id: true },
-      });
-      if (conflict) return { kind: 'conflict' as const };
-      const row = await tx.appointment.update({
-        where: { id_businessId: { id, businessId } },
-        data: { startsAt, endsAt },
-        select: appointmentSelect,
-      });
-      if (event) {
-        await tx.appointmentEvent.create({
-          data: {
-            businessId,
-            appointmentId: id,
-            type: event.type,
-            ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
-          },
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+        const current = await tx.appointment.findUnique({
+          where: { id_businessId: { id, businessId } },
+          select: appointmentSelect,
         });
-      }
-      return { kind: 'updated' as const, row };
-    });
+        if (!current) return { kind: 'not_found' as const };
+        const now = clock?.() ?? new Date();
+        if (!['SCHEDULED', 'CONFIRMED'].includes(current.status) || current.startsAt <= now) {
+          throw new AppError('APPOINTMENT_NOT_RESCHEDULABLE', 'El turno no admite reprogramacion');
+        }
+        const configuration = await loadBookingConfiguration(
+          tx,
+          businessId,
+          current.customerId,
+          current.serviceId,
+        );
+        const endsAt = bookingEnd(configuration, startsAt, now);
+        const conflict = await tx.appointment.findFirst({
+          where: {
+            businessId,
+            id: { not: id },
+            status: { in: ['SCHEDULED', 'CONFIRMED'] },
+            startsAt: { lt: endsAt },
+            endsAt: { gt: startsAt },
+          },
+          select: { id: true },
+        });
+        if (conflict) return { kind: 'conflict' as const };
+        const row = await tx.appointment.update({
+          where: { id_businessId: { id, businessId } },
+          data: { startsAt, endsAt },
+          select: appointmentSelect,
+        });
+        if (event) {
+          await tx.appointmentEvent.create({
+            data: {
+              businessId,
+              appointmentId: id,
+              type: event.type,
+              ...(event.metadata
+                ? {
+                    metadata: {
+                      ...event.metadata,
+                      previousStartsAt: current.startsAt.toISOString(),
+                    } as Prisma.InputJsonValue,
+                  }
+                : {}),
+            },
+          });
+        }
+        return { kind: 'updated' as const, row };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
   }
 
   async updateStatus(businessId: string, id: string, status: AppointmentStatus) {

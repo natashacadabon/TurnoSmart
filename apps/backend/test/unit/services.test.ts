@@ -21,7 +21,13 @@ function setup() {
     create: vi.fn(),
     update: vi.fn(),
   };
-  const prisma = { service, $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)) };
+  const tx = { service, $queryRaw: vi.fn().mockResolvedValue([]) };
+  const prisma = {
+    service,
+    $transaction: vi.fn((operation: Promise<unknown>[] | ((client: typeof tx) => unknown)) =>
+      typeof operation === 'function' ? operation(tx) : Promise.all(operation),
+    ),
+  };
   return { service, repo: new PrismaServiceRepository(prisma as unknown as PrismaClient) };
 }
 const dbError = (code: string) =>

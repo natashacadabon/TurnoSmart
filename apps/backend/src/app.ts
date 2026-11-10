@@ -100,9 +100,6 @@ export function createApp(deps: AppDeps): Express {
     ...authed,
     appointmentsRouter({
       appointments: deps.appointments,
-      customers: deps.customers,
-      services: deps.services,
-      availability: deps.availability,
       risk: deps.risk,
     }),
   );

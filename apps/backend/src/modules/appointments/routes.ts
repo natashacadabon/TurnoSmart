@@ -37,19 +37,10 @@ const actions: Record<string, AppointmentStatus> = {
 
 export function appointmentsRouter(deps: {
   appointments: ConstructorParameters<typeof AppointmentService>[0];
-  customers: ConstructorParameters<typeof AppointmentService>[1];
-  services: ConstructorParameters<typeof AppointmentService>[2];
-  availability: ConstructorParameters<typeof AppointmentService>[3];
-  risk: ConstructorParameters<typeof AppointmentService>[4];
+  risk: ConstructorParameters<typeof AppointmentService>[1];
 }): Router {
   const router = Router();
-  const service = new AppointmentService(
-    deps.appointments,
-    deps.customers,
-    deps.services,
-    deps.availability,
-    deps.risk,
-  );
+  const service = new AppointmentService(deps.appointments, deps.risk);
 
   router.get('/', requirePermission('appointments:read'), async (req, res) => {
     const query = parse(listAppointmentsQuerySchema, req.query);
