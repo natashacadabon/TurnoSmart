@@ -88,17 +88,6 @@ jobs:
           EXPECTED_DEV_SUPABASE: ${{ vars.EXPECTED_DEV_SUPABASE }}
         run: |
           : "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}" "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_PROJECT_ID:?Configurar VERCEL_PROJECT_ID}"
-          # Vercel puede tratar el primer deployment de un proyecto como Production.
-          scope=()
-          if [[ "$VERCEL_ORG_ID" == team_* ]]; then
-            scope=(--data-urlencode "teamId=$VERCEL_ORG_ID")
-          fi
-          curl -fsS --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" \
-            --get https://api.vercel.com/v7/deployments \
-            "${scope[@]}" --data-urlencode "projectId=$VERCEL_PROJECT_ID" \
-            --data-urlencode target=production --data-urlencode state=READY --data-urlencode limit=1 |
-            jq -e '.deployments | any(.target == "production" and .state == "READY")' >/dev/null ||
-            { echo "Preview requiere un deployment Production previo y listo."; exit 1; }
           npx --yes "vercel@$VERCEL_CLI_VERSION" pull --yes --environment=preview --git-branch "$HEAD_REF" --token="$VERCEL_TOKEN"
           node apps/frontend/scripts/deploy-config.mjs prepare
           # vercel pull guarda secretos (p. ej. VERCEL_OIDC_TOKEN); prepare los descarta y aqui se exige.
@@ -243,7 +232,7 @@ jobs:
           if [[ -n "$PR_NUMBER" ]]; then
             identity="turnosmartPullRequest=$GITHUB_REPOSITORY_ID-$PR_NUMBER"
           fi
-          url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --yes \
+          url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --yes --environment=preview \
             --meta "$identity" \
             --meta "turnosmartMergeSha=$PR_SHA" --token="$VERCEL_TOKEN")
           [[ "$url" =~ ^https://[a-zA-Z0-9-]+\.vercel\.app/?$ ]]

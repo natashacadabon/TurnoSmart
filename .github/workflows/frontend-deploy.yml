@@ -101,19 +101,6 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           : "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}" "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_PROJECT_ID:?Configurar VERCEL_PROJECT_ID}"
-          if [[ "$DEPLOY_TARGET" == preview ]]; then
-            # Vercel puede tratar el primer deployment de un proyecto como Production.
-            scope=()
-            if [[ "$VERCEL_ORG_ID" == team_* ]]; then
-              scope=(--data-urlencode "teamId=$VERCEL_ORG_ID")
-            fi
-            curl -fsS --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" \
-              --get https://api.vercel.com/v7/deployments \
-              "${scope[@]}" --data-urlencode "projectId=$VERCEL_PROJECT_ID" \
-              --data-urlencode target=production --data-urlencode state=READY --data-urlencode limit=1 |
-              jq -e '.deployments | any(.target == "production" and .state == "READY")' >/dev/null ||
-              { echo "Preview requiere un deployment Production previo y listo."; exit 1; }
-          fi
           branch=()
           if [[ "$DEPLOY_TARGET" == preview ]]; then
             branch=(--git-branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}")
@@ -155,7 +142,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          flags=()
+          flags=(--environment=preview)
           if [[ "$DEPLOY_TARGET" == production ]]; then
             flags=(--prod --skip-domain)
           fi

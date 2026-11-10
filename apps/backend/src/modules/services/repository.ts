@@ -69,10 +69,16 @@ export class PrismaServiceRepository implements ServiceRepository {
     try {
       // Clave compuesta: comprobacion de pertenencia y escritura en una sola operacion.
       // No modifica Appointment ni sus intervalos historicos.
-      return await this.prisma.service.update({
-        where: { id_businessId: { id, businessId } },
-        data,
-      });
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+          return tx.service.update({
+            where: { id_businessId: { id, businessId } },
+            data,
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+      );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025')
         return null;

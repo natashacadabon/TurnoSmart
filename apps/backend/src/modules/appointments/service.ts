@@ -8,23 +8,11 @@ import {
 import { AppError, notFound } from '../../lib/errors.js';
 import { calculateNoShowRisk } from '../ai/risk-calculator.js';
 import type { RiskRepository } from '../ai/risk-repository.js';
-import {
-  appointmentFits,
-  localTime,
-  type AvailabilityRepository,
-} from '../availability/repository.js';
-import type { CustomerRepository } from '../customers/repository.js';
-import type { ServiceRepository } from '../services/repository.js';
 import type { AppointmentRepository } from './repository.js';
-
-const ACTIVE_STATUSES: AppointmentStatus[] = ['SCHEDULED', 'CONFIRMED'];
 
 export class AppointmentService {
   constructor(
     private readonly appointments: AppointmentRepository,
-    private readonly customers: CustomerRepository,
-    private readonly services: ServiceRepository,
-    private readonly availability: AvailabilityRepository,
     private readonly risk: RiskRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
@@ -50,24 +38,16 @@ export class AppointmentService {
 
   async create(businessId: string, input: CreateAppointmentRequest) {
     const startsAt = new Date(input.startsAt);
-    const service = await this.validateBooking(
-      businessId,
-      input.customerId,
-      input.serviceId,
-      startsAt,
-    );
-    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
-    await this.ensureAvailable(businessId, startsAt, endsAt);
     const result = await this.appointments.createAtomically(
       businessId,
       {
         customerId: input.customerId,
         serviceId: input.serviceId,
         startsAt,
-        endsAt,
         notes: input.notes ?? null,
       },
       { type: 'CREATED' },
+      this.clock,
     );
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
@@ -83,27 +63,17 @@ export class AppointmentService {
   }
 
   async reschedule(businessId: string, id: string, input: RescheduleAppointmentRequest) {
-    const current = await this.appointments.findById(businessId, id);
-    if (!current) throw notFound('Turno');
-    if (!ACTIVE_STATUSES.includes(current.status) || current.startsAt <= this.clock()) {
-      throw new AppError('APPOINTMENT_NOT_RESCHEDULABLE', 'El turno no admite reprogramacion');
-    }
     const startsAt = new Date(input.startsAt);
-    const service = await this.validateBooking(
+    const result = await this.appointments.rescheduleAtomically(
       businessId,
-      current.customerId,
-      current.serviceId,
+      id,
       startsAt,
-    );
-    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
-    await this.ensureAvailable(businessId, startsAt, endsAt, id);
-    const result = await this.appointments.rescheduleAtomically(businessId, id, startsAt, endsAt, {
-      type: 'RESCHEDULED',
-      metadata: {
-        previousStartsAt: current.startsAt.toISOString(),
-        startsAt: startsAt.toISOString(),
+      {
+        type: 'RESCHEDULED',
+        metadata: { startsAt: startsAt.toISOString() },
       },
-    });
+      this.clock,
+    );
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
@@ -145,21 +115,6 @@ export class AppointmentService {
     return result.row;
   }
 
-  private async validateBooking(
-    businessId: string,
-    customerId: string,
-    serviceId: string,
-    startsAt: Date,
-  ) {
-    if (startsAt <= this.clock())
-      throw new AppError('APPOINTMENT_IN_PAST', 'El turno debe ser futuro');
-    if (!(await this.customers.findById(businessId, customerId))) throw notFound('Cliente');
-    const service = await this.services.findById(businessId, serviceId);
-    if (!service) throw notFound('Servicio');
-    if (!service.active) throw new AppError('SERVICE_INACTIVE', 'El servicio esta inactivo');
-    return service;
-  }
-
   private async persistRiskScore(
     businessId: string,
     appointment: { id: string; customerId: string; startsAt: Date },
@@ -178,29 +133,5 @@ export class AppointmentService {
       appointmentId: appointment.id,
       ...risk,
     });
-  }
-
-  private async ensureAvailable(
-    businessId: string,
-    startsAt: Date,
-    endsAt: Date,
-    excludeId?: string,
-  ) {
-    const week = await this.availability.list(businessId);
-    const rules = week.rules.map((rule) => ({
-      dayOfWeek: rule.dayOfWeek,
-      startTime: localTime(rule.startTime),
-      endTime: localTime(rule.endTime),
-      active: rule.active,
-    }));
-    if (!appointmentFits({ startsAt, endsAt }, rules, week.timezone)) {
-      throw new AppError(
-        'APPOINTMENT_OUTSIDE_AVAILABILITY',
-        'El turno queda fuera de la disponibilidad del negocio',
-      );
-    }
-    if (await this.appointments.hasConflict(businessId, startsAt, endsAt, excludeId)) {
-      throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
-    }
   }
 }
