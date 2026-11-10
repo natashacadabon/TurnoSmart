@@ -1,29 +1,57 @@
 # Infraestructura
 
-## Implementado
+## Desarrollo local
 
-- `docker/Dockerfile.dev` compartido por los workspaces.
-- `docker/compose.dev.yml` con frontend y backend.
-- Puertos `3000` y `4000`, hot reload y volumen de dependencias.
-- Cache de Next.js y carga de `apps/backend/.env` mediante `env_file`.
-- Supabase cloud como base remota; no hay PostgreSQL local en Compose.
-- Al arrancar, el backend genera el cliente de Prisma y ambos servicios compilan `packages/shared`, que no forma parte de la imagen.
+Requiere Node 22 de `.nvmrc`, `npm ci` inicial y Docker Desktop Linux.
 
 ```bash
+npm run docker:config
 npm run docker:dev
+# En otra terminal, o Ctrl+C en la primera
 npm run docker:down
+# Detiene las apps, reinicia solo las tablas de la app y carga fixtures
+npm run docker:reset
+npm run docker:dev
 ```
 
-En `next dev`, el frontend usa `http://localhost:4000`, el puerto del backend
-publicado en el host; no hace falta definir una URL de API local. Las variables
-de Supabase del frontend se leen de `apps/frontend/.env.local`, montado en el
-contenedor. Los builds de produccion exigen origenes HTTPS publicos.
+Un unico Compose mantiene PostgreSQL persistente, GoTrue y su proxy para
+`/auth/v1`. Frontend y backend corren en Windows con hot reload nativo, sin
+polling ni volumen de node_modules Linux. Shared tiene un unico watcher.
+Las dependencias se reutilizan y solo se reinstalan si cambian los manifiestos
+o Node. Migraciones y seeds se ejecutan una vez antes de iniciar las apps.
+No hay contenedores permanentes para tareas de preparacion.
 
-- GitHub Actions valida pushes y PRs. [Vercel](vercel/README.md) publica Preview y Production desde Actions. [Render Dev](render/README.md) publica desde `dev` tras los checks de GitHub.
+Abrir `http://localhost:3000/login`, usuario `admin@turnosmart.test`,
+password ficticia `TurnoSmartLocal2026`. Los puertos y password se pueden
+configurar copiando `.env.dev.example` a `.env.dev` antes de iniciar.
+Los comandos no modifican archivos `.env`. La firma Auth se conserva en
+`.local/auth-secret` ignorado por Git, o reutiliza `TS_JWT_SECRET` existente.
+Las credenciales cloud de la terminal no se propagan a las apps.
+
+`docker:down` detiene apps y servicios sin borrar volumenes.
+`docker:reset` opera mediante `psql` dentro del servicio PostgreSQL del
+Compose: solo reinicia el schema `public` de `turnosmart_local`, aplica
+migraciones y seed y apaga los servicios. Conserva cuentas Auth, password
+original del administrador y otros schemas. No usa DATABASE_URL de la terminal.
+El seed conserva IDs y actualiza fixtures reservados.
+
+`docker:logs` muestra solo PostgreSQL/Auth/proxy. Los logs de las apps
+estan en la terminal de `docker:dev`. Tras cambiar codigo de shared se
+recompila automaticamente. Solo los puertos locales 3000, 4000, 54325 y
+54326 se usan. Las conexiones Docker publicadas se limitan a loopback.
+
+Los Dockerfiles de comprobacion Vercel/Render y del ZIP Azure tienen
+consumidores documentados. Se conservan como herramientas puntuales locales
+y no forman parte del arranque de desarrollo. Las imagenes y volumenes anteriores y el stack Supabase detenido se conservan.
+Los contenedores huerfanos del mismo proyecto Compose se retiran al arrancar
+o detener, sin borrar volumenes.
+
+- [Vercel](vercel/README.md) publica Preview y Production desde Actions.
+  [Render Dev](render/README.md) publica desde `dev` tras los checks de GitHub.
 
 ## Planificado
 
-B07 M1–M2 preparado en [azure/README.md](azure/README.md): Bicep de RG temporal,
+B07 M1Ã¢â‚¬â€œM2 preparado en [azure/README.md](azure/README.md): Bicep de RG temporal,
 Plan F1 Linux/App Service Node 22, ZIP de produccion y comandos PowerShell manuales.
 No se crearon recursos Azure; B1 requiere aprobacion explicita. La demo exige
 preflight/what-if, despliegue manual y limpieza del RG.
