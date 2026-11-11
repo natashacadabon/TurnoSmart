@@ -1,17 +1,6 @@
 'use client';
 
-import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Skeleton,
-  Stack,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Skeleton, Stack, Typography } from '@mui/material';
 import {
   APPOINTMENT_STATUSES,
   type AppointmentEventDto,
@@ -19,18 +8,26 @@ import {
   type AppointmentStatus,
 } from '@turnosmart/shared';
 import { useEffect, useState } from 'react';
+import {
+  ArrowRight,
+  BadgeCheck,
+  CalendarClock,
+  CalendarPlus,
+  CircleCheck,
+  CircleX,
+  History,
+  UserX,
+} from 'lucide-react';
 import { api, errorMessage } from '@/lib/api';
-import { EmptyState } from './ui';
+import { AppointmentStatusBadge } from './appointments/AppointmentStatusBadge';
 
-const STATUS: Record<
-  AppointmentStatus,
-  { label: string; color: 'default' | 'info' | 'success' | 'error' | 'warning' }
-> = {
-  SCHEDULED: { label: 'Agendado', color: 'info' },
-  CONFIRMED: { label: 'Confirmado', color: 'success' },
-  CANCELLED: { label: 'Cancelado', color: 'error' },
-  COMPLETED: { label: 'Completado', color: 'success' },
-  NO_SHOW: { label: 'Ausente', color: 'warning' },
+const ICON = {
+  CREATED: CalendarPlus,
+  RESCHEDULED: CalendarClock,
+  CONFIRMED: BadgeCheck,
+  CANCELLED: CircleX,
+  COMPLETED: CircleCheck,
+  MARKED_NO_SHOW: UserX,
 };
 
 const TYPE_LABEL: Record<AppointmentEventType, string> = {
@@ -42,29 +39,23 @@ const TYPE_LABEL: Record<AppointmentEventType, string> = {
   MARKED_NO_SHOW: 'Marcado como ausente',
 };
 
-/** C puede registrar el estado anterior/nuevo en metadata; se muestran sólo si son estados válidos. */
-function statusFrom(metadata: AppointmentEventDto['metadata'], key: 'fromStatus' | 'toStatus') {
-  const value = metadata?.[key];
-  return APPOINTMENT_STATUSES.find((s) => s === value) ?? null;
+function statusFrom(value: unknown): AppointmentStatus | undefined {
+  return APPOINTMENT_STATUSES.find((status) => status === value);
 }
 
-const StatusChip = ({ status, outlined }: { status: AppointmentStatus; outlined?: boolean }) => (
-  <Chip
-    size="small"
-    color={STATUS[status].color}
-    variant={outlined ? 'outlined' : 'filled'}
-    label={STATUS[status].label}
-    sx={{ height: 22, fontSize: 12 }}
-  />
-);
+function instantFrom(value: unknown) {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value) : null;
+}
 
 /** Historial del turno en orden cronológico (C07). Sólo lectura. */
 export function EventHistory({
   appointmentId,
   timezone,
+  revision = 0,
 }: {
   appointmentId: string;
   timezone: string;
+  revision?: number;
 }) {
   const [events, setEvents] = useState<AppointmentEventDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +77,7 @@ export function EventHistory({
     return () => {
       active = false;
     };
-  }, [appointmentId, reloadKey]);
+  }, [appointmentId, reloadKey, revision]);
 
   const reload = () => {
     setError(null);
@@ -100,28 +91,29 @@ export function EventHistory({
   });
 
   return (
-    <Card>
-      <CardContent>
-        <Typography variant="h2" sx={{ mb: 2 }}>
-          Historial
-        </Typography>
+    <Card component="section" aria-labelledby="appointment-history">
+      <CardContent sx={{ px: 2, py: 1.5, '&:last-child': { pb: 1.5 } }}>
+        <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', mb: 1 }}>
+          <History size={17} aria-hidden />
+          <Typography id="appointment-history" variant="h2">
+            Historial
+          </Typography>
+        </Stack>
         {error && (
           <Alert severity="error" action={<Button onClick={reload}>Reintentar</Button>}>
             {error}
           </Alert>
         )}
         {!events && !error && (
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <Skeleton width="80%" />
             <Skeleton width="60%" />
           </Stack>
         )}
         {events?.length === 0 && (
-          <EmptyState
-            icon={<HistoryRoundedIcon />}
-            title="Sin movimientos"
-            description="Los cambios del turno van a aparecer acá."
-          />
+          <Typography variant="body2" color="text.secondary">
+            Sin movimientos registrados.
+          </Typography>
         )}
         {events && events.length > 0 && (
           <Box
@@ -131,36 +123,56 @@ export function EventHistory({
           >
             {events.map((e, i) => {
               const last = i === events.length - 1;
-              const fromStatus = statusFrom(e.metadata, 'fromStatus');
-              const toStatus = statusFrom(e.metadata, 'toStatus');
+              const fromStatus =
+                statusFrom(e.metadata?.previousStatus) ?? statusFrom(e.metadata?.fromStatus);
+              const toStatus = statusFrom(e.metadata?.status) ?? statusFrom(e.metadata?.toStatus);
+              const previousStart =
+                e.type === 'RESCHEDULED' ? instantFrom(e.metadata?.previousStartsAt) : null;
+              const newStart = e.type === 'RESCHEDULED' ? instantFrom(e.metadata?.startsAt) : null;
+              const Icon = ICON[e.type];
               return (
-                <Box component="li" key={e.id} sx={{ display: 'flex', gap: 1.75 }}>
+                <Box component="li" key={e.id} sx={{ display: 'flex', gap: 1 }}>
                   <Box
                     sx={{
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      pt: 0.75,
+                      pt: 0.25,
                     }}
                   >
-                    <Box
-                      sx={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: '50%',
-                        bgcolor: last ? 'primary.main' : 'background.paper',
-                        border: 2,
-                        borderColor: 'primary.main',
-                        flexShrink: 0,
-                      }}
-                    />
+                    <Box sx={{ color: 'primary.main', display: 'flex', flexShrink: 0 }}>
+                      <Icon size={16} aria-hidden />
+                    </Box>
                     {!last && <Box sx={{ width: 2, flexGrow: 1, bgcolor: 'divider', my: 0.5 }} />}
                   </Box>
-                  <Box sx={{ pb: last ? 0 : 2.5, minWidth: 0 }}>
+                  <Box sx={{ pb: last ? 0 : 1, minWidth: 0 }}>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       {TYPE_LABEL[e.type] ?? e.type}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
+                    {previousStart && (
+                      <Typography
+                        sx={{ display: 'block' }}
+                        variant="caption"
+                        color="text.secondary"
+                      >
+                        Antes · {fmt.format(previousStart)}
+                      </Typography>
+                    )}
+                    {newStart && (
+                      <Typography
+                        sx={{ display: 'block' }}
+                        variant="caption"
+                        color="text.secondary"
+                      >
+                        Nuevo inicio · {fmt.format(newStart)}
+                      </Typography>
+                    )}
+                    <Typography
+                      component="time"
+                      dateTime={e.createdAt}
+                      variant="caption"
+                      color="text.secondary"
+                    >
                       {fmt.format(new Date(e.createdAt))}
                     </Typography>
                     {(fromStatus || toStatus) && (
@@ -169,13 +181,9 @@ export function EventHistory({
                         spacing={0.75}
                         sx={{ alignItems: 'center', mt: 0.75, flexWrap: 'wrap' }}
                       >
-                        {fromStatus && <StatusChip status={fromStatus} outlined />}
-                        {fromStatus && toStatus && (
-                          <Typography variant="caption" color="text.secondary" aria-hidden>
-                            →
-                          </Typography>
-                        )}
-                        {toStatus && <StatusChip status={toStatus} />}
+                        {fromStatus && <AppointmentStatusBadge status={fromStatus} />}
+                        {fromStatus && toStatus && <ArrowRight size={14} aria-hidden />}
+                        {toStatus && <AppointmentStatusBadge status={toStatus} />}
                       </Stack>
                     )}
                   </Box>

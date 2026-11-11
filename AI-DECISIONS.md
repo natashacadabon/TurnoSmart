@@ -545,6 +545,48 @@ D08 sigue pendiente para accesos directos a Supabase. Sin commit ni push.
 
 ---
 
+## 2026-11-11 - Detalle operativo y reprogramación de turnos
+
+**Problema abordado**
+
+Permitir que el equipo gestione un turno desde su detalle, con información
+suficiente para decidir y una confirmación explícita antes de cambiar su horario.
+
+**Prompt / herramienta utilizada**
+
+Codex. Se solicitó rediseñar el detalle del turno, integrar las acciones con los
+contratos reales y mostrar el historial persistido en una vista responsive.
+
+**Código / arquitectura propuesta por IA**
+
+- Priorizar cliente, servicio, horario en la zona del negocio, duración, estado
+  y observaciones. Presentar el historial y el análisis de riesgo en una sección
+  secundaria.
+- Compartir el selector de horarios con «Nuevo turno». Consultar `GET /api/slots`
+  con `excludeAppointmentId`, mostrar el intervalo anterior y el propuesto antes
+  de guardar y confirmar con la respuesta de `POST /api/appointments/:id/reschedule`.
+  Ante un `409`, volver a consultar la disponibilidad.
+- Mostrar acciones según permisos, estado y horario. Pedir confirmación para
+  cancelar, completar o marcar ausencia. Actualizar el historial con los eventos
+  persistidos y recargar la agenda al volver.
+
+**Validación y corrección humana**
+
+La solicitud definió el alcance funcional. El diseño siguió el brief y el tema
+existente porque la captura mencionada no estaba adjunta. Pasaron lint,
+typecheck, `git diff --check`, 12 pruebas de Playwright con respuestas HTTP
+simuladas, 30 unitarias del backend y 84 de integración con PostgreSQL real sobre
+una base limpia.
+
+**Resultado**
+
+Implementado en el frontend con los contratos existentes. El backend conserva
+la validación definitiva del horario. La API actual no admite un motivo de
+cancelación ni una versión esperada que detecte cambios concurrentes entre la
+última lectura y la escritura.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.

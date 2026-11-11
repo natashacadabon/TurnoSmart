@@ -15,6 +15,10 @@
   align-content: start;
 }
 
+.content:has(> [data-agenda-dashboard]) {
+  max-width: 1540px;
+}
+
 .loading {
   min-height: 100vh;
   display: grid;
