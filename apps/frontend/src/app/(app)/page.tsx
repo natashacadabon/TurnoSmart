@@ -1,23 +1,13 @@
 'use client';
 
-import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
-import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
-import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
-import MailOutlineRoundedIcon from '@mui/icons-material/MailOutlineRounded';
-import QueryStatsRoundedIcon from '@mui/icons-material/QueryStatsRounded';
-import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded';
-import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   LinearProgress,
+  Skeleton,
   Stack,
   Typography,
 } from '@mui/material';
@@ -28,13 +18,14 @@ import {
   type CustomerDto,
   type Paginated,
 } from '@turnosmart/shared';
+import { CalendarDays, Eye, Mail, TriangleAlert, UsersRound } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { AgendaInsights } from '@/components/appointments/AgendaInsights';
 import { AgendaReminders } from '@/components/appointments/AgendaReminders';
-import { RiskExplanationPanel } from '@/components/RiskExplanationPanel';
-import { appointmentStates, businessDayRange } from '@/lib/agenda';
+import { businessDayRange } from '@/lib/agenda';
 import { listAgendaAppointments } from '@/lib/agenda-data';
 import { REMINDER_LEAD_MS } from '@/lib/agenda-reminders';
 import { api, errorMessage } from '@/lib/api';
@@ -55,6 +46,7 @@ export default function AgendaPage() {
       name={me.business.name}
       timezone={me.business.timezone}
       canBook={can(me.profile.role, 'appointments:write')}
+      canExplain={can(me.profile.role, 'risk:explain')}
     />
   );
 }
@@ -64,14 +56,20 @@ function AgendaDashboard({
   name,
   timezone,
   canBook,
+  canExplain,
 }: {
   scope: string;
   name: string;
   timezone: string;
   canBook: boolean;
+  canExplain: boolean;
 }) {
-  const [customers, setCustomers] = useState<number | null>(null);
-  const [feed, setFeed] = useState<AppointmentDto[] | null>(null);
+  const [customers, setCustomers] = useState<number | null>();
+  const [feedResult, setFeedResult] = useState<{
+    from: string;
+    to: string;
+    items: AppointmentDto[] | null;
+  } | null>(null);
   const [week, setWeek] = useState<AvailabilityRulesResponse['data'] | null>(null);
   const [availabilityError, setAvailabilityError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -80,17 +78,20 @@ function AgendaDashboard({
   const [calendarRevision, setCalendarRevision] = useState(0);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [riskAppointment, setRiskAppointment] = useState<string | null>(null);
+  const [riskDialogOpen, setRiskDialogOpen] = useState(false);
+  const [riskCount, setRiskCount] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const currentTimezone = week?.timezone ?? timezone;
   const today = businessDate(new Date(now), currentTimezone);
-  const { from } = businessDayRange(today, currentTimezone);
+  const { from, to: dayEnd } = businessDayRange(today, currentTimezone);
   // Prefetch la próxima fecha local antes de entrar en la ventana de 10 minutos.
   const horizon = businessDate(new Date(now + REMINDER_LEAD_MS + 60_000), currentTimezone);
   const { to } = businessDayRange(horizon, currentTimezone);
-  const appointments = feed?.filter(
-    (item) => businessDate(new Date(item.startsAt), currentTimezone) === today,
-  );
+  const feed =
+    feedResult && feedResult.from <= from && feedResult.to >= dayEnd ? feedResult.items : undefined;
+  const appointments =
+    feed?.filter((item) => businessDate(new Date(item.startsAt), currentTimezone) === today) ??
+    feed;
 
   useEffect(() => {
     let current = true;
@@ -146,10 +147,10 @@ function AgendaDashboard({
     let current = true;
     listAgendaAppointments({ from, to }, () => current).then(
       (result) => {
-        if (current) setFeed(result);
+        if (current) setFeedResult({ from, to, items: result });
       },
       () => {
-        /* Las acciones siempre revalidan los datos antes de escribir. */
+        if (current) setFeedResult({ from, to, items: null });
       },
     );
     return () => {
@@ -159,51 +160,53 @@ function AgendaDashboard({
 
   function reminderChanged(appointment?: AppointmentDto) {
     if (appointment)
-      setFeed((items) => [
-        ...(items ?? []).filter((item) => item.id !== appointment.id),
-        appointment,
-      ]);
+      setFeedResult((previous) =>
+        previous?.items
+          ? {
+              ...previous,
+              items: [...previous.items.filter((item) => item.id !== appointment.id), appointment],
+            }
+          : previous,
+      );
     setRevision((value) => value + 1);
     setCalendarRevision((value) => value + 1);
   }
 
-  const candidate = appointments?.find(
-    (item) =>
-      (item.status === 'SCHEDULED' || item.status === 'CONFIRMED') &&
-      Date.parse(item.startsAt) > now,
-  );
   const metrics = [
     {
       label: 'Turnos hoy',
-      value: appointments?.length,
-      icon: <CalendarMonthRoundedIcon fontSize="small" />,
+      value: appointments ? appointments.length : appointments,
+      icon: CalendarDays,
     },
-    { label: 'Clientes', value: customers, icon: <GroupsRoundedIcon fontSize="small" /> },
+    { label: 'Clientes', value: customers, icon: UsersRound },
     {
       label: 'Riesgo alto',
-      value: null,
-      icon: <WarningAmberRoundedIcon fontSize="small" />,
-      hint: 'El riesgo se consulta por turno',
+      value: appointments ? riskCount : appointments,
+      icon: TriangleAlert,
+      hint: 'Requiere un análisis de cada turno activo de hoy',
+      alert: true,
     },
     {
       label: 'Emails enviados',
       value: null,
-      icon: <MailOutlineRoundedIcon fontSize="small" />,
+      icon: Mail,
       hint: 'El total de envíos aún no está disponible',
     },
   ];
 
   return (
-    <Stack data-agenda-dashboard spacing={1.75} sx={{ minWidth: 0 }}>
+    <Stack data-agenda-dashboard spacing={1.5} sx={{ minWidth: 0 }}>
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         sx={{ gap: 1, justifyContent: 'space-between', alignItems: { sm: 'center' } }}
       >
         <Box>
-          <Typography variant="overline" color="text.secondary">
+          <Typography variant="body2" color="text.secondary">
             {name}
           </Typography>
-          <Typography variant="h1">Agenda</Typography>
+          <Typography variant="h1" sx={{ fontSize: { xs: '1.5rem', sm: '1.65rem' } }}>
+            Agenda
+          </Typography>
         </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
           <AgendaReminders
@@ -212,15 +215,14 @@ function AgendaDashboard({
             timezone={currentTimezone}
             scope={scope}
             canWrite={canBook}
-            paused={bookingOpen || !!riskAppointment}
+            paused={bookingOpen || riskDialogOpen}
             onChanged={reminderChanged}
           />
           <Button
             component={Link}
             href="/demo"
             size="small"
-            variant="outlined"
-            startIcon={<VisibilityRoundedIcon />}
+            startIcon={<Eye size={17} aria-hidden />}
           >
             Ver demo
           </Button>
@@ -228,8 +230,7 @@ function AgendaDashboard({
             component={Link}
             href="/customers"
             size="small"
-            variant="outlined"
-            startIcon={<GroupsRoundedIcon />}
+            startIcon={<UsersRound size={17} aria-hidden />}
           >
             Clientes
           </Button>
@@ -241,39 +242,50 @@ function AgendaDashboard({
         aria-label="Indicadores del día"
         sx={{
           display: 'grid',
-          gap: { xs: 1, sm: 1.5 },
-          gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
+          gap: 1,
+          gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(4, minmax(0, 1fr))' },
         }}
       >
-        {metrics.map(({ label, icon, value, hint }) => (
-          <Card key={label}>
-            <Stack direction="row" sx={{ p: 1.25, gap: 1, alignItems: 'center' }}>
+        {metrics.map(({ label, icon: Icon, value, hint, alert }) => (
+          <Card key={label} component="section" aria-label={label}>
+            <Stack direction="row" sx={{ px: 1.25, py: 1, gap: 0.75, alignItems: 'center' }}>
               <Box
                 sx={{
                   display: 'grid',
                   placeItems: 'center',
-                  width: 32,
-                  height: 32,
+                  width: 30,
+                  height: 30,
                   flexShrink: 0,
                   borderRadius: 1,
-                  bgcolor: 'action.hover',
-                  color: 'primary.main',
+                  bgcolor: alert ? 'warning.light' : 'action.hover',
+                  color: alert ? 'warning.main' : 'primary.main',
                 }}
               >
-                {icon}
+                <Icon size={17} aria-hidden />
               </Box>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                   {label}
                 </Typography>
-                <Typography
-                  variant="h4"
-                  sx={{ fontSize: '1.2rem', lineHeight: 1.1 }}
-                  title={hint}
-                  aria-label={hint}
-                >
-                  {value ?? '—'}
-                </Typography>
+                {value === undefined ? (
+                  <Skeleton width={36} height={21} aria-label={`Cargando ${label.toLowerCase()}`} />
+                ) : value === null ? (
+                  <Typography variant="body2" color="text.secondary" title={hint}>
+                    Sin datos
+                  </Typography>
+                ) : (
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontSize: '1.2rem',
+                      fontWeight: 700,
+                      lineHeight: 1.1,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {value}
+                  </Typography>
+                )}
               </Box>
             </Stack>
           </Card>
@@ -286,15 +298,15 @@ function AgendaDashboard({
           display: 'grid',
           alignItems: 'start',
           minWidth: 0,
-          gap: 1.75,
+          gap: 1.5,
           gridTemplateColumns: {
             xs: 'minmax(0, 1fr)',
-            lg: expanded ? 'minmax(0, 1fr)' : 'minmax(0, 3fr) minmax(230px, 1fr)',
+            lg: expanded ? 'minmax(0, 1fr)' : 'minmax(0, 3fr) minmax(248px, 1.1fr)',
           },
         }}
       >
         <Card id="agenda" sx={{ minWidth: 0 }}>
-          <CardContent sx={{ p: { xs: 1.25, sm: 2 }, '&:last-child': { pb: { xs: 1.25, sm: 2 } } }}>
+          <CardContent sx={{ p: { xs: 1, sm: 1.5 }, '&:last-child': { pb: { xs: 1, sm: 1.5 } } }}>
             {availabilityError && (
               <Alert
                 severity="error"
@@ -311,6 +323,7 @@ function AgendaDashboard({
                 canBook={canBook}
                 expanded={expanded}
                 appointmentRevision={calendarRevision}
+                customerRevision={customerRevision}
                 onBookingOpenChange={setBookingOpen}
                 onToggleExpanded={() => setExpanded((value) => !value)}
                 onAppointmentSaved={() => {
@@ -324,84 +337,16 @@ function AgendaDashboard({
           </CardContent>
         </Card>
 
-        <Stack
-          component="aside"
-          aria-label="Seguimiento de agenda"
-          spacing={1.75}
-          sx={{ display: { xs: 'flex', lg: expanded ? 'none' : 'flex' } }}
-        >
-          <Card id="riesgo">
-            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-              <Stack spacing={1}>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  <AutoAwesomeRoundedIcon color="primary" fontSize="small" />
-                  <Typography variant="h2">Recomendación IA</Typography>
-                </Stack>
-                <Typography variant="body2" color="text.secondary">
-                  {candidate
-                    ? 'Consultá el riesgo de ausencia y las recomendaciones para el próximo turno de hoy.'
-                    : 'Abrí el detalle de un turno para consultar su riesgo y pedir una recomendación.'}
-                </Typography>
-                {candidate && (
-                  <Button
-                    onClick={() => setRiskAppointment(candidate.id)}
-                    size="small"
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Consultar IA
-                  </Button>
-                )}
-              </Stack>
-            </CardContent>
-          </Card>
-          <Card id="reportes">
-            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-              <Stack spacing={1}>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  <QueryStatsRoundedIcon color="primary" fontSize="small" />
-                  <Typography variant="h2">Salud de la agenda</Typography>
-                </Stack>
-                <Typography variant="body2" color="text.secondary">
-                  Resultados de los turnos de hoy
-                </Typography>
-                {(['COMPLETED', 'CANCELLED', 'NO_SHOW'] as const).map((status) => (
-                  <Stack
-                    key={status}
-                    direction="row"
-                    sx={{ justifyContent: 'space-between', gap: 1 }}
-                  >
-                    <Typography variant="body2">{appointmentStates[status].label}</Typography>
-                    <Typography
-                      variant="body2"
-                      sx={{ fontWeight: 700 }}
-                      color={appointmentStates[status].color}
-                    >
-                      {appointments?.filter((item) => item.status === status).length ?? '—'}
-                    </Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
-        </Stack>
+        <AgendaInsights
+          appointments={appointments ?? null}
+          now={now}
+          timezone={currentTimezone}
+          expanded={expanded}
+          canExplain={canExplain}
+          onRiskDialogChange={setRiskDialogOpen}
+          onHighRiskCountChange={setRiskCount}
+        />
       </Box>
-      {riskAppointment && (
-        <Dialog
-          open
-          fullWidth
-          maxWidth="sm"
-          onClose={() => setRiskAppointment(null)}
-          aria-labelledby="agenda-risk-title"
-        >
-          <DialogTitle id="agenda-risk-title">Recomendación IA</DialogTitle>
-          <DialogContent>
-            <RiskExplanationPanel appointmentId={riskAppointment} />
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setRiskAppointment(null)}>Cerrar</Button>
-          </DialogActions>
-        </Dialog>
-      )}
     </Stack>
   );
 }

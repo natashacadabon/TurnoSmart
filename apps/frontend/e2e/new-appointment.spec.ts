@@ -76,6 +76,7 @@ async function openAgenda(
     instant?: string;
     rules?: AvailabilityRuleInput[];
     rejectFirstTransition?: boolean;
+    failMetrics?: boolean;
   } = {},
 ) {
   const instant = options.instant ?? now;
@@ -112,6 +113,7 @@ async function openAgenda(
   const writes: CreateAppointmentRequest[] = [];
   const appointments = [...initialAppointments];
   const transitions: string[] = [];
+  const riskCalls: string[] = [];
   let rules = options.rules ?? weekdays;
   const customers = [customer];
   const slotDates: string[] = [];
@@ -123,12 +125,15 @@ async function openAgenda(
       if (request.method() === 'OPTIONS') return respond(route, {});
       const url = new URL(request.url());
       if (url.pathname.endsWith('/risk/explanation')) {
-        expect(url.pathname).toBe('/api/appointments/' + id(20) + '/risk/explanation');
+        const appointmentId = url.pathname.split('/')[3]!;
+        expect(request.method()).toBe('POST');
+        riskCalls.push(appointmentId);
+        const high = appointmentId === id(21);
         return respond(route, {
           risk: {
-            appointmentId: id(20),
-            score: 45,
-            level: 'MEDIUM',
+            appointmentId,
+            score: high ? 85 : 45,
+            level: high ? 'HIGH' : 'MEDIUM',
             factors: [],
             calculatedAt: now,
           },
@@ -142,7 +147,12 @@ async function openAgenda(
         });
       }
       if (url.pathname.endsWith('/events')) return respond(route, []);
-      if (url.pathname.startsWith('/api/customers/')) return respond(route, customer);
+      if (url.pathname.startsWith('/api/customers/')) {
+        const found = customers.find((item) => url.pathname.endsWith('/' + item.id));
+        return found
+          ? respond(route, found)
+          : respond(route, { error: { code: 'NOT_FOUND', message: 'Cliente no encontrado' } }, 404);
+      }
       if (url.pathname.startsWith('/api/appointments/')) {
         const [, , , appointmentId, action] = url.pathname.split('/');
         const appointment = appointments.find((item) => item.id === appointmentId);
@@ -197,6 +207,8 @@ async function openAgenda(
             meta: { active: 'true', limit: 100, offset: 0, total: 2 },
           });
         case '/api/customers': {
+          if (options.failMetrics && url.searchParams.get('pageSize') === '1')
+            return respond(route, { error: { message: 'Sin conexión' } }, 503);
           if (request.method() === 'POST') {
             const saved = { ...customer, id: id(6), fullName: request.postDataJSON().fullName };
             customers.push(saved);
@@ -214,6 +226,8 @@ async function openAgenda(
           });
         case '/api/appointments':
           if (request.method() === 'GET') {
+            if (options.failMetrics)
+              return respond(route, { error: { message: 'Sin conexión' } }, 503);
             return respond(route, {
               items: appointments,
               page: 1,
@@ -259,6 +273,7 @@ async function openAgenda(
     writes,
     slotDates,
     transitions,
+    riskCalls,
     replaceRules(next: AvailabilityRuleInput[]) {
       rules = next;
     },
@@ -802,7 +817,7 @@ test('conserva el calendario al expandir y refleja horarios, estados y cambios d
     notes: null,
     ...timestamps,
   }));
-  const { replaceRules } = await openAgenda(page, false, initial);
+  const { replaceRules, riskCalls } = await openAgenda(page, false, initial);
   const grid = page.locator('#agenda-calendar-grid');
   const slot = (time: string) => grid.locator('.booking-calendar-slot[data-time="' + time + '"]');
   await expect(slot('09:00:00')).toHaveCount(1);
@@ -840,6 +855,24 @@ test('conserva el calendario al expandir y refleja horarios, estados y cambios d
   const title = await grid.locator('.booking-calendar-title').textContent();
   const sidebar = page.getByRole('complementary', { name: 'Seguimiento de agenda' });
   await expect(sidebar).toBeVisible();
+  const insights = sidebar.getByRole('region', { name: 'Recomendación IA' });
+  const health = sidebar.getByRole('region', { name: 'Salud de la agenda' });
+  const kpis = page.getByRole('region', { name: 'Indicadores del día' });
+  const highRisk = kpis.getByRole('region', { name: 'Riesgo alto' });
+  await expect(
+    kpis.getByRole('region', { name: 'Turnos hoy' }).getByText('5', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    kpis.getByRole('region', { name: 'Clientes' }).getByText('1', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    kpis.getByRole('region', { name: 'Emails enviados' }).getByText('Sin datos'),
+  ).toBeVisible();
+  await expect(highRisk.getByText('Sin datos')).toBeVisible();
+  await expect(health.getByRole('definition')).toHaveText(['1', '1', '1']);
+  await expect(
+    health.getByRole('img', { name: /distribución.*1 cancelados.*1 ausentes/i }),
+  ).toBeVisible();
   expect(
     await page.locator('html').evaluate((element) => element.scrollHeight),
   ).toBeLessThanOrEqual(1081);
@@ -850,11 +883,26 @@ test('conserva el calendario al expandir y refleja horarios, estados y cambios d
   await page.getByRole('button', { name: 'Contraer calendario' }).click();
   await expect(sidebar).toBeVisible();
   await expect.poll(async () => (await grid.boundingBox())!.width).toBeCloseTo(compact);
-  await page.getByRole('button', { name: 'Consultar IA' }).click();
+  expect(riskCalls).toEqual([]);
+  await insights.getByRole('button', { name: 'Consultar IA' }).click();
   const riskDialog = page.getByRole('dialog', { name: 'Recomendación IA' });
+  expect(riskCalls).toEqual([]);
   await riskDialog.getByRole('button', { name: 'Explicar con IA' }).click();
   await expect(riskDialog.getByText('Confirmá la asistencia antes del turno.')).toBeVisible();
   await riskDialog.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(insights.getByText('Riesgo medio')).toBeVisible();
+  await expect(highRisk.getByText('Sin datos')).toBeVisible();
+  await insights.getByRole('button', { name: 'Ver análisis' }).click();
+  await expect(riskDialog.getByText('Enviar un recordatorio')).toBeVisible();
+  expect(riskCalls).toEqual([id(20)]);
+  await riskDialog.getByRole('button', { name: 'Cerrar' }).click();
+  await insights.getByRole('button', { name: 'Consultar IA' }).click();
+  await riskDialog.getByRole('button', { name: 'Explicar con IA' }).click();
+  await expect(riskDialog.getByText('Riesgo alto')).toBeVisible();
+  await riskDialog.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(insights.getByRole('listitem').first().getByText('Riesgo alto')).toBeVisible();
+  await expect(highRisk.getByText('1', { exact: true })).toBeVisible();
+  expect(riskCalls).toEqual([id(20), id(21)]);
 
   replaceRules([
     { ...weekdays[0]!, endTime: '13:00' },
@@ -888,8 +936,11 @@ test('conserva el calendario al expandir y refleja horarios, estados y cambios d
   await expect(page.getByText(/Todavía no hay horarios de atención/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nuevo turno' })).toBeDisabled();
   const monday = grid.locator('.booking-calendar-day[data-date="2099-01-05"]');
-  await monday.getByText(/^\+\d+ más$/).click({ timeout: 5000 });
-  const completed = page.getByRole('dialog').getByRole('link', { name: /Turno completado/ });
+  const completedLink = monday.getByRole('link', { name: /Turno completado/ });
+  if (!(await completedLink.isVisible())) {
+    await monday.getByText(/^\+\d+ turnos?$/).click({ timeout: 5000 });
+  }
+  const completed = grid.getByRole('link', { name: /Turno completado/ }).filter({ visible: true });
   await expect(completed.locator('svg.lucide-check-circle-2')).toBeVisible();
   await completed.click({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Estado del turno' })).toBeVisible({
@@ -897,6 +948,86 @@ test('conserva el calendario al expandir y refleja horarios, estados y cambios d
   });
   await expect(page.getByText('Completado', { exact: true })).toBeVisible();
   expect(browserErrors).toEqual([]);
+});
+
+test('Mes muestra turnos en la celda y lista solo los que desbordan en orden horario', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = (sequence: number, day: string, hour: number): AppointmentDto => ({
+    ...reminderFixture(120 + sequence, 60),
+    startsAt: day + 'T' + String(hour).padStart(2, '0') + ':00:00.000Z',
+    endsAt: day + 'T' + String(hour).padStart(2, '0') + ':30:00.000Z',
+  });
+  const sparse = [fixture(0, date, 13), fixture(1, date, 14)];
+  const busyDay = '2099-01-06';
+  const dense = Array.from({ length: 10 }, (_, index) => fixture(2 + index, busyDay, 12 + index));
+  const historical = { ...fixture(12, '2099-01-04', 14), status: 'COMPLETED' as const };
+  await openAgenda(page, false, [...sparse, ...dense.slice().reverse(), historical]);
+  const grid = page.locator('#agenda-calendar-grid');
+  await grid.getByText('Mes', { exact: true }).click();
+  const cell = (day: string) => grid.locator(`.booking-calendar-day[data-date="${day}"]`);
+  const links = (day: string) => cell(day).getByRole('link', { name: /turno/i });
+  await expect(links(date)).toHaveCount(2);
+  await expect(links(date).first()).toContainText('10:00');
+  await expect(links(date).first()).toContainText('María Pérez');
+  await expect(links(date).first().locator('svg.lucide-clock-3')).toBeVisible();
+  await expect(cell(date).getByText(/^\+\d+ turnos?$/)).toHaveCount(0);
+
+  const overflow = cell(busyDay).getByText(/^\+\d+ turnos?$/);
+  await expect(overflow).toBeVisible();
+  const visible = await links(busyDay).evaluateAll((items) =>
+    items.map((item) => item.getAttribute('href')),
+  );
+  expect(visible.length).toBeGreaterThanOrEqual(1);
+  expect(visible).toEqual(dense.slice(0, visible.length).map((item) => '/appointments/' + item.id));
+  await expect(overflow).toHaveText(`+${dense.length - visible.length} turnos`);
+  await overflow.click();
+  const dialog = grid.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect
+    .poll(() =>
+      dialog
+        .getByRole('link', { name: /turno/i })
+        .evaluateAll((items) => items.map((item) => item.getAttribute('href'))),
+    )
+    .toEqual(dense.slice(visible.length).map((item) => '/appointments/' + item.id));
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  const sunday = cell('2099-01-04');
+  await expect(sunday).toContainText('Cerrado');
+  await expect(sunday.getByRole('link', { name: /Turno completado/ })).toBeVisible();
+  await sunday.locator('.agenda-day-number').click();
+  await expect(page.getByRole('dialog', { name: /Nuevo turno/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Expandir calendario' }).click();
+  await expect(links(date)).toHaveCount(2);
+});
+
+test('Agenda distingue métricas en cero de datos no disponibles', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  await openAgenda(page);
+  const metrics = page.getByRole('region', { name: 'Indicadores del día' });
+  for (const label of ['Turnos hoy', 'Riesgo alto']) {
+    await expect(
+      metrics.getByRole('region', { name: label }).getByText('0', { exact: true }),
+    ).toBeVisible();
+  }
+  await expect(
+    metrics.getByRole('region', { name: 'Emails enviados' }).getByText('Sin datos'),
+  ).toBeVisible();
+
+  const unavailable = await context.newPage();
+  await openAgenda(unavailable, false, [], { failMetrics: true });
+  const empty = unavailable.getByRole('region', { name: 'Indicadores del día' });
+  for (const label of ['Turnos hoy', 'Clientes', 'Riesgo alto', 'Emails enviados']) {
+    await expect(empty.getByRole('region', { name: label }).getByText('Sin datos')).toBeVisible();
+  }
+  await expect(unavailable.getByRole('region', { name: 'Salud de la agenda' })).toContainText(
+    'Datos aún no disponibles',
+  );
+  await unavailable.close();
 });
 
 test('abre desde una fecha del calendario móvil, crea un cliente y limpia el slot al cambiar la fecha', async ({

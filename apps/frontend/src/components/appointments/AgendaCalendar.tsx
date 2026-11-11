@@ -20,6 +20,7 @@ import {
   Alert,
   Box,
   Button,
+  GlobalStyles,
   LinearProgress,
   Stack,
   Typography,
@@ -46,6 +47,7 @@ import { errorMessage } from '@/lib/api';
 import { businessDate } from '@/lib/booking';
 import { appointmentToCalendarEvent } from '@/lib/calendar-events';
 import { timezoneLabel } from '@/lib/timezones';
+import { useAgendaCustomerNames } from '@/lib/use-agenda-customer-names';
 import { useToast } from '@/components/ToastProvider';
 import { AppointmentFormDialog } from './AppointmentFormDialog';
 import { AppointmentStatusBadge, AppointmentStatusIcon } from './AppointmentStatusBadge';
@@ -61,31 +63,86 @@ const monthToolbar = { ...toolbar, end: 'dayGridMonth' };
 type ViewPosition = { date: string; type: string };
 type TodayPosition = NonNullable<ReturnType<typeof agendaTodayPosition>>;
 
-function calendarEvent(appointment: AppointmentDto): EventInput {
+function calendarEvent(appointment: AppointmentDto, customerName?: string): EventInput {
   const state = appointmentStates[appointment.status];
+  const event = appointmentToCalendarEvent(appointment, 'Turno ' + state.label.toLowerCase());
   return {
-    ...appointmentToCalendarEvent(appointment, 'Turno ' + state.label.toLowerCase()),
+    ...event,
+    extendedProps: { ...event.extendedProps, customerName },
     color: state.color,
     contrastColor: '#fff',
-    className: appointment.status === 'CANCELLED' ? 'agenda-event-cancelled' : '',
+    className:
+      appointment.status === 'CANCELLED'
+        ? 'agenda-calendar-event agenda-event-cancelled'
+        : 'agenda-calendar-event',
     url: '/appointments/' + appointment.id,
   };
 }
 
-function renderAppointment({ event, timeText, timeClass, titleClass }: EventDisplayInfo) {
+const overflowStyles = {
+  '[role="dialog"][data-date]:has([data-agenda-event-content])': {
+    maxWidth: 'calc(100vw - 24px)',
+    maxHeight: 'min(24rem, 65dvh)',
+    overflowY: 'auto',
+  },
+  '[role="dialog"][data-date] [role="listitem"]:has([data-agenda-visible-event])': {
+    display: 'none',
+  },
+};
+
+function renderAppointment(
+  { event, timeText, timeClass, titleClass, view }: EventDisplayInfo,
+  visibleInGrid: boolean,
+) {
   const status = appointmentStatusSchema.safeParse(event.extendedProps.status);
+  const name =
+    typeof event.extendedProps.customerName === 'string' ? event.extendedProps.customerName : '';
+  const tooltip = [timeText, name, event.title].filter(Boolean).join(' · ');
+  const monthly = view.type === 'dayGridMonth';
   return (
     <>
-      {timeText && <div className={timeClass}>{timeText}</div>}
-      <div
+      {timeText && (
+        <div className={timeClass} title={tooltip}>
+          {timeText}
+        </div>
+      )}
+      <Box
         className={titleClass}
-        style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}
+        title={tooltip}
+        data-agenda-event-content=""
+        data-agenda-visible-event={visibleInGrid ? '' : undefined}
+        sx={{ display: 'flex', alignItems: 'center', gap: 0.375, minWidth: 0 }}
       >
         {status.success && <AppointmentStatusIcon status={status.data} inEvent />}
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {event.title}
-        </span>
-      </div>
+        <Box
+          component="span"
+          sx={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            ...(monthly && { fontSize: '0.75rem', lineHeight: 1.25 }),
+          }}
+        >
+          {name || event.title}
+        </Box>
+        {name && (
+          <Box
+            component="span"
+            sx={{
+              position: 'absolute',
+              width: '1px',
+              height: '1px',
+              p: 0,
+              overflow: 'hidden',
+              clipPath: 'inset(50%)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {' · ' + event.title}
+          </Box>
+        )}
+      </Box>
     </>
   );
 }
@@ -96,6 +153,7 @@ interface Props {
   rules: AvailabilityRuleInput[];
   expanded: boolean;
   appointmentRevision: number;
+  customerRevision: number;
   onBookingOpenChange(open: boolean): void;
   onToggleExpanded(): void;
   onAppointmentSaved(): void;
@@ -107,6 +165,7 @@ export function AgendaCalendar({
   rules,
   expanded,
   appointmentRevision,
+  customerRevision,
   onBookingOpenChange,
   onToggleExpanded,
   onAppointmentSaved,
@@ -115,7 +174,16 @@ export function AgendaCalendar({
   const compact = useMediaQuery(useTheme().breakpoints.down('sm'));
   const [draft, setDraft] = useState<{ date?: string; startsAt?: string } | null>(null);
   const { notify } = useToast();
-  const [events, setEvents] = useState<EventInput[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentDto[]>([]);
+  const [visibleInGrid, setVisibleInGrid] = useState<ReadonlySet<string>>(new Set());
+  const customerNames = useAgendaCustomerNames(appointments, customerRevision);
+  const events = useMemo(
+    () =>
+      appointments.map((appointment) =>
+        calendarEvent(appointment, customerNames.get(appointment.customerId)),
+      ),
+    [appointments, customerNames],
+  );
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [initialPosition] = useState(() => agendaTodayPosition(rules, new Date(), timezone));
   const [viewPosition, setViewPosition] = useState<ViewPosition | null>(null);
@@ -140,6 +208,11 @@ export function AgendaCalendar({
     () => ({
       timeGridWeek: { hiddenDays: hasHours ? week.hiddenDays : [] },
       timeGridDay: { hiddenDays: hasHours ? week.hiddenDays : [] },
+      dayGridMonth: {
+        dayMaxEvents: true,
+        eventOrder: 'start,-duration,title',
+        eventOrderStrict: true,
+      },
     }),
     [hasHours, week.hiddenDays],
   );
@@ -227,7 +300,7 @@ export function AgendaCalendar({
       if (!range) return;
       const loaded = await listAgendaAppointments(range, () => active);
       if (!active) return;
-      setEvents(loaded.map(calendarEvent));
+      setAppointments(loaded);
       setResult({ key: requestKey, error: '' });
     }
     void load().catch((err) => {
@@ -263,9 +336,9 @@ export function AgendaCalendar({
 
   function saved(appointment: AppointmentDto, title: string) {
     calendar.current?.getApi().gotoDate(businessDate(new Date(appointment.startsAt), timezone));
-    setEvents((previous) => [
+    setAppointments((previous) => [
       ...previous.filter((event) => event.id !== appointment.id),
-      calendarEvent(appointment),
+      appointment,
     ]);
     refresh();
     onAppointmentSaved();
@@ -274,7 +347,8 @@ export function AgendaCalendar({
   }
 
   return (
-    <Stack spacing={1.5}>
+    <Stack spacing={1.25}>
+      <GlobalStyles styles={overflowStyles} />
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         sx={{ gap: 1.5, alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
@@ -337,11 +411,42 @@ export function AgendaCalendar({
         id="agenda-calendar-grid"
         sx={{
           minWidth: 0,
-          '& .booking-calendar-toolbar': { flexWrap: 'wrap', gap: 1 },
+          '& .booking-calendar-toolbar': { flexWrap: 'wrap', gap: 0.75 },
+          '& .booking-calendar-toolbar button': {
+            minHeight: { xs: 40, sm: 32 },
+            paddingBlock: 0.5,
+          },
           '& .booking-calendar-title': { fontSize: { xs: '1rem', sm: '1.25rem' } },
-          '& .agenda-day-closed': { bgcolor: 'action.hover' },
+          '& .agenda-day-closed': { bgcolor: 'grey.50' },
+          '& .agenda-month-cell-top': {
+            display: 'flex',
+            justifyContent: 'flex-end',
+            p: '2px 5px',
+          },
+          '& .agenda-month-cell-date': {
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            lineHeight: 1.25,
+            minHeight: 20,
+            fontSize: '0.75rem',
+            fontWeight: 600,
+          },
+          '& .agenda-month-cell-today .agenda-day-number': {
+            bgcolor: 'primary.main',
+            color: 'primary.contrastText',
+            borderRadius: 1,
+            px: 0.5,
+          },
+          '& .agenda-calendar-event:hover': { filter: 'brightness(0.95)' },
+          '& .agenda-calendar-event:focus-visible': {
+            outline: '2px solid',
+            outlineColor: 'primary.main',
+            outlineOffset: 1,
+          },
           '& .agenda-event-cancelled': { textDecoration: 'line-through' },
           '& .agenda-closed-hours': { bgcolor: 'action.hover' },
+          '& .agenda-month-closed-hours': { bgcolor: 'transparent' },
         }}
       >
         <FullCalendar
@@ -362,18 +467,26 @@ export function AgendaCalendar({
               ? 'booking-calendar-day'
               : 'booking-calendar-day agenda-day-closed'
           }
+          dayCellTopClass={(info) =>
+            info.view.type === 'dayGridMonth' ? 'agenda-month-cell-top' : ''
+          }
+          dayCellTopInnerClass={(info) =>
+            info.view.type === 'dayGridMonth'
+              ? 'agenda-month-cell-date' + (info.isToday ? ' agenda-month-cell-today' : '')
+              : ''
+          }
           dayCellTopContent={(info) => (
             <>
-              {info.text}
+              <span className="agenda-day-number">{info.text}</span>
               {info.view.type === 'dayGridMonth' &&
                 !canSelectAgendaTime(rules, businessDate(info.date, timezone)) && (
                   <Box
                     component="span"
                     sx={{
-                      ml: 0.5,
-                      fontSize: '0.65rem',
+                      fontSize: '0.625rem',
+                      fontWeight: 400,
                       color: 'text.secondary',
-                      display: { xs: 'block', sm: 'inline' },
+                      display: { xs: 'none', sm: 'inline' },
                     }}
                   >
                     Cerrado
@@ -383,17 +496,34 @@ export function AgendaCalendar({
           )}
           slotLaneClass="booking-calendar-slot"
           events={events}
-          eventContent={renderAppointment}
+          eventContent={(info) =>
+            renderAppointment(
+              info,
+              info.view.type === 'dayGridMonth' && visibleInGrid.has(info.event.id),
+            )
+          }
           height="clamp(360px, calc(100dvh - 360px), 780px)"
           scrollTime={(viewPosition ? bounds?.slotMinTime : initialPosition?.time) ?? '00:00'}
           scrollTimeReset={false}
           {...bounds}
           views={views}
           businessHours={week.businessHours}
-          nonBusinessHoursClass="agenda-closed-hours"
+          nonBusinessHoursClass={
+            viewType === 'dayGridMonth' ? 'agenda-month-closed-hours' : 'agenda-closed-hours'
+          }
           slotEventOverlap={false}
           fixedWeekCount={false}
-          dayMaxEvents
+          moreLinkText={(count) => '+' + count + (count === 1 ? ' turno' : ' turnos')}
+          moreLinkHint={(count) => 'Mostrar ' + count + (count === 1 ? ' turno' : ' turnos')}
+          moreLinkClick={(info) => {
+            // El popover nativo conserva el foco y trae todos los eventos del día.
+            // Marcar los ya visibles para que su lista sólo muestre los restantes.
+            const hidden = new Set(info.hiddenSegs.map(({ event }) => event.id));
+            setVisibleInGrid(
+              new Set(info.allSegs.map(({ event }) => event.id).filter((id) => !hidden.has(id))),
+            );
+            return 'popover';
+          }}
           nowIndicator
           allDaySlot={false}
           selectable={bookable}

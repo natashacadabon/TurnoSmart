@@ -17,6 +17,7 @@
 
 .content:has(> [data-agenda-dashboard]) {
   max-width: 1540px;
+  padding: 20px clamp(14px, 2vw, 28px);
 }
 
 .loading {

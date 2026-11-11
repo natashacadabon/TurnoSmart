@@ -90,11 +90,15 @@ function ScoreGauge({
 export function RiskExplanationPanel({
   appointmentId,
   compact = false,
+  initialResult,
+  onExplained,
 }: {
   appointmentId: string;
   compact?: boolean;
+  initialResult?: RiskExplanationResponse | undefined;
+  onExplained?(result: RiskExplanationResponse): void;
 }) {
-  const [result, setResult] = useState<RiskExplanationResponse | null>(null);
+  const [result, setResult] = useState<RiskExplanationResponse | null>(initialResult ?? null);
   const [error, setError] = useState<{ text: string; severity: 'error' | 'info' } | null>(null);
   const [loading, setLoading] = useState(false);
   const heading = useId();
@@ -103,11 +107,12 @@ export function RiskExplanationPanel({
     setLoading(true);
     setError(null);
     try {
-      setResult(
-        await api<RiskExplanationResponse>(`/api/appointments/${appointmentId}/risk/explanation`, {
-          method: 'POST',
-        }),
+      const explanation = await api<RiskExplanationResponse>(
+        `/api/appointments/${appointmentId}/risk/explanation`,
+        { method: 'POST' },
       );
+      setResult(explanation);
+      onExplained?.(explanation);
     } catch (err) {
       const info = err instanceof ApiError && err.code === 'RISK_NOT_AVAILABLE';
       setError({ text: errorMessage(err), severity: info ? 'info' : 'error' });
