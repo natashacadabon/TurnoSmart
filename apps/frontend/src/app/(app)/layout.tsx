@@ -10,6 +10,7 @@ import { UnsavedChangesProvider } from '@/components/UnsavedChangesProvider';
 import { AppSidebar } from '@/components/AppSidebar';
 import { useAuth } from '@/components/AuthProvider';
 import { ToastProvider } from '@/components/ToastProvider';
+import { NotificationProvider } from '@/components/notifications/NotificationProvider';
 import { Brand, softDangerButtonSx } from '@/components/ui';
 import styles from './layout.module.css';
 
@@ -36,10 +37,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <UnsavedChangesProvider>
       <ToastProvider key={me.business.id + '/' + me.user.id}>
-        <main className={styles.shell}>
-          <AppSidebar />
-          <section className={styles.content}>{children}</section>
-        </main>
+        <NotificationProvider>
+          <main className={styles.shell}>
+            <AppSidebar />
+            <section className={styles.content}>{children}</section>
+          </main>
+        </NotificationProvider>
       </ToastProvider>
     </UnsavedChangesProvider>
   );

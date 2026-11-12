@@ -27,12 +27,14 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   APPOINTMENT_STATUSES,
   appointmentStatusSchema,
   type AppointmentDto,
   type AvailabilityRuleInput,
 } from '@turnosmart/shared';
+import { CalendarDays, LockKeyhole } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   agendaHours,
@@ -89,6 +91,48 @@ const overflowStyles = {
     display: 'none',
   },
 };
+
+const monthIndicator = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+  minWidth: 0,
+  maxWidth: '100%',
+  gap: '3px',
+  px: { xs: '2px', sm: 0.75 },
+  py: '1px',
+  border: 1,
+  borderRadius: 1,
+  fontSize: { xs: '0.625rem', sm: '0.6875rem' },
+  fontWeight: 600,
+  lineHeight: 1.35,
+  '& svg': { flexShrink: 0 },
+  '& > span': { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+} as const;
+
+function ClosedDayIndicator({ dateLabel }: { dateLabel: string }) {
+  const indicator = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    // FullCalendar oculta el encabezado visual de la celda para lectores de pantalla.
+    const cell = indicator.current?.closest('[role="cell"][data-date]');
+    if (!cell) return;
+    const previous = cell.getAttribute('aria-label');
+    cell.setAttribute('aria-label', dateLabel + ', cerrado');
+    return () => {
+      if (previous === null) cell.removeAttribute('aria-label');
+      else cell.setAttribute('aria-label', previous);
+    };
+  }, [dateLabel]);
+
+  return (
+    <span ref={indicator} className="agenda-month-closed-chip">
+      <LockKeyhole size={11} aria-hidden />
+      <span>Cerrado</span>
+    </span>
+  );
+}
 
 function renderAppointment(
   { event, timeText, timeClass, titleClass, view }: EventDisplayInfo,
@@ -172,6 +216,10 @@ export function AgendaCalendar({
 }: Props) {
   const calendar = useRef<CalendarRef>(null);
   const compact = useMediaQuery(useTheme().breakpoints.down('sm'));
+  const dayLabel = useMemo(
+    () => new Intl.DateTimeFormat('es-AR', { dateStyle: 'full', timeZone: timezone }),
+    [timezone],
+  );
   const [draft, setDraft] = useState<{ date?: string; startsAt?: string } | null>(null);
   const { notify } = useToast();
   const [appointments, setAppointments] = useState<AppointmentDto[]>([]);
@@ -212,6 +260,8 @@ export function AgendaCalendar({
         dayMaxEvents: true,
         eventOrder: 'start,-duration,title',
         eventOrderStrict: true,
+        moreLinkHint: (count: number) =>
+          'Mostrar ' + count + (count === 1 ? ' turno adicional' : ' turnos adicionales'),
       },
     }),
     [hasHours, week.hiddenDays],
@@ -426,11 +476,52 @@ export function AgendaCalendar({
           '& .agenda-month-cell-date': {
             display: 'flex',
             alignItems: 'center',
-            gap: 0.5,
             lineHeight: 1.25,
             minHeight: 20,
             fontSize: '0.75rem',
             fontWeight: 600,
+          },
+          '& .agenda-month-cell-date:has(.agenda-month-closed-chip)': {
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr)',
+            alignContent: 'center',
+            justifyItems: 'center',
+            width: '100%',
+            minWidth: 0,
+            gap: '1px',
+            '& .agenda-day-number': { lineHeight: 1 },
+          },
+          '& .agenda-month-closed-chip': {
+            ...monthIndicator,
+            py: 0,
+            bgcolor: 'grey.100',
+            borderColor: 'divider',
+            color: 'text.secondary',
+            '@media (max-width: 420px)': { '& svg': { display: 'none' } },
+          },
+          '& [role="button"][aria-haspopup="dialog"]:has(.agenda-month-more-chip)': {
+            justifyContent: 'center',
+            minWidth: 0,
+            maxWidth: '100%',
+            cursor: 'pointer',
+            '&:hover .agenda-month-more-chip': {
+              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.14),
+            },
+            '&:focus-visible .agenda-month-more-chip': {
+              outline: '2px solid',
+              outlineColor: 'primary.main',
+              outlineOffset: 1,
+            },
+          },
+          '& :has(> .agenda-month-more-chip)': { minWidth: 0, maxWidth: '100%', py: 0 },
+          '& .agenda-month-more-chip': {
+            ...monthIndicator,
+            color: 'primary.dark',
+            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.07),
+            borderColor: (theme) => alpha(theme.palette.primary.main, 0.2),
+            transition: 'background-color 140ms ease',
+            '@media (max-width: 360px)': { '& svg': { display: 'none' } },
+            '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
           },
           '& .agenda-month-cell-today .agenda-day-number': {
             bgcolor: 'primary.main',
@@ -480,17 +571,7 @@ export function AgendaCalendar({
               <span className="agenda-day-number">{info.text}</span>
               {info.view.type === 'dayGridMonth' &&
                 !canSelectAgendaTime(rules, businessDate(info.date, timezone)) && (
-                  <Box
-                    component="span"
-                    sx={{
-                      fontSize: '0.625rem',
-                      fontWeight: 400,
-                      color: 'text.secondary',
-                      display: { xs: 'none', sm: 'inline' },
-                    }}
-                  >
-                    Cerrado
-                  </Box>
+                  <ClosedDayIndicator dateLabel={dayLabel.format(info.date)} />
                 )}
             </>
           )}
@@ -515,6 +596,16 @@ export function AgendaCalendar({
           fixedWeekCount={false}
           moreLinkText={(count) => '+' + count + (count === 1 ? ' turno' : ' turnos')}
           moreLinkHint={(count) => 'Mostrar ' + count + (count === 1 ? ' turno' : ' turnos')}
+          moreLinkContent={(info) =>
+            info.view.type === 'dayGridMonth' ? (
+              <span className="agenda-month-more-chip">
+                <CalendarDays size={11} aria-hidden />
+                <span>{info.text}</span>
+              </span>
+            ) : (
+              info.text
+            )
+          }
           moreLinkClick={(info) => {
             // El popover nativo conserva el foco y trae todos los eventos del día.
             // Marcar los ya visibles para que su lista sólo muestre los restantes.

@@ -25,6 +25,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { AgendaInsights } from '@/components/appointments/AgendaInsights';
 import { AgendaReminders } from '@/components/appointments/AgendaReminders';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { businessDayRange } from '@/lib/agenda';
 import { listAgendaAppointments } from '@/lib/agenda-data';
 import { REMINDER_LEAD_MS } from '@/lib/agenda-reminders';
@@ -77,6 +78,7 @@ function AgendaDashboard({
   const [customerRevision, setCustomerRevision] = useState(0);
   const [calendarRevision, setCalendarRevision] = useState(0);
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [riskDialogOpen, setRiskDialogOpen] = useState(false);
   const [riskCount, setRiskCount] = useState<number | null>(null);
@@ -209,13 +211,18 @@ function AgendaDashboard({
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <NotificationBell
+            timezone={currentTimezone}
+            refreshRevision={revision}
+            onOpenChange={setNotificationsOpen}
+          />
           <AgendaReminders
             appointments={feed ?? []}
             now={now}
             timezone={currentTimezone}
             scope={scope}
             canWrite={canBook}
-            paused={bookingOpen || riskDialogOpen}
+            paused={bookingOpen || riskDialogOpen || notificationsOpen}
             onChanged={reminderChanged}
           />
           <Button

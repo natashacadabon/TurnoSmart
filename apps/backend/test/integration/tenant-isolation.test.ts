@@ -18,6 +18,7 @@ import { PrismaServiceRepository } from '../../src/modules/services/repository.j
 import { PrismaAvailabilityRepository } from '../../src/modules/availability/repository.js';
 import { PrismaSlotsRepository } from '../../src/modules/slots/repository.js';
 import { PrismaAppointmentRepository } from '../../src/modules/appointments/repository.js';
+import { PrismaNotificationRepository } from '../../src/modules/notifications/repository.js';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -38,6 +39,7 @@ const app = createApp({
   slots: new PrismaSlotsRepository(prisma),
   appointments: new PrismaAppointmentRepository(prisma),
   events: new PrismaEventRepository(prisma),
+  notifications: new PrismaNotificationRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer: null,
   aiRateLimit: { limit: 10, windowMs: 60_000 },
@@ -70,6 +72,161 @@ afterAll(async () => {
   // Cascade elimina perfiles, clientes y turnos de prueba.
   await prisma.business.deleteMany({ where: { id: { in: createdBusinesses } } });
   await prisma.$disconnect();
+});
+
+describe('centro de notificaciones', () => {
+  it('persiste avisos únicos y lecturas individuales, pagina y aísla los negocios', async () => {
+    const member = await onboard('Notificaciones A');
+    const stranger = await onboard('Notificaciones B');
+    const staff = verifier.addUser();
+    await prisma.profile.create({
+      data: {
+        id: staff.id,
+        businessId: member.businessId,
+        email: 'staff@example.test',
+        role: 'STAFF',
+      },
+    });
+    const staffAuth = { Authorization: `Bearer ${staff.token}` };
+    const path = '/api/notifications';
+    const now = Date.now();
+
+    async function appointment(businessId: string, startsAt: Date) {
+      const [customer, service] = await Promise.all([
+        prisma.customer.create({ data: { businessId, fullName: 'Cliente' } }),
+        prisma.service.create({ data: { businessId, name: randomUUID(), durationMinutes: 30 } }),
+      ]);
+      return prisma.appointment.create({
+        data: {
+          businessId,
+          customerId: customer.id,
+          serviceId: service.id,
+          startsAt,
+          endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+        },
+      });
+    }
+
+    const near = await appointment(member.businessId, new Date(now + 4 * 60_000));
+    const distant = await appointment(member.businessId, new Date(now + 24 * 60 * 60_000));
+    const foreign = await appointment(stranger.businessId, new Date(now + 4 * 60_000));
+    expect((await request(app).get(path)).status).toBe(401);
+    expect((await request(app).get(path).set(member.auth)).body).toEqual({
+      items: [],
+      nextCursor: null,
+      unreadCount: 0,
+    });
+    const synced = await Promise.all(
+      [member.auth, staffAuth, member.auth].map((auth) =>
+        request(app)
+          .post(path + '/sync-upcoming')
+          .set(auth),
+      ),
+    );
+    for (const response of synced) {
+      expect(response.status).toBe(200);
+      expect(response.body.items).toEqual([
+        {
+          id: synced[0]!.body.items[0].id,
+          appointmentId: near.id,
+          startsAt: near.startsAt.toISOString(),
+        },
+      ]);
+    }
+    const upcomingId = synced[0]!.body.items[0].id as string;
+    expect((await request(app).get(path).set(stranger.auth)).body.items).toEqual([]);
+    expect((await request(app).patch(`${path}/${upcomingId}/read`).set(stranger.auth)).status).toBe(
+      404,
+    );
+    expect((await request(app).get(`${path}?cursor=${upcomingId}`).set(stranger.auth)).status).toBe(
+      404,
+    );
+    expect(
+      (await request(app).post(`/api/appointments/${foreign.id}/confirm`).set(stranger.auth))
+        .status,
+    ).toBe(200);
+    expect(
+      (await request(app).post(`/api/appointments/${distant.id}/confirm`).set(member.auth)).status,
+    ).toBe(200);
+    expect(
+      (await request(app).post(`/api/appointments/${distant.id}/confirm`).set(member.auth)).status,
+    ).toBe(409);
+
+    const first = await request(app)
+      .get(path + '?limit=1')
+      .set(member.auth);
+    expect(first.body).toMatchObject({
+      items: [{ kind: 'CONFIRMED', appointmentId: distant.id }],
+      unreadCount: 2,
+    });
+    expect(first.body.nextCursor).toBe(first.body.items[0].id);
+    const second = await request(app)
+      .get(`${path}?limit=1&cursor=${first.body.nextCursor}`)
+      .set(member.auth);
+    expect(second.body).toMatchObject({
+      items: [{ id: upcomingId, kind: 'APPOINTMENT_UPCOMING' }],
+      nextCursor: null,
+    });
+    const reads = await Promise.all(
+      [1, 2].map(() => request(app).patch(`${path}/${upcomingId}/read`).set(member.auth)),
+    );
+    expect(reads.map((response) => response.status)).toEqual([200, 200]);
+    expect(reads[0]!.body).toEqual(reads[1]!.body);
+    expect(reads[0]!.body.unreadCount).toBe(1);
+    expect((await request(app).get(path).set(staffAuth)).body.unreadCount).toBe(2);
+    expect(
+      (
+        await request(app)
+          .get(path + '?filter=unread')
+          .set(member.auth)
+      ).body.items,
+    ).toMatchObject([{ kind: 'CONFIRMED' }]);
+    expect(
+      (
+        await request(app)
+          .patch(path + '/read-all')
+          .set(member.auth)
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await request(app)
+          .get(path + '?filter=unread')
+          .set(member.auth)
+      ).body,
+    ).toMatchObject({ items: [], unreadCount: 0 });
+    expect((await request(app).get(path).set(staffAuth)).body.unreadCount).toBe(2);
+    expect((await request(app).get(path).set(stranger.auth)).body.unreadCount).toBe(1);
+    expect(
+      (await request(app).post(`/api/appointments/${near.id}/cancel`).set(member.auth)).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(app)
+          .post(path + '/sync-upcoming')
+          .set(member.auth)
+      ).body.items,
+    ).toEqual([]);
+    await prisma.appointment.delete({ where: { id: near.id } });
+    const preserved = await request(app)
+      .get(path + '?filter=unread')
+      .set(member.auth);
+    expect(preserved.body.items).toMatchObject([{ kind: 'CANCELLED', appointmentId: null }]);
+    expect(await prisma.notificationRead.count({ where: { businessId: member.businessId } })).toBe(
+      2,
+    );
+  });
+
+  it('mantiene las tablas nuevas fuera de la Data API', async () => {
+    const [result] = await prisma.$queryRaw<{ enabled: boolean; directAccess: boolean }[]>`
+      SELECT bool_and(c.relrowsecurity) AS enabled,
+             bool_or(has_table_privilege(r.rolname, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')) AS "directAccess"
+      FROM pg_class c CROSS JOIN pg_roles r
+      WHERE c.oid IN ('public.notifications'::regclass, 'public.notification_reads'::regclass)
+        AND r.rolname IN ('anon', 'authenticated')
+    `;
+    expect(result).toEqual({ enabled: true, directAccess: false });
+  });
 });
 
 describe('integración API-DB: identidad', () => {

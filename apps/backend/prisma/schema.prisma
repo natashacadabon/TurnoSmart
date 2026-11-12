@@ -48,6 +48,15 @@ enum ReminderStatus {
   CANCELLED
 }
 
+enum NotificationKind {
+  APPOINTMENT_UPCOMING
+  CONFIRMED
+  CANCELLED
+  RESCHEDULED
+  MARKED_NO_SHOW
+  COMPLETED
+}
+
 model Business {
   id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name              String
@@ -62,6 +71,7 @@ model Business {
   appointmentEvents AppointmentEvent[]
   riskScores        RiskScore[]
   reminders         Reminder[]
+  notifications     Notification[]
 
   @@map("businesses")
 }
@@ -76,7 +86,9 @@ model Profile {
   createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
   business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  notificationReads NotificationRead[]
 
+  @@unique([id, businessId])
   @@unique([businessId, email])
   @@index([businessId])
   @@map("profiles")
@@ -152,6 +164,7 @@ model Appointment {
   events     AppointmentEvent[]
   riskScore  RiskScore?
   reminders  Reminder[]
+  notifications Notification[]
 
   @@unique([id, businessId])
   @@index([businessId, startsAt])
@@ -209,4 +222,37 @@ model Reminder {
   @@index([businessId, status, scheduledAt])
   @@index([appointmentId])
   @@map("reminders")
+}
+
+model Notification {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId    String             @map("business_id") @db.Uuid
+  appointmentId String?            @map("appointment_id") @db.Uuid
+  kind          NotificationKind
+  sourceKey     String             @map("source_key")
+  startsAt      DateTime           @map("starts_at") @db.Timestamptz(3)
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  business      Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment   Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  reads         NotificationRead[]
+
+  @@unique([businessId, sourceKey])
+  @@unique([id, businessId])
+  @@index([businessId, createdAt(sort: Desc), id(sort: Desc)], map: "notifications_business_recent_idx")
+  @@index([appointmentId])
+  @@map("notifications")
+}
+
+model NotificationRead {
+  businessId     String       @map("business_id") @db.Uuid
+  notificationId String       @map("notification_id") @db.Uuid
+  profileId      String       @map("profile_id") @db.Uuid
+  readAt         DateTime     @default(now()) @map("read_at") @db.Timestamptz(3)
+  notification   Notification @relation(fields: [notificationId, businessId], references: [id, businessId], onDelete: Cascade)
+  profile        Profile      @relation(fields: [profileId, businessId], references: [id, businessId], onDelete: Cascade)
+
+  @@id([notificationId, profileId])
+  @@index([businessId, profileId, notificationId], map: "notification_reads_profile_idx")
+  @@index([profileId, businessId])
+  @@map("notification_reads")
 }

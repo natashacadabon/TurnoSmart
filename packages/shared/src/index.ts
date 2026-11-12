@@ -10,3 +10,4 @@ export * from './errors.js';
 export * from './identity.js';
 export * from './customers.js';
 export * from './appointments.js';
+export * from './notifications.js';

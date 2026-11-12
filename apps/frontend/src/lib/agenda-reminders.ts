@@ -1,11 +1,15 @@
-import { isTerminalAppointmentStatus, type AppointmentDto } from '@turnosmart/shared';
+import {
+  NOTIFICATION_LEAD_MS,
+  isTerminalAppointmentStatus,
+  type AppointmentDto,
+} from '@turnosmart/shared';
 import { businessDate } from './booking';
 import { canApplyAppointmentAction, type AppointmentAction } from './appointment-actions';
 export { appointmentActions as reminderActions } from './appointment-actions';
 export type ReminderAction = AppointmentAction;
 
 const MINUTE = 60_000;
-export const REMINDER_LEAD_MS = 10 * MINUTE;
+export const REMINDER_LEAD_MS = NOTIFICATION_LEAD_MS;
 export const REMINDER_SNOOZE_MS = 5 * MINUTE;
 export type ReminderPhase = 'soon' | 'started';
 export type ReminderPreference = { dismissed?: boolean; until?: number; seen?: ReminderPhase };

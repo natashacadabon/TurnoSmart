@@ -5,6 +5,7 @@ import type {
   AvailabilityRuleInput,
   CreateAppointmentRequest,
   CustomerDto,
+  NotificationDto,
   ServiceDto,
 } from '@turnosmart/shared';
 import { APPOINTMENT_STATUSES } from '@turnosmart/shared';
@@ -61,9 +62,9 @@ function respond(route: Route, json: object, status = 200) {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers':
       'Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
   };
-  return route.request().method() === 'OPTIONS'
+  return route.request().method() === 'OPTIONS' || status === 204
     ? route.fulfill({ status: 204, headers })
     : route.fulfill({ status, json, headers });
 }
@@ -112,12 +113,82 @@ async function openAgenda(
   );
   const writes: CreateAppointmentRequest[] = [];
   const appointments = [...initialAppointments];
+  const notifications: NotificationDto[] = [];
+  let failNotificationList = false;
   const transitions: string[] = [];
   const riskCalls: string[] = [];
   let rules = options.rules ?? weekdays;
   const customers = [customer];
   const slotDates: string[] = [];
   let bookedByAnother = false;
+  await page.route(/\/api\/notifications(?:\/[^?]+)?(\?.*)?$/, async (route) => {
+    if (route.request().method() === 'OPTIONS') return respond(route, {});
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/sync-upcoming')) {
+      const current = await page.evaluate(() => Date.now());
+      const due = agendaReminders(appointments, current, timezone, {}).queue;
+      return respond(route, {
+        items: due.map(({ appointment }) => {
+          const previous = notifications.find(
+            (item) =>
+              item.kind === 'APPOINTMENT_UPCOMING' &&
+              item.appointmentId === appointment.id &&
+              item.startsAt === appointment.startsAt,
+          );
+          const notification = previous ?? {
+            id: id(5000 + notifications.length),
+            appointmentId: appointment.id,
+            startsAt: appointment.startsAt,
+            kind: 'APPOINTMENT_UPCOMING' as const,
+            createdAt: new Date(current).toISOString(),
+            readAt: null,
+          };
+          if (!previous) notifications.push(notification);
+          return {
+            id: notification.id,
+            appointmentId: appointment.id,
+            startsAt: appointment.startsAt,
+          };
+        }),
+      });
+    }
+    if (url.pathname.endsWith('/read-all')) {
+      for (const notice of notifications) notice.readAt ??= now;
+      return respond(route, {}, 204);
+    }
+    const unreadCount = () => notifications.filter((notice) => !notice.readAt).length;
+    if (url.pathname.endsWith('/read')) {
+      const notice = notifications.find((item) => url.pathname.includes(item.id));
+      if (!notice)
+        return respond(
+          route,
+          { error: { code: 'NOT_FOUND', message: 'Notificación no encontrada' } },
+          404,
+        );
+      notice.readAt ??= now;
+      return respond(route, { readAt: notice.readAt, unreadCount: unreadCount() });
+    }
+    if (failNotificationList)
+      return respond(
+        route,
+        { error: { code: 'INTERNAL_ERROR', message: 'Notificaciones no disponibles' } },
+        503,
+      );
+    const ordered = [...notifications].sort(
+      (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+    );
+    const cursor = url.searchParams.get('cursor');
+    const offset = cursor ? ordered.findIndex((item) => item.id === cursor) + 1 : 0;
+    const remaining = ordered
+      .slice(offset)
+      .filter((item) => url.searchParams.get('filter') !== 'unread' || !item.readAt);
+    const limit = Number(url.searchParams.get('limit'));
+    return respond(route, {
+      items: remaining.slice(0, limit),
+      unreadCount: unreadCount(),
+      nextCursor: remaining.length > limit ? remaining[limit - 1]!.id : null,
+    });
+  });
   await page.route(
     /\/api\/(me|services|slots|customers(?:\/[^/?]+)?|availability-rules|appointments(?:\/[^/?]+(?:\/(?:events|confirm|cancel|complete|no-show|risk\/explanation))?)?)(\?.*)?$/,
     async (route) => {
@@ -178,6 +249,17 @@ async function openAgenda(
           );
         }
         appointment.status = reminderActions[action as ReminderAction].status;
+        notifications.push({
+          id: id(5000 + notifications.length),
+          appointmentId: appointment.id,
+          startsAt: appointment.startsAt,
+          createdAt: now,
+          readAt: null,
+          kind:
+            appointment.status === 'NO_SHOW'
+              ? 'MARKED_NO_SHOW'
+              : (appointment.status as 'CONFIRMED' | 'CANCELLED' | 'COMPLETED'),
+        });
         return respond(route, appointment);
       }
       switch (url.pathname) {
@@ -273,6 +355,10 @@ async function openAgenda(
     writes,
     slotDates,
     transitions,
+    notifications,
+    setNotificationError(fail: boolean) {
+      failNotificationList = fail;
+    },
     riskCalls,
     replaceRules(next: AvailabilityRuleInput[]) {
       rules = next;
@@ -391,15 +477,20 @@ test('gestiona la cola de avisos, pospone y sincroniza cambios reales con el cal
   const firstAlert = reminderFixture(31, 5);
   const secondAlert = reminderFixture(32, 10);
   const far = reminderFixture(33, 30);
-  const { transitions } = await openAgenda(page, false, [firstAlert, secondAlert, far], {
-    rejectFirstTransition: true,
-  });
+  const { transitions, notifications } = await openAgenda(
+    page,
+    false,
+    [firstAlert, secondAlert, far],
+    {
+      rejectFirstTransition: true,
+    },
+  );
   const card = page.getByRole('region', { name: 'Aviso de turno' });
   await expect(card).toHaveCount(1);
   await expect(card.getByText('María Pérez')).toBeVisible();
   await expect(card.getByText('Consulta', { exact: true })).toBeVisible();
   await expect(card.getByText('Comienza en 5 min')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Avisos de turnos (2)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Notificaciones (2 sin leer)' })).toBeVisible();
   await page.getByRole('button', { name: 'Nuevo turno' }).click();
   await expect(card).toBeHidden();
   await page
@@ -410,9 +501,14 @@ test('gestiona la cola de avisos, pospone y sincroniza cambios reales con el cal
   await page.getByRole('button', { name: 'Expandir calendario' }).click();
   await expect(card).toHaveCount(1);
   await card.getByRole('button', { name: 'Recordar en 5 min' }).click();
+  expect(
+    notifications
+      .filter((notice) => notice.kind === 'APPOINTMENT_UPCOMING')
+      .every((notice) => !notice.readAt),
+  ).toBe(true);
   await expect(card.getByText('Comienza en 10 min')).toBeVisible();
   await card.getByRole('button', { name: 'Confirmar turno' }).click();
-  await expect(card.getByText('El turno cambió en otra sesión')).toBeVisible();
+  await expect(page.getByText('El turno cambió en otra sesión')).toBeVisible();
   const secondEvent = page.locator(
     '#agenda-calendar-grid a[href="/appointments/' + secondAlert.id + '"]',
   );
@@ -429,12 +525,90 @@ test('gestiona la cola de avisos, pospone y sincroniza cambios reales con el cal
   await expect(
     page.locator('#agenda-calendar-grid a[href="/appointments/' + firstAlert.id + '"]'),
   ).toContainText('Turno completado');
-  await expect(page.getByRole('button', { name: 'Avisos de turnos (0)' })).toBeDisabled();
+  await expect(card).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Notificaciones (4 sin leer)' })).toBeVisible();
+  expect(notifications.filter((notice) => notice.kind === 'APPOINTMENT_UPCOMING')).toHaveLength(2);
   expect(transitions).toEqual([
     secondAlert.id + '/confirm',
     secondAlert.id + '/cancel',
     firstAlert.id + '/complete',
   ]);
+  await page.clock.setFixedTime(new Date(Date.parse(now) + 25 * 60_000));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(card.getByText('Comienza en 5 min')).toBeVisible();
+  await card.getByRole('button', { name: 'Cerrar avisos' }).click();
+  await expect(card).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Notificaciones (5 sin leer)' })).toBeVisible();
+  expect(notifications.find((notice) => notice.appointmentId === far.id)?.readAt).toBeNull();
+});
+
+test('la campana abre un historial persistente, marca lecturas y navega al turno en móvil', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const appointment = reminderFixture(80, 90);
+  const { notifications, setNotificationError } = await openAgenda(page, false, [appointment]);
+  const bell = page.getByRole('button', { name: /^Notificaciones/ });
+  const popup = page.getByRole('dialog', { name: 'Notificaciones' });
+  await bell.focus();
+  await page.keyboard.press('Enter');
+  await expect(popup.getByText('No tenés notificaciones')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popup).toHaveCount(0);
+  await expect(bell).toBeFocused();
+  await bell.click();
+  await expect(popup).toBeVisible();
+  await page.mouse.click(2, 2);
+  await expect(popup).toHaveCount(0);
+
+  for (let index = 0; index < 23; index++) {
+    notifications.push({
+      id: id(7000 + index),
+      appointmentId: index === 22 ? appointment.id : null,
+      kind: index === 22 ? 'CONFIRMED' : 'COMPLETED',
+      startsAt: appointment.startsAt,
+      createdAt: new Date(Date.parse(now) - (22 - index) * 60_000).toISOString(),
+      readAt: index < 20 ? now : null,
+    });
+  }
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(bell).toHaveAccessibleName('Notificaciones (3 sin leer)');
+  setNotificationError(true);
+  await bell.click();
+  await expect(popup.getByText('No se pudieron cargar las notificaciones.')).toBeVisible();
+  setNotificationError(false);
+  await popup.getByRole('button', { name: 'Reintentar' }).click();
+  await expect(popup.getByRole('alert')).toHaveCount(0);
+  const box = (await popup.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  const rows = popup.getByRole('listitem');
+  await expect(rows).toHaveCount(8);
+  await expect(rows.first()).toContainText('Turno confirmado');
+  await rows.nth(1).getByRole('button', { name: 'Marcar como leída' }).click();
+  await expect(popup.getByText('2 sin leer')).toBeVisible();
+  await rows.first().getByRole('button', { name: 'Ver turno' }).click();
+  await expect(page).toHaveURL(new RegExp('/appointments/' + appointment.id + '$'), {
+    timeout: 30_000,
+  });
+  expect(notifications.at(-1)?.readAt).not.toBeNull();
+  await page.getByRole('link', { name: 'Volver a Agenda' }).click();
+  await expect(bell).toHaveAccessibleName('Notificaciones (1 sin leer)');
+  await bell.click();
+  await popup.getByRole('link', { name: 'Ver todas las notificaciones' }).click();
+  await expect(page).toHaveURL(/\/notifications$/, { timeout: 30_000 });
+  const history = page.getByRole('list', { name: 'Notificaciones' });
+  await expect(history.getByRole('listitem')).toHaveCount(20);
+  await page.getByRole('button', { name: 'Siguiente' }).click();
+  await expect(history.getByRole('listitem')).toHaveCount(3);
+  await page.getByRole('button', { name: 'No leídas', exact: true }).click();
+  await expect(history.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Marcar todas como leídas' }).click();
+  await expect(page.getByText('0 sin leer')).toBeVisible();
+  await page.reload();
+  await expect(history.getByRole('listitem')).toHaveCount(20);
+  await expect(page.getByText('0 sin leer')).toBeVisible();
 });
 
 test('detalle reprograma con confirmación, maneja errores y actualiza historial y agenda', async ({
@@ -937,10 +1111,13 @@ test('conserva el calendario al expandir y refleja horarios, estados y cambios d
   await expect(page.getByRole('button', { name: 'Nuevo turno' })).toBeDisabled();
   const monday = grid.locator('.booking-calendar-day[data-date="2099-01-05"]');
   const completedLink = monday.getByRole('link', { name: /Turno completado/ });
-  if (!(await completedLink.isVisible())) {
+  const insideCell = await completedLink.isVisible();
+  if (!insideCell) {
     await monday.getByText(/^\+\d+ turnos?$/).click({ timeout: 5000 });
   }
-  const completed = grid.getByRole('link', { name: /Turno completado/ }).filter({ visible: true });
+  const completed = insideCell
+    ? completedLink
+    : page.getByRole('dialog').getByRole('link', { name: /Turno completado/ });
   await expect(completed.locator('svg.lucide-check-circle-2')).toBeVisible();
   await completed.click({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Estado del turno' })).toBeVisible({
@@ -969,22 +1146,40 @@ test('Mes muestra turnos en la celda y lista solo los que desbordan en orden hor
   await grid.getByText('Mes', { exact: true }).click();
   const cell = (day: string) => grid.locator(`.booking-calendar-day[data-date="${day}"]`);
   const links = (day: string) => cell(day).getByRole('link', { name: /turno/i });
+  async function expectCentered(day: Locator, indicator: Locator) {
+    await expect(indicator).toBeVisible();
+    const box = (await day.boundingBox())!;
+    const chip = (await indicator.boundingBox())!;
+    expect(Math.abs(chip.x + chip.width / 2 - (box.x + box.width / 2))).toBeLessThan(4);
+    expect(chip.x).toBeGreaterThanOrEqual(box.x);
+    expect(chip.x + chip.width).toBeLessThanOrEqual(box.x + box.width);
+    expect(chip.y).toBeGreaterThanOrEqual(box.y);
+    expect(chip.y + chip.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+  }
   await expect(links(date)).toHaveCount(2);
   await expect(links(date).first()).toContainText('10:00');
   await expect(links(date).first()).toContainText('María Pérez');
   await expect(links(date).first().locator('svg.lucide-clock-3')).toBeVisible();
   await expect(cell(date).getByText(/^\+\d+ turnos?$/)).toHaveCount(0);
 
-  const overflow = cell(busyDay).getByText(/^\+\d+ turnos?$/);
-  await expect(overflow).toBeVisible();
+  const overflow = cell(busyDay).locator('.agenda-month-more-chip');
+  const overflowButton = cell(busyDay).getByRole('button', { name: /^\+\d+ turnos?$/ });
+  await expectCentered(cell(busyDay), overflow);
+  await expect(overflow.locator('svg.lucide-calendar-days')).toBeVisible();
   const visible = await links(busyDay).evaluateAll((items) =>
     items.map((item) => item.getAttribute('href')),
   );
   expect(visible.length).toBeGreaterThanOrEqual(1);
   expect(visible).toEqual(dense.slice(0, visible.length).map((item) => '/appointments/' + item.id));
   await expect(overflow).toHaveText(`+${dense.length - visible.length} turnos`);
-  await overflow.click();
-  const dialog = grid.getByRole('dialog');
+  await expect(overflowButton).toHaveAccessibleDescription(
+    `Mostrar ${dense.length - visible.length} turnos adicionales`,
+  );
+  await page.keyboard.press('Tab');
+  await overflowButton.focus();
+  await expect(overflow).toHaveCSS('outline-width', '2px');
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect
     .poll(() =>
@@ -995,14 +1190,45 @@ test('Mes muestra turnos en la celda y lista solo los que desbordan en orden hor
     .toEqual(dense.slice(visible.length).map((item) => '/appointments/' + item.id));
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
+  await expect(overflowButton).toBeFocused();
 
   const sunday = cell('2099-01-04');
-  await expect(sunday).toContainText('Cerrado');
+  const closedChip = sunday.locator('.agenda-month-closed-chip');
+  await expectCentered(sunday, closedChip);
+  await expect(closedChip.locator('svg.lucide-lock-keyhole')).toBeVisible();
+  const dayNumber = (await sunday.locator('.agenda-day-number').boundingBox())!;
+  expect((await closedChip.boundingBox())!.y).toBeGreaterThanOrEqual(
+    dayNumber.y + dayNumber.height,
+  );
+  await expect(sunday).toHaveAccessibleName(/domingo.*cerrado/i);
+  await expect(sunday.getByRole('button')).toHaveCount(0);
   await expect(sunday.getByRole('link', { name: /Turno completado/ })).toBeVisible();
   await sunday.locator('.agenda-day-number').click();
   await expect(page.getByRole('dialog', { name: /Nuevo turno/ })).toHaveCount(0);
+  const outside = cell('2099-02-01');
+  await expectCentered(outside, outside.locator('.agenda-month-closed-chip'));
+  await expect(outside.getByRole('button')).toHaveCount(0);
+  await expect(cell('2099-01-07').locator('.agenda-month-more-chip')).toHaveCount(0);
+
   await page.getByRole('button', { name: 'Expandir calendario' }).click();
   await expect(links(date)).toHaveCount(2);
+  await expectCentered(cell(busyDay), overflow);
+  await expectCentered(sunday, closedChip);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectCentered(cell(busyDay), overflow);
+  await expectCentered(sunday, closedChip);
+  expect(await page.locator('html').evaluate((element) => element.scrollWidth)).toBe(390);
+  await page.setViewportSize({ width: 390, height: 730 });
+  const single = sunday.getByRole('button', { name: '+1', exact: true });
+  await expect(single).toHaveAccessibleDescription('Mostrar 1 turno adicional');
+  await expectCentered(sunday, sunday.locator('.agenda-month-more-chip'));
+  await single.click();
+  await expect(dialog.getByRole('link', { name: /Turno completado/ })).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await grid.getByRole('button', { name: /mes siguiente/i }).click();
+  await expect(grid.locator('.booking-calendar-title')).toContainText(/febrero/i);
+  await expectCentered(outside, outside.locator('.agenda-month-closed-chip'));
 });
 
 test('Agenda distingue métricas en cero de datos no disponibles', async ({ page, context }) => {

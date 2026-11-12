@@ -14,8 +14,8 @@ export function slotsRouter(deps: {
   const service = new SlotsService(deps.slots, deps.availability);
   router.get('/', requirePermission('slots:read'), async (req, res) => {
     const query = parse(slotsQuerySchema, req.query);
-    const { businessId, timezone } = req.auth!;
-    const response: SlotsResponse = { data: await service.list(businessId, timezone, query) };
+    const { businessId } = req.auth!;
+    const response: SlotsResponse = { data: await service.list(businessId, query) };
     res.json(response);
   });
   return router;

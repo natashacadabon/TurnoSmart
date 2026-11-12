@@ -49,7 +49,7 @@ function respond(route: Route, json: object, status = 200) {
   return route.fulfill({ status, json, headers });
 }
 
-async function fixtures(page: Page, role: Role = 'OWNER') {
+async function fixtures(page: Page, role: Role = 'OWNER', overlapping = false) {
   const user = {
     id: fixtureId,
     email,
@@ -90,6 +90,9 @@ async function fixtures(page: Page, role: Role = 'OWNER') {
       updatedAt: timestamp,
     },
   ];
+  if (overlapping) {
+    rules.push({ ...rules[0]!, id: secondId, startTime: '11:00', endTime: '13:00' });
+  }
   let availabilityReads = 0;
   let slotError = false;
   let slots: SlotDto[] = [
@@ -249,6 +252,27 @@ test('crea, edita, desactiva y activa servicios con validación y conflicto de n
   await row.getByRole('button', { name: /Activar/ }).click();
   await expect(row.getByRole('button', { name: /Desactivar/ })).toBeVisible();
   expect(writes.at(-1)).toMatchObject({ method: 'PATCH', body: { active: true } });
+});
+
+test('muestra un solapamiento guardado y permite corregir la franja sin quitarla', async ({
+  page,
+}) => {
+  const { writes } = await fixtures(page, 'OWNER', true);
+  await login(page);
+  await expect(page.getByText(/La disponibilidad guardada tiene errores/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Domingo, Revisar' }).click();
+  const save = page.getByRole('button', { name: 'Guardar cambios' });
+  await expect(page.getByText(/Se solapa con la franja 09:00–12:00/)).toBeVisible();
+  await expect(save).toBeDisabled();
+  await page.getByLabel('Inicio domingo 2').fill('12:00');
+  await save.click();
+  await expect(page.getByText('Disponibilidad guardada.')).toBeVisible();
+  expect(writes.at(-1)?.body).toEqual({
+    rules: [
+      { dayOfWeek: 0, startTime: '09:00', endTime: '12:00', active: true },
+      { dayOfWeek: 0, startTime: '12:00', endTime: '13:00', active: true },
+    ],
+  });
 });
 
 test('edita un día, conserva el borrador al navegar y guarda franjas adyacentes', async ({

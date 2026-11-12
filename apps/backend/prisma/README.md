@@ -125,7 +125,9 @@ habil anterior o siguiente, con una agenda por negocio y sin solapamientos activ
 Los upserts usan IDs reservados del seed, separados del seed antiguo. No se
 reasignan perfiles de otro negocio/rol ni se mueven registros con IDs ajenos.
 Los fixtures reservados pueden volver a sus valores de demostracion al repetir;
-los registros ajenos al seed permanecen intactos. Ante conflicto con un turno
+la disponibilidad se inicializa solo al crear el negocio. Si la semana ya se
+editó o quedó vacía, el seed conserva esa semana y sus turnos. Los registros
+ajenos al seed permanecen intactos. Ante conflicto con un turno
 manual, las escrituras de negocio se revierten en la transaccion Serializable.
 No ejecutar mientras se editan esos datos de demostracion.
 
