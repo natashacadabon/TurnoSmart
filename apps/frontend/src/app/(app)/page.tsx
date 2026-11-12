@@ -227,14 +227,6 @@ function AgendaDashboard({
           />
           <Button
             component={Link}
-            href="/demo"
-            size="small"
-            startIcon={<Eye size={17} aria-hidden />}
-          >
-            Ver demo
-          </Button>
-          <Button
-            component={Link}
             href="/customers"
             size="small"
             startIcon={<UsersRound size={17} aria-hidden />}
