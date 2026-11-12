@@ -258,6 +258,8 @@ export function AgendaCalendar({
       timeGridDay: { hiddenDays: hasHours ? week.hiddenDays : [] },
       dayGridMonth: {
         dayMaxEvents: true,
+        dayRowClass: 'agenda-month-week',
+        moreLinkClass: 'agenda-month-more-link',
         eventOrder: 'start,-duration,title',
         eventOrderStrict: true,
         moreLinkHint: (count: number) =>
@@ -470,14 +472,16 @@ export function AgendaCalendar({
           '& .agenda-day-closed': { bgcolor: 'grey.50' },
           '& .agenda-month-cell-top': {
             display: 'flex',
-            justifyContent: 'flex-end',
-            p: '2px 5px',
+            justifyContent: 'center',
+            p: '2px',
           },
           '& .agenda-month-cell-date': {
             display: 'flex',
             alignItems: 'center',
             lineHeight: 1.25,
             minHeight: 20,
+            height: 'auto',
+            m: 0,
             fontSize: '0.75rem',
             fontWeight: 600,
           },
@@ -499,7 +503,18 @@ export function AgendaCalendar({
             color: 'text.secondary',
             '@media (max-width: 420px)': { '& svg': { display: 'none' } },
           },
-          '& [role="button"][aria-haspopup="dialog"]:has(.agenda-month-more-chip)': {
+          '& .agenda-month-week': {
+            // Keep room for the date, closed indicator and overflow link on short screens.
+            minHeight: 58,
+          },
+          '& .agenda-month-more-link': {
+            // Keep the native link in the measured cell body, ahead of its event list.
+            order: -1,
+            flexShrink: 0,
+            m: 0,
+            px: '2px',
+            pt: '2px',
+            pb: '2px',
             justifyContent: 'center',
             minWidth: 0,
             maxWidth: '100%',

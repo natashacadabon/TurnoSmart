@@ -1141,30 +1141,74 @@ test('Mes muestra turnos en la celda y lista solo los que desbordan en orden hor
   const busyDay = '2099-01-06';
   const dense = Array.from({ length: 10 }, (_, index) => fixture(2 + index, busyDay, 12 + index));
   const historical = { ...fixture(12, '2099-01-04', 14), status: 'COMPLETED' as const };
-  await openAgenda(page, false, [...sparse, ...dense.slice().reverse(), historical]);
+  const nextWeek = '2099-01-13';
+  const nextWeekDense = Array.from({ length: 10 }, (_, index) =>
+    fixture(13 + index, nextWeek, 12 + index),
+  );
+  const singleDay = '2099-01-08';
+  await openAgenda(page, false, [
+    ...sparse,
+    ...dense.slice().reverse(),
+    historical,
+    ...nextWeekDense,
+    fixture(23, singleDay, 13),
+  ]);
   const grid = page.locator('#agenda-calendar-grid');
   await grid.getByText('Mes', { exact: true }).click();
   const cell = (day: string) => grid.locator(`.booking-calendar-day[data-date="${day}"]`);
   const links = (day: string) => cell(day).getByRole('link', { name: /turno/i });
   async function expectCentered(day: Locator, indicator: Locator) {
     await expect(indicator).toBeVisible();
-    const box = (await day.boundingBox())!;
-    const chip = (await indicator.boundingBox())!;
-    expect(Math.abs(chip.x + chip.width / 2 - (box.x + box.width / 2))).toBeLessThan(4);
-    expect(chip.x).toBeGreaterThanOrEqual(box.x);
-    expect(chip.x + chip.width).toBeLessThanOrEqual(box.x + box.width);
-    expect(chip.y).toBeGreaterThanOrEqual(box.y);
-    expect(chip.y + chip.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+    await expect
+      .poll(async () => {
+        const box = (await day.boundingBox())!;
+        const chip = (await indicator.boundingBox())!;
+        return {
+          centered: Math.abs(chip.x + chip.width / 2 - (box.x + box.width / 2)) < 4,
+          inside:
+            chip.x >= box.x &&
+            chip.x + chip.width <= box.x + box.width &&
+            chip.y >= box.y &&
+            chip.y + chip.height <= box.y + box.height + 0.5,
+        };
+      })
+      .toEqual({ centered: true, inside: true });
+  }
+  async function expectBelowDate(day: string) {
+    const dayCell = cell(day);
+    const indicator = dayCell.locator('.agenda-month-more-chip');
+    await expectCentered(dayCell, indicator);
+    await expect
+      .poll(() =>
+        dayCell.evaluate((element) => {
+          const number = element.querySelector('.agenda-day-number')!.getBoundingClientRect();
+          const chip = element.querySelector('.agenda-month-more-chip')!.getBoundingClientRect();
+          const lastHeaderChip = element.querySelector('.agenda-month-closed-chip');
+          const headerBottom = lastHeaderChip?.getBoundingClientRect().bottom ?? number.bottom;
+          const firstEvent = element
+            .querySelector('.agenda-calendar-event')
+            ?.getBoundingClientRect();
+          return {
+            nearDate: chip.top >= headerBottom && chip.top - headerBottom <= 10,
+            insideCell: element.getBoundingClientRect().bottom - chip.bottom >= 2,
+            beforeEvents: !firstEvent || chip.bottom <= firstEvent.top,
+          };
+        }),
+      )
+      .toEqual({ nearDate: true, insideCell: true, beforeEvents: true });
   }
   await expect(links(date)).toHaveCount(2);
   await expect(links(date).first()).toContainText('10:00');
   await expect(links(date).first()).toContainText('María Pérez');
   await expect(links(date).first().locator('svg.lucide-clock-3')).toBeVisible();
   await expect(cell(date).getByText(/^\+\d+ turnos?$/)).toHaveCount(0);
+  await expect(links(singleDay)).toHaveCount(1);
+  await expect(cell(singleDay).locator('.agenda-month-more-chip')).toHaveCount(0);
 
   const overflow = cell(busyDay).locator('.agenda-month-more-chip');
   const overflowButton = cell(busyDay).getByRole('button', { name: /^\+\d+ turnos?$/ });
-  await expectCentered(cell(busyDay), overflow);
+  await expectBelowDate(busyDay);
+  await expectBelowDate(nextWeek);
   await expect(overflow.locator('svg.lucide-calendar-days')).toBeVisible();
   const visible = await links(busyDay).evaluateAll((items) =>
     items.map((item) => item.getAttribute('href')),
@@ -1212,18 +1256,19 @@ test('Mes muestra turnos en la celda y lista solo los que desbordan en orden hor
 
   await page.getByRole('button', { name: 'Expandir calendario' }).click();
   await expect(links(date)).toHaveCount(2);
-  await expectCentered(cell(busyDay), overflow);
+  await expectBelowDate(busyDay);
   await expectCentered(sunday, closedChip);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expectCentered(cell(busyDay), overflow);
+  await expectBelowDate(busyDay);
+  await expectBelowDate(nextWeek);
   await expectCentered(sunday, closedChip);
   expect(await page.locator('html').evaluate((element) => element.scrollWidth)).toBe(390);
   await page.setViewportSize({ width: 390, height: 730 });
-  const single = sunday.getByRole('button', { name: '+1', exact: true });
-  await expect(single).toHaveAccessibleDescription('Mostrar 1 turno adicional');
-  await expectCentered(sunday, sunday.locator('.agenda-month-more-chip'));
-  await single.click();
-  await expect(dialog.getByRole('link', { name: /Turno completado/ })).toHaveCount(1);
+  await expectBelowDate(busyDay);
+  await expectCentered(sunday, closedChip);
+  const compactOverflow = cell(busyDay).getByRole('button', { name: /^\+\d+$/ });
+  await compactOverflow.click();
+  await expect(dialog.getByRole('link', { name: /turno/i }).first()).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await grid.getByRole('button', { name: /mes siguiente/i }).click();
