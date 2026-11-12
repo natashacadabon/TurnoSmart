@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { replaceAvailabilityRulesSchema, type AvailabilityRulesResponse } from '@turnosmart/shared';
+import {
+  availabilityRuleInputSchema,
+  replaceAvailabilityRulesSchema,
+  type AvailabilityRulesResponse,
+} from '@turnosmart/shared';
 import { requirePermission } from '../../middleware/auth.js';
 import { parse } from '../../lib/http.js';
 import { AppError } from '../../lib/errors.js';
 import {
-  localTime,
   timezoneFormatter,
+  toAvailabilityRuleInput,
   type AvailabilityRepository,
   type WeeklyAvailability,
 } from './repository.js';
@@ -15,26 +19,21 @@ const noQuery = z.strictObject({});
 
 function response(week: WeeklyAvailability): AvailabilityRulesResponse {
   timezoneFormatter(week.timezone);
-  const rules = week.rules.map((row) => ({
-    id: row.id,
-    dayOfWeek: row.dayOfWeek,
-    startTime: localTime(row.startTime),
-    endTime: localTime(row.endTime),
-    active: row.active,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  }));
-  if (
-    !replaceAvailabilityRulesSchema.safeParse({
-      rules: rules.map(({ dayOfWeek, startTime, endTime, active }) => ({
-        dayOfWeek,
-        startTime,
-        endTime,
-        active,
-      })),
-    }).success
-  )
-    throw new AppError('INTERNAL_ERROR', 'Configuracion de disponibilidad invalida');
+  // Exponer las franjas representables permite corregir un solapamiento mediante el PUT validado.
+  const rules = week.rules.map((row) => {
+    const parsed = availabilityRuleInputSchema.safeParse(toAvailabilityRuleInput(row));
+    if (!parsed.success)
+      throw new AppError(
+        'INTERNAL_ERROR',
+        'La disponibilidad guardada contiene una franja inválida.',
+      );
+    return {
+      id: row.id,
+      ...parsed.data,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  });
   return { data: { timezone: week.timezone, rules } };
 }
 

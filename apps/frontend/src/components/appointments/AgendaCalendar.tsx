@@ -1,0 +1,659 @@
+'use client';
+
+import FullCalendar, {
+  type CalendarRef,
+  type EventInput,
+  type EventDisplayInfo,
+} from '@fullcalendar/react';
+import dayGrid from '@fullcalendar/react/daygrid';
+import interaction from '@fullcalendar/react/interaction';
+import es from '@fullcalendar/react/locales/es';
+import monarch from '@fullcalendar/react/themes/monarch';
+import timeGrid from '@fullcalendar/react/timegrid';
+import '@fullcalendar/react/skeleton.css';
+import '@fullcalendar/react/themes/monarch/theme.css';
+import '@fullcalendar/react/themes/monarch/palettes/blue.css';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import OpenInFullRoundedIcon from '@mui/icons-material/OpenInFullRounded';
+import CloseFullscreenRoundedIcon from '@mui/icons-material/CloseFullscreenRounded';
+import {
+  Alert,
+  Box,
+  Button,
+  GlobalStyles,
+  LinearProgress,
+  Stack,
+  Typography,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import {
+  APPOINTMENT_STATUSES,
+  appointmentStatusSchema,
+  type AppointmentDto,
+  type AvailabilityRuleInput,
+} from '@turnosmart/shared';
+import { CalendarDays, LockKeyhole } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  agendaHours,
+  agendaTodayPosition,
+  appointmentStates,
+  canSelectAgendaTime,
+  utcAppointmentDates,
+  weekday,
+} from '@/lib/agenda';
+import { listAgendaAppointments } from '@/lib/agenda-data';
+import { errorMessage } from '@/lib/api';
+import { businessDate } from '@/lib/booking';
+import { appointmentToCalendarEvent } from '@/lib/calendar-events';
+import { timezoneLabel } from '@/lib/timezones';
+import { useAgendaCustomerNames } from '@/lib/use-agenda-customer-names';
+import { useToast } from '@/components/ToastProvider';
+import { AppointmentFormDialog } from './AppointmentFormDialog';
+import { AppointmentStatusBadge, AppointmentStatusIcon } from './AppointmentStatusBadge';
+
+const plugins = [monarch, dayGrid, timeGrid, interaction];
+const toolbar = {
+  start: 'prev,next today',
+  center: 'title',
+  end: 'dayGridMonth,timeGridWeek,timeGridDay',
+};
+const timeToolbar = { ...toolbar, start: 'prev,next agendaToday' };
+const monthToolbar = { ...toolbar, end: 'dayGridMonth' };
+type ViewPosition = { date: string; type: string };
+type TodayPosition = NonNullable<ReturnType<typeof agendaTodayPosition>>;
+
+function calendarEvent(appointment: AppointmentDto, customerName?: string): EventInput {
+  const state = appointmentStates[appointment.status];
+  const event = appointmentToCalendarEvent(appointment, 'Turno ' + state.label.toLowerCase());
+  return {
+    ...event,
+    extendedProps: { ...event.extendedProps, customerName },
+    color: state.color,
+    contrastColor: '#fff',
+    className:
+      appointment.status === 'CANCELLED'
+        ? 'agenda-calendar-event agenda-event-cancelled'
+        : 'agenda-calendar-event',
+    url: '/appointments/' + appointment.id,
+  };
+}
+
+const overflowStyles = {
+  '[role="dialog"][data-date]:has([data-agenda-event-content])': {
+    maxWidth: 'calc(100vw - 24px)',
+    maxHeight: 'min(24rem, 65dvh)',
+    overflowY: 'auto',
+  },
+  '[role="dialog"][data-date] [role="listitem"]:has([data-agenda-visible-event])': {
+    display: 'none',
+  },
+};
+
+const monthIndicator = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+  minWidth: 0,
+  maxWidth: '100%',
+  gap: '3px',
+  px: { xs: '2px', sm: 0.75 },
+  py: '1px',
+  border: 1,
+  borderRadius: 1,
+  fontSize: { xs: '0.625rem', sm: '0.6875rem' },
+  fontWeight: 600,
+  lineHeight: 1.35,
+  '& svg': { flexShrink: 0 },
+  '& > span': { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+} as const;
+
+function ClosedDayIndicator({ dateLabel }: { dateLabel: string }) {
+  const indicator = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    // FullCalendar oculta el encabezado visual de la celda para lectores de pantalla.
+    const cell = indicator.current?.closest('[role="cell"][data-date]');
+    if (!cell) return;
+    const previous = cell.getAttribute('aria-label');
+    cell.setAttribute('aria-label', dateLabel + ', cerrado');
+    return () => {
+      if (previous === null) cell.removeAttribute('aria-label');
+      else cell.setAttribute('aria-label', previous);
+    };
+  }, [dateLabel]);
+
+  return (
+    <span ref={indicator} className="agenda-month-closed-chip">
+      <LockKeyhole size={11} aria-hidden />
+      <span>Cerrado</span>
+    </span>
+  );
+}
+
+function renderAppointment(
+  { event, timeText, timeClass, titleClass, view }: EventDisplayInfo,
+  visibleInGrid: boolean,
+) {
+  const status = appointmentStatusSchema.safeParse(event.extendedProps.status);
+  const name =
+    typeof event.extendedProps.customerName === 'string' ? event.extendedProps.customerName : '';
+  const tooltip = [timeText, name, event.title].filter(Boolean).join(' · ');
+  const monthly = view.type === 'dayGridMonth';
+  return (
+    <>
+      {timeText && (
+        <div className={timeClass} title={tooltip}>
+          {timeText}
+        </div>
+      )}
+      <Box
+        className={titleClass}
+        title={tooltip}
+        data-agenda-event-content=""
+        data-agenda-visible-event={visibleInGrid ? '' : undefined}
+        sx={{ display: 'flex', alignItems: 'center', gap: 0.375, minWidth: 0 }}
+      >
+        {status.success && <AppointmentStatusIcon status={status.data} inEvent />}
+        <Box
+          component="span"
+          sx={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            ...(monthly && { fontSize: '0.75rem', lineHeight: 1.25 }),
+          }}
+        >
+          {name || event.title}
+        </Box>
+        {name && (
+          <Box
+            component="span"
+            sx={{
+              position: 'absolute',
+              width: '1px',
+              height: '1px',
+              p: 0,
+              overflow: 'hidden',
+              clipPath: 'inset(50%)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {' · ' + event.title}
+          </Box>
+        )}
+      </Box>
+    </>
+  );
+}
+
+interface Props {
+  timezone: string;
+  canBook: boolean;
+  rules: AvailabilityRuleInput[];
+  expanded: boolean;
+  appointmentRevision: number;
+  customerRevision: number;
+  onBookingOpenChange(open: boolean): void;
+  onToggleExpanded(): void;
+  onAppointmentSaved(): void;
+}
+
+export function AgendaCalendar({
+  timezone,
+  canBook,
+  rules,
+  expanded,
+  appointmentRevision,
+  customerRevision,
+  onBookingOpenChange,
+  onToggleExpanded,
+  onAppointmentSaved,
+}: Props) {
+  const calendar = useRef<CalendarRef>(null);
+  const compact = useMediaQuery(useTheme().breakpoints.down('sm'));
+  const dayLabel = useMemo(
+    () => new Intl.DateTimeFormat('es-AR', { dateStyle: 'full', timeZone: timezone }),
+    [timezone],
+  );
+  const [draft, setDraft] = useState<{ date?: string; startsAt?: string } | null>(null);
+  const { notify } = useToast();
+  const [appointments, setAppointments] = useState<AppointmentDto[]>([]);
+  const [visibleInGrid, setVisibleInGrid] = useState<ReadonlySet<string>>(new Set());
+  const customerNames = useAgendaCustomerNames(appointments, customerRevision);
+  const events = useMemo(
+    () =>
+      appointments.map((appointment) =>
+        calendarEvent(appointment, customerNames.get(appointment.customerId)),
+      ),
+    [appointments, customerNames],
+  );
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const [initialPosition] = useState(() => agendaTodayPosition(rules, new Date(), timezone));
+  const [viewPosition, setViewPosition] = useState<ViewPosition | null>(null);
+  const [todayPosition, setTodayPosition] = useState<TodayPosition | null>(null);
+  const lastView = useRef<ViewPosition | null>(null);
+  const lastToday = useRef<TodayPosition | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{ key: string; error: string } | null>(null);
+  const requestKey = range ? `${range.from}/${range.to}/${revision}/${appointmentRevision}` : '';
+  const loading = !!range && result?.key !== requestKey;
+  const error = result?.key === requestKey ? result.error : '';
+  const week = useMemo(() => agendaHours(rules), [rules]);
+  const hasHours = week.bounds !== null;
+  const initialView = !hasHours ? 'dayGridMonth' : compact ? 'timeGridDay' : 'timeGridWeek';
+  const viewType = viewPosition?.type ?? initialView;
+  const day =
+    viewType === 'timeGridDay' ? (viewPosition?.date ?? initialPosition?.date) : undefined;
+  const bounds =
+    day === undefined ? week.bounds : (agendaHours(rules, weekday(day)).bounds ?? week.bounds);
+  const bookable = canBook && hasHours;
+  const views = useMemo(
+    () => ({
+      timeGridWeek: { hiddenDays: hasHours ? week.hiddenDays : [] },
+      timeGridDay: { hiddenDays: hasHours ? week.hiddenDays : [] },
+      dayGridMonth: {
+        dayMaxEvents: true,
+        dayRowClass: 'agenda-month-week',
+        moreLinkClass: 'agenda-month-more-link',
+        eventOrder: 'start,-duration,title',
+        eventOrderStrict: true,
+        moreLinkHint: (count: number) =>
+          'Mostrar ' + count + (count === 1 ? ' turno adicional' : ' turnos adicionales'),
+      },
+    }),
+    [hasHours, week.hiddenDays],
+  );
+
+  useEffect(() => {
+    const instance = calendar.current?.getApi();
+    if (!instance) return;
+
+    let active = true;
+    let version = 0;
+    const syncView = () => {
+      const { activeStart, activeEnd, currentStart, type } = instance.view;
+      const { from, to } = utcAppointmentDates(activeStart, activeEnd);
+      const date = businessDate(
+        type === 'timeGridDay' ? currentStart : instance.getDate(),
+        timezone,
+      );
+      const notification = ++version;
+      // FullCalendar emite datesSet durante su commit. Publicar fuera de ese ciclo.
+      queueMicrotask(() => {
+        if (!active || notification !== version) return;
+        setRange((previous) =>
+          previous?.from === from && previous.to === to ? previous : { from, to },
+        );
+        setViewPosition((previous) =>
+          previous?.date === date && previous.type === type ? previous : { date, type },
+        );
+      });
+    };
+
+    instance.on('datesSet', syncView);
+    syncView();
+    return () => {
+      active = false;
+      instance.off('datesSet', syncView);
+    };
+  }, [timezone]);
+
+  useLayoutEffect(() => {
+    const instance = calendar.current?.getApi();
+    if (!instance || !viewPosition) return;
+    const previous = lastView.current;
+    const explicitToday =
+      todayPosition && lastToday.current !== todayPosition ? todayPosition : null;
+
+    if (hasHours && viewPosition.type !== 'dayGridMonth') {
+      if (explicitToday) {
+        // En Semana, cambiar la fecha enfocada puede mantener el mismo rango visible.
+        const date =
+          viewPosition.type === 'timeGridDay'
+            ? viewPosition.date
+            : businessDate(instance.getDate(), timezone);
+        if (date !== explicitToday.date) return;
+        instance.scrollToTime(explicitToday.time);
+      } else if (
+        previous &&
+        (previous.date !== viewPosition.date || previous.type === 'dayGridMonth')
+      ) {
+        const opening = agendaHours(rules, weekday(viewPosition.date)).bounds ?? week.bounds;
+        if (opening) instance.scrollToTime(opening.slotMinTime);
+      }
+    }
+    lastView.current = viewPosition;
+    lastToday.current = todayPosition;
+  }, [hasHours, rules, timezone, todayPosition, viewPosition, week.bounds]);
+
+  const goToToday = useCallback(() => {
+    const position = agendaTodayPosition(rules, new Date(), timezone);
+    if (!position) return;
+    setTodayPosition(position);
+    calendar.current?.getApi().gotoDate(position.date);
+  }, [rules, timezone]);
+
+  useEffect(() => {
+    if (!hasHours) {
+      const instance = calendar.current?.getApi();
+      if (instance?.view.type !== 'dayGridMonth') instance?.changeView('dayGridMonth');
+    }
+  }, [hasHours]);
+
+  useEffect(() => {
+    if (!range) return;
+    let active = true;
+    async function load() {
+      if (!range) return;
+      const loaded = await listAgendaAppointments(range, () => active);
+      if (!active) return;
+      setAppointments(loaded);
+      setResult({ key: requestKey, error: '' });
+    }
+    void load().catch((err) => {
+      if (active) setResult({ key: requestKey, error: errorMessage(err) });
+    });
+    return () => {
+      active = false;
+    };
+  }, [range, requestKey]);
+
+  function refresh() {
+    setRevision((value) => value + 1);
+  }
+
+  function canOpenDate(date: string, end?: string) {
+    return (
+      bookable &&
+      date.slice(0, 10) >= businessDate(new Date(), timezone) &&
+      canSelectAgendaTime(rules, date, end)
+    );
+  }
+
+  function openDate(date: string, allDay: boolean) {
+    if (!canOpenDate(date)) return;
+    const day = date.slice(0, 10);
+    changeDraft({ date: day, ...(!allDay ? { startsAt: new Date(date).toISOString() } : {}) });
+  }
+
+  function changeDraft(next: typeof draft) {
+    setDraft(next);
+    onBookingOpenChange(!!next);
+  }
+
+  function saved(appointment: AppointmentDto, title: string) {
+    calendar.current?.getApi().gotoDate(businessDate(new Date(appointment.startsAt), timezone));
+    setAppointments((previous) => [
+      ...previous.filter((event) => event.id !== appointment.id),
+      appointment,
+    ]);
+    refresh();
+    onAppointmentSaved();
+    changeDraft(null);
+    notify('Turno guardado · ' + title);
+  }
+
+  return (
+    <Stack spacing={1.25}>
+      <GlobalStyles styles={overflowStyles} />
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        sx={{ gap: 1.5, alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
+      >
+        <Box>
+          <Typography variant="h2">Calendario de turnos</Typography>
+          <Typography variant="body2" color="text.secondary" title={timezone}>
+            {timezoneLabel(timezone)}
+          </Typography>
+        </Box>
+        <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            size="small"
+            variant="outlined"
+            aria-expanded={expanded}
+            aria-controls="agenda-calendar-grid"
+            startIcon={expanded ? <CloseFullscreenRoundedIcon /> : <OpenInFullRoundedIcon />}
+            onClick={onToggleExpanded}
+            sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
+          >
+            {expanded ? 'Contraer calendario' : 'Expandir calendario'}
+          </Button>
+          {canBook && (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<AddRoundedIcon />}
+              disabled={!bookable}
+              onClick={() => changeDraft({})}
+            >
+              Nuevo turno
+            </Button>
+          )}
+        </Stack>
+      </Stack>
+      <Stack
+        component="section"
+        aria-label="Estados de turnos"
+        direction="row"
+        useFlexGap
+        sx={{ gap: 0.75, flexWrap: 'wrap' }}
+      >
+        {APPOINTMENT_STATUSES.map((status) => (
+          <AppointmentStatusBadge key={status} status={status} />
+        ))}
+      </Stack>
+      {!hasHours && (
+        <Alert severity="info">
+          Todavía no hay horarios de atención configurados. Configurá la disponibilidad en Servicios
+          para crear turnos.
+        </Alert>
+      )}
+      {loading && <LinearProgress aria-label="Cargando turnos" />}
+      {error && (
+        <Alert severity="error" action={<Button onClick={refresh}>Reintentar</Button>}>
+          {error}
+        </Alert>
+      )}
+      <Box
+        id="agenda-calendar-grid"
+        sx={{
+          minWidth: 0,
+          '& .booking-calendar-toolbar': { flexWrap: 'wrap', gap: 0.75 },
+          '& .booking-calendar-toolbar button': {
+            minHeight: { xs: 40, sm: 32 },
+            paddingBlock: 0.5,
+          },
+          '& .booking-calendar-title': { fontSize: { xs: '1rem', sm: '1.25rem' } },
+          '& .agenda-day-closed': { bgcolor: 'grey.50' },
+          '& .agenda-month-cell-top': {
+            display: 'flex',
+            justifyContent: 'center',
+            p: '2px',
+          },
+          '& .agenda-month-cell-date': {
+            display: 'flex',
+            alignItems: 'center',
+            lineHeight: 1.25,
+            minHeight: 20,
+            height: 'auto',
+            m: 0,
+            fontSize: '0.75rem',
+            fontWeight: 600,
+          },
+          '& .agenda-month-cell-date:has(.agenda-month-closed-chip)': {
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr)',
+            alignContent: 'center',
+            justifyItems: 'center',
+            width: '100%',
+            minWidth: 0,
+            gap: '1px',
+            '& .agenda-day-number': { lineHeight: 1 },
+          },
+          '& .agenda-month-closed-chip': {
+            ...monthIndicator,
+            py: 0,
+            bgcolor: 'grey.100',
+            borderColor: 'divider',
+            color: 'text.secondary',
+            '@media (max-width: 420px)': { '& svg': { display: 'none' } },
+          },
+          '& .agenda-month-week': {
+            // Keep room for the date, closed indicator and overflow link on short screens.
+            minHeight: 58,
+          },
+          '& .agenda-month-more-link': {
+            // Keep the native link in the measured cell body, ahead of its event list.
+            order: -1,
+            flexShrink: 0,
+            m: 0,
+            px: '2px',
+            pt: '2px',
+            pb: '2px',
+            justifyContent: 'center',
+            minWidth: 0,
+            maxWidth: '100%',
+            cursor: 'pointer',
+            '&:hover .agenda-month-more-chip': {
+              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.14),
+            },
+            '&:focus-visible .agenda-month-more-chip': {
+              outline: '2px solid',
+              outlineColor: 'primary.main',
+              outlineOffset: 1,
+            },
+          },
+          '& :has(> .agenda-month-more-chip)': { minWidth: 0, maxWidth: '100%', py: 0 },
+          '& .agenda-month-more-chip': {
+            ...monthIndicator,
+            color: 'primary.dark',
+            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.07),
+            borderColor: (theme) => alpha(theme.palette.primary.main, 0.2),
+            transition: 'background-color 140ms ease',
+            '@media (max-width: 360px)': { '& svg': { display: 'none' } },
+            '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+          },
+          '& .agenda-month-cell-today .agenda-day-number': {
+            bgcolor: 'primary.main',
+            color: 'primary.contrastText',
+            borderRadius: 1,
+            px: 0.5,
+          },
+          '& .agenda-calendar-event:hover': { filter: 'brightness(0.95)' },
+          '& .agenda-calendar-event:focus-visible': {
+            outline: '2px solid',
+            outlineColor: 'primary.main',
+            outlineOffset: 1,
+          },
+          '& .agenda-event-cancelled': { textDecoration: 'line-through' },
+          '& .agenda-closed-hours': { bgcolor: 'action.hover' },
+          '& .agenda-month-closed-hours': { bgcolor: 'transparent' },
+        }}
+      >
+        <FullCalendar
+          ref={calendar}
+          plugins={plugins}
+          locale={es}
+          timeZone={timezone}
+          initialView={initialView}
+          initialDate={initialPosition?.date}
+          headerToolbar={
+            !hasHours ? monthToolbar : viewType === 'dayGridMonth' ? toolbar : timeToolbar
+          }
+          buttons={{ agendaToday: { text: 'Hoy', hint: 'Hoy', click: goToToday } }}
+          headerToolbarClass="booking-calendar-toolbar"
+          toolbarTitleClass="booking-calendar-title"
+          dayCellClass={(info) =>
+            canSelectAgendaTime(rules, businessDate(info.date, timezone))
+              ? 'booking-calendar-day'
+              : 'booking-calendar-day agenda-day-closed'
+          }
+          dayCellTopClass={(info) =>
+            info.view.type === 'dayGridMonth' ? 'agenda-month-cell-top' : ''
+          }
+          dayCellTopInnerClass={(info) =>
+            info.view.type === 'dayGridMonth'
+              ? 'agenda-month-cell-date' + (info.isToday ? ' agenda-month-cell-today' : '')
+              : ''
+          }
+          dayCellTopContent={(info) => (
+            <>
+              <span className="agenda-day-number">{info.text}</span>
+              {info.view.type === 'dayGridMonth' &&
+                !canSelectAgendaTime(rules, businessDate(info.date, timezone)) && (
+                  <ClosedDayIndicator dateLabel={dayLabel.format(info.date)} />
+                )}
+            </>
+          )}
+          slotLaneClass="booking-calendar-slot"
+          events={events}
+          eventContent={(info) =>
+            renderAppointment(
+              info,
+              info.view.type === 'dayGridMonth' && visibleInGrid.has(info.event.id),
+            )
+          }
+          height="clamp(360px, calc(100dvh - 360px), 780px)"
+          scrollTime={(viewPosition ? bounds?.slotMinTime : initialPosition?.time) ?? '00:00'}
+          scrollTimeReset={false}
+          {...bounds}
+          views={views}
+          businessHours={week.businessHours}
+          nonBusinessHoursClass={
+            viewType === 'dayGridMonth' ? 'agenda-month-closed-hours' : 'agenda-closed-hours'
+          }
+          slotEventOverlap={false}
+          fixedWeekCount={false}
+          moreLinkText={(count) => '+' + count + (count === 1 ? ' turno' : ' turnos')}
+          moreLinkHint={(count) => 'Mostrar ' + count + (count === 1 ? ' turno' : ' turnos')}
+          moreLinkContent={(info) =>
+            info.view.type === 'dayGridMonth' ? (
+              <span className="agenda-month-more-chip">
+                <CalendarDays size={11} aria-hidden />
+                <span>{info.text}</span>
+              </span>
+            ) : (
+              info.text
+            )
+          }
+          moreLinkClick={(info) => {
+            // El popover nativo conserva el foco y trae todos los eventos del día.
+            // Marcar los ya visibles para que su lista sólo muestre los restantes.
+            const hidden = new Set(info.hiddenSegs.map(({ event }) => event.id));
+            setVisibleInGrid(
+              new Set(info.allSegs.map(({ event }) => event.id).filter((id) => !hidden.has(id))),
+            );
+            return 'popover';
+          }}
+          nowIndicator
+          allDaySlot={false}
+          selectable={bookable}
+          selectAllow={(info) => canOpenDate(info.startStr, info.allDay ? undefined : info.endStr)}
+          selectMirror
+          dateClick={(info) => openDate(info.dateStr, info.allDay)}
+          select={(info) => {
+            openDate(info.startStr, info.allDay);
+            calendar.current?.getApi().unselect();
+          }}
+          slotDuration="00:30:00"
+          snapDuration="00:15:00"
+          eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+        />
+      </Box>
+      {draft && (
+        <AppointmentFormDialog
+          timezone={timezone}
+          {...(draft.date ? { initialDate: draft.date } : {})}
+          {...(draft.startsAt ? { initialStartsAt: draft.startsAt } : {})}
+          onClose={() => changeDraft(null)}
+          onSaved={saved}
+        />
+      )}
+    </Stack>
+  );
+}

@@ -22,3 +22,12 @@ export function slotTimeFormatter(timeZone: string) {
     hourCycle: 'h23',
   });
 }
+
+export function appointmentWindowLabel(window: SlotDto, timezone: string) {
+  const start = new Date(window.startsAt);
+  const date = new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeZone: timezone }).format(
+    start,
+  );
+  const time = slotTimeFormatter(timezone);
+  return date + ' · ' + time.format(start) + ' – ' + time.format(new Date(window.endsAt));
+}

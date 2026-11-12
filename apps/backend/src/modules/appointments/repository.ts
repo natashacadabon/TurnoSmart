@@ -1,6 +1,7 @@
 import { Prisma, type AppointmentStatus, type PrismaClient } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
-import { localTime } from '../availability/repository.js';
+import { operationalAvailabilityRules } from '../availability/repository.js';
+import { recordAppointmentNotification } from '../notifications/repository.js';
 import { bookingEnd } from './booking.js';
 import type { AppointmentEventType } from '@turnosmart/shared';
 
@@ -138,12 +139,7 @@ async function loadBookingConfiguration(
   });
   return {
     timezone: business.timezone,
-    rules: business.availabilityRules.map((rule) => ({
-      dayOfWeek: rule.dayOfWeek,
-      startTime: localTime(rule.startTime),
-      endTime: localTime(rule.endTime),
-      active: rule.active,
-    })),
+    rules: operationalAvailabilityRules(business.availabilityRules),
     customerExists: customer !== null,
     service,
   };
@@ -309,7 +305,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           select: appointmentSelect,
         });
         if (event) {
-          await tx.appointmentEvent.create({
+          const savedEvent = await tx.appointmentEvent.create({
             data: {
               businessId,
               appointmentId: id,
@@ -324,6 +320,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                 : {}),
             },
           });
+          await recordAppointmentNotification(tx, savedEvent, row.startsAt);
         }
         return { kind: 'updated' as const, row };
       },
@@ -368,7 +365,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         select: appointmentSelect,
       });
       if (event) {
-        await tx.appointmentEvent.create({
+        const savedEvent = await tx.appointmentEvent.create({
           data: {
             businessId,
             appointmentId: id,
@@ -376,6 +373,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             ...(event.metadata ? { metadata: event.metadata as Prisma.InputJsonValue } : {}),
           },
         });
+        await recordAppointmentNotification(tx, savedEvent, row.startsAt);
       }
       return { kind: 'updated' as const, row };
     });

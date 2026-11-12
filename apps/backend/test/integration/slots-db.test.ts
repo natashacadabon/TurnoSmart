@@ -31,7 +31,7 @@ const get = (extra = {}, auth = owner) =>
 async function member(id: string) {
   const user = ctx.verifier.addUser();
   await prisma.profile.create({
-    data: { id: user.id, businessId: id, email: `${user.id}@test.local` },
+    data: { id: user.id, businessId: id, email: `${user.id}@test.local`, role: 'OWNER' },
   });
   return { Authorization: `Bearer ${user.token}` };
 }
@@ -74,6 +74,58 @@ afterAll(async () => {
 });
 
 describe('B05 API + PostgreSQL', () => {
+  it('permite corregir un solapamiento persistido y habilita los slots después del PUT', async () => {
+    const legacy = await prisma.availabilityRule.create({
+      data: {
+        businessId,
+        dayOfWeek: 1,
+        startTime: new Date('1970-01-01T10:00:00Z'),
+        endTime: new Date('1970-01-01T11:00:00Z'),
+        active: false,
+      },
+    });
+    const path = '/api/availability-rules';
+    const week = await request(ctx.app).get(path).set(owner);
+    expect(week.status).toBe(200);
+    expect(week.body.data.timezone).toBe('America/Argentina/Buenos_Aires');
+    expect(week.body.data.rules).toHaveLength(2);
+    expect(week.body.data.rules[1]).toMatchObject({ id: legacy.id, active: false });
+    const blocked = await get();
+    expect(blocked.status).toBe(500);
+    expect(blocked.body.error.requestId).toBe(blocked.headers['x-request-id']);
+    const replacement = [
+      { dayOfWeek: 1, startTime: '09:00', endTime: '10:00' },
+      { dayOfWeek: 1, startTime: '10:00', endTime: '11:00', active: false },
+      { dayOfWeek: 1, startTime: '14:00', endTime: '16:00' },
+    ];
+    const invalid = await request(ctx.app)
+      .put(path)
+      .set(owner)
+      .send({ rules: [{ ...replacement[0], endTime: '12:00' }, replacement[1]] });
+    expect(invalid.status).toBe(422);
+    expect(invalid.body.error.details).toContainEqual({
+      path: 'rules.1.startTime',
+      message: expect.stringContaining('09:00–12:00'),
+    });
+    expect((await request(ctx.app).get(path).set(owner)).body).toEqual(week.body);
+
+    expect((await request(ctx.app).put(path).set(owner).send({ rules: replacement })).status).toBe(
+      200,
+    );
+    const slots = await get();
+    expect(slots.status).toBe(200);
+    expect(slots.body.data.map((slot: { startsAt: string }) => slot.startsAt)).toEqual([
+      '2026-11-02T12:00:00.000Z',
+      '2026-11-02T17:00:00.000Z',
+      '2026-11-02T17:15:00.000Z',
+      '2026-11-02T17:30:00.000Z',
+      '2026-11-02T17:45:00.000Z',
+      '2026-11-02T18:00:00.000Z',
+    ]);
+    const closed = await get({ date: '2026-11-03' });
+    expect(closed.status).toBe(200);
+    expect(closed.body.data).toEqual([]);
+  });
   it.each(['SCHEDULED', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW'] as const)(
     'aplica estado %s en agenda compartida sin modificar turnos/eventos',
     async (status) => {

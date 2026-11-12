@@ -105,12 +105,7 @@ export function WeeklyAvailability({
   const parsed = replaceAvailabilityRulesSchema.safeParse({ rules: payload(rules) });
   const validation = parsed.success
     ? {}
-    : Object.fromEntries(
-        parsed.error.issues.map((issue) => [
-          issue.path.join('.'),
-          issue.message.replace('startTime', 'la hora de inicio'),
-        ]),
-      );
+    : Object.fromEntries(parsed.error.issues.map((issue) => [issue.path.join('.'), issue.message]));
   const fieldIssues = { ...errors, ...validation };
   const week = DAYS.map((item) => {
     const entries = rules
@@ -324,8 +319,13 @@ export function WeeklyAvailability({
                   Hay cambios de disponibilidad sin guardar.
                 </Typography>
               )}
-              {dirty && !parsed.success && (
-                <Alert severity="warning">Revisá las franjas indicadas antes de guardar.</Alert>
+              {!parsed.success && (
+                <Alert severity="warning">
+                  {fieldIssues.rules ??
+                    (dirty
+                      ? 'Revisá las franjas indicadas antes de guardar.'
+                      : 'La disponibilidad guardada tiene errores. Revisá los días marcados como «Revisar».')}
+                </Alert>
               )}
               {message && <Alert severity="error">{message}</Alert>}
               {success && <Alert severity="success">Disponibilidad guardada.</Alert>}

@@ -8,6 +8,8 @@ schemas y envelopes compartidos y los errores/middleware existentes de A.
   el usuario verificado. Lectura OWNER/ADMIN/STAFF; escritura OWNER/ADMIN.
 - GET incluye inactivas y timezone de Business. Orden por dia, inicio, fin e ID.
   No acepta query. Una semana vacia no significa disponibilidad permanente.
+  Un solapamiento persistido entre franjas representables se devuelve para
+  poder corregirlo mediante PUT. Slots y reservas rechazan esa configuracion.
 - PUT exige `rules` (0..100), con objetos estrictos: dia entero 0..6, horas
   `HH:mm` 00:00..23:59, inicio anterior al fin, active boolean default true.
   Rechaza campos protegidos, duplicados y solapamientos incluso inactivos.

@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { buildSeedData } from '../../prisma/seed-data.js';
+import { seedDomain } from '../../prisma/seed-runner.js';
 import { PrismaAvailabilityRepository } from '../../src/modules/availability/repository.js';
 import { PrismaIdentityRepository } from '../../src/modules/identity/repository.js';
 import { buildTestApp } from '../fakes.js';
@@ -64,6 +66,38 @@ afterAll(async () => {
 });
 
 describe('B04 API + PostgreSQL', () => {
+  it('el reseed conserva la semana editada y no reabre un negocio con semana vacía', async () => {
+    const fixtures = buildSeedData(new Date('2099-11-02T15:00:00Z'));
+    const profiles = fixtures.accounts.map((account) => ({
+      ...account,
+      id: ctx.verifier.addUser().id,
+    }));
+    const [edited, closed] = fixtures.businesses;
+    createdBusinesses.push(edited!.id, closed!.id);
+    // Solo los horarios iniciales. Los turnos de prueba no deben impedir editar la semana.
+    const data = { ...fixtures, appointments: [] };
+    await seedDomain(prisma, data, profiles);
+    const headers = await member(edited!.id, 'OWNER');
+    const closedHeaders = await member(closed!.id, 'OWNER');
+    const editedRules = [
+      { ...rule, startTime: '09:00', endTime: '12:00' },
+      { ...rule, startTime: '14:00', endTime: '20:00' },
+      { ...rule, dayOfWeek: 2, startTime: '14:00', endTime: '20:30' },
+    ];
+    const saved = await request(ctx.app).put(path).set(headers).send({ rules: editedRules });
+    expect(saved.status).toBe(200);
+    expect((await request(ctx.app).put(path).set(closedHeaders).send({ rules: [] })).status).toBe(
+      200,
+    );
+
+    await seedDomain(prisma, fixtures, profiles);
+
+    const reread = await request(ctx.app).get(path).set(headers);
+    expect(reread.status, JSON.stringify(reread.body)).toBe(200);
+    expect(reread.body).toEqual(saved.body);
+    expect((await request(ctx.app).get(path).set(closedHeaders)).body.data.rules).toEqual([]);
+    expect(await prisma.appointment.count({ where: { businessId: closed!.id } })).toBe(0);
+  });
   it('persiste TIME exacto, conserva IDs, aplica permisos y aisla ambos negocios', async () => {
     const first = await request(ctx.app)
       .put(path)

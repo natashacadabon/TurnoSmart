@@ -21,6 +21,8 @@ import { slotsRouter } from './modules/slots/routes.js';
 import type { SlotsRepository } from './modules/slots/repository.js';
 import type { AppointmentRepository } from './modules/appointments/repository.js';
 import { appointmentsRouter } from './modules/appointments/routes.js';
+import type { PrismaNotificationRepository } from './modules/notifications/repository.js';
+import { notificationsRouter } from './modules/notifications/routes.js';
 import { getMetrics } from './lib/metrics.js';
 
 export interface AppDeps {
@@ -34,6 +36,7 @@ export interface AppDeps {
   slots: SlotsRepository;
   appointments: AppointmentRepository;
   events: EventRepository;
+  notifications?: PrismaNotificationRepository;
   risk: RiskRepository;
   /** null si GEMINI_API_KEY no está configurada: la explicación responde 503. */
   explainer: RiskExplainer | null;
@@ -95,6 +98,8 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/services', ...authed, servicesRouter(deps));
   app.use('/api/availability-rules', ...authed, availabilityRouter(deps));
   app.use('/api/slots', ...authed, slotsRouter(deps));
+  if (deps.notifications)
+    app.use('/api/notifications', ...authed, notificationsRouter(deps.notifications));
   app.use(
     '/api/appointments',
     ...authed,

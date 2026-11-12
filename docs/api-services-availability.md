@@ -291,6 +291,9 @@ comunes 400/401/403/415/500/503. No hay DELETE ni cambio de tenant.
 ### GET /api/availability-rules
 
 Objetivo: devolver toda la semana, incluidas reglas inactivas. Sin path params, query ni body.
+Si existen franjas solapadas que individualmente respetan el formato, GET las
+devuelve para permitir corregirlas mediante PUT. Las consultas de slots y las
+reservas rechazan la configuración hasta que se corrija.
 Orden: dayOfWeek, startTime, endTime, id, todos ascendentes. Reglas vacias no implican 24/7.
 
 Response 200:

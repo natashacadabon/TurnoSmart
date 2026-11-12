@@ -17,7 +17,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { RiskExplanationResponse, RiskLevel } from '@turnosmart/shared';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { EmptyState } from './ui';
 
@@ -28,21 +28,31 @@ const LEVEL: Record<RiskLevel, { label: string; color: 'success' | 'warning' | '
 };
 
 /** Medidor circular del score 0-100. */
-function ScoreGauge({ score, level }: { score: number; level: RiskLevel }) {
+function ScoreGauge({
+  score,
+  level,
+  compact,
+}: {
+  score: number;
+  level: RiskLevel;
+  compact: boolean;
+}) {
   const color = `${LEVEL[level].color}.main`;
+  const size = compact ? 88 : 112;
   return (
-    <Box sx={{ position: 'relative', width: 112, height: 112, flexShrink: 0 }}>
+    <Box sx={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <CircularProgress
         variant="determinate"
         value={100}
-        size={112}
+        size={size}
         thickness={4}
+        aria-hidden
         sx={{ color: 'action.hover', position: 'absolute' }}
       />
       <CircularProgress
         variant="determinate"
         value={score}
-        size={112}
+        size={size}
         thickness={4}
         aria-label={`Score ${score} de 100`}
         sx={{
@@ -61,7 +71,9 @@ function ScoreGauge({ score, level }: { score: number; level: RiskLevel }) {
         }}
       >
         <div>
-          <Typography sx={{ fontSize: 32, fontWeight: 750, lineHeight: 1 }}>{score}</Typography>
+          <Typography sx={{ fontSize: compact ? 26 : 32, fontWeight: 750, lineHeight: 1 }}>
+            {score}
+          </Typography>
           <Typography variant="caption" color="text.secondary">
             de 100
           </Typography>
@@ -75,20 +87,32 @@ function ScoreGauge({ score, level }: { score: number; level: RiskLevel }) {
  * Explicación del score bajo demanda (A08). La llamada a Gemini sólo se hace al pulsar el botón;
  * si falla, el resto de la pantalla y la agenda siguen funcionando.
  */
-export function RiskExplanationPanel({ appointmentId }: { appointmentId: string }) {
-  const [result, setResult] = useState<RiskExplanationResponse | null>(null);
+export function RiskExplanationPanel({
+  appointmentId,
+  compact = false,
+  initialResult,
+  onExplained,
+}: {
+  appointmentId: string;
+  compact?: boolean;
+  initialResult?: RiskExplanationResponse | undefined;
+  onExplained?(result: RiskExplanationResponse): void;
+}) {
+  const [result, setResult] = useState<RiskExplanationResponse | null>(initialResult ?? null);
   const [error, setError] = useState<{ text: string; severity: 'error' | 'info' } | null>(null);
   const [loading, setLoading] = useState(false);
+  const heading = useId();
 
   async function requestExplanation() {
     setLoading(true);
     setError(null);
     try {
-      setResult(
-        await api<RiskExplanationResponse>(`/api/appointments/${appointmentId}/risk/explanation`, {
-          method: 'POST',
-        }),
+      const explanation = await api<RiskExplanationResponse>(
+        `/api/appointments/${appointmentId}/risk/explanation`,
+        { method: 'POST' },
       );
+      setResult(explanation);
+      onExplained?.(explanation);
     } catch (err) {
       const info = err instanceof ApiError && err.code === 'RISK_NOT_AVAILABLE';
       setError({ text: errorMessage(err), severity: info ? 'info' : 'error' });
@@ -99,6 +123,7 @@ export function RiskExplanationPanel({ appointmentId }: { appointmentId: string 
 
   const button = (
     <Button
+      size={compact ? 'small' : 'medium'}
       variant={result ? 'outlined' : 'contained'}
       startIcon={
         loading ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeRoundedIcon />
@@ -111,8 +136,8 @@ export function RiskExplanationPanel({ appointmentId }: { appointmentId: string 
   );
 
   return (
-    <Card>
-      <CardContent>
+    <Card component="section" aria-labelledby={heading}>
+      <CardContent sx={compact ? { px: 2, py: 1.5, '&:last-child': { pb: 1.5 } } : undefined}>
         <Stack
           direction="row"
           sx={{
@@ -120,25 +145,29 @@ export function RiskExplanationPanel({ appointmentId }: { appointmentId: string 
             alignItems: 'center',
             flexWrap: 'wrap',
             gap: 1,
-            mb: 2,
+            mb: compact ? (result || error || loading ? 1.25 : 0) : 2,
           }}
         >
           <div>
-            <Typography variant="h2">Riesgo de ausencia</Typography>
+            <Typography id={heading} variant="h2">
+              Riesgo de ausencia
+            </Typography>
             <Typography variant="body2" color="text.secondary">
-              Score heurístico calculado con el historial del turno.
+              {compact
+                ? 'Score heurístico del turno.'
+                : 'Score heurístico calculado con el historial del turno.'}
             </Typography>
           </div>
-          {result && button}
+          {(result || compact) && button}
         </Stack>
 
         {error && (
-          <Alert severity={error.severity} sx={{ mb: 2 }}>
+          <Alert severity={error.severity} sx={{ mb: compact && !result ? 0 : 2 }}>
             {error.text}
           </Alert>
         )}
 
-        {!result && !loading && (
+        {!result && !loading && !compact && (
           <EmptyState
             icon={<InsightsRoundedIcon />}
             title="¿Qué tan probable es que el cliente venga?"
@@ -148,8 +177,12 @@ export function RiskExplanationPanel({ appointmentId }: { appointmentId: string 
         )}
 
         {loading && !result && (
-          <Stack direction="row" spacing={3} sx={{ alignItems: 'center', py: 2 }}>
-            <Skeleton variant="circular" width={112} height={112} />
+          <Stack
+            direction="row"
+            spacing={compact ? 1.5 : 3}
+            sx={{ alignItems: 'center', py: compact ? 0 : 2 }}
+          >
+            <Skeleton variant="circular" width={compact ? 88 : 112} height={compact ? 88 : 112} />
             <Box sx={{ flexGrow: 1 }}>
               <Skeleton width="40%" height={32} />
               <Skeleton width="90%" />
@@ -159,13 +192,16 @@ export function RiskExplanationPanel({ appointmentId }: { appointmentId: string 
         )}
 
         {result && (
-          <Stack spacing={3} sx={{ opacity: loading ? 0.6 : 1, transition: 'opacity .2s' }}>
+          <Stack
+            spacing={compact ? 1.5 : 3}
+            sx={{ opacity: loading ? 0.6 : 1, transition: 'opacity .2s' }}
+          >
             <Stack
               direction={{ xs: 'column', sm: 'row' }}
-              spacing={3}
+              spacing={compact ? 1.5 : 3}
               sx={{ alignItems: { sm: 'center' } }}
             >
-              <ScoreGauge score={result.risk.score} level={result.risk.level} />
+              <ScoreGauge score={result.risk.score} level={result.risk.level} compact={compact} />
               <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                 <Chip
                   color={LEVEL[result.risk.level].color}

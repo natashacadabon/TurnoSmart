@@ -16,6 +16,7 @@ import { PrismaServiceRepository } from './modules/services/repository.js';
 import { PrismaAvailabilityRepository } from './modules/availability/repository.js';
 import { PrismaSlotsRepository } from './modules/slots/repository.js';
 import { PrismaAppointmentRepository } from './modules/appointments/repository.js';
+import { PrismaNotificationRepository } from './modules/notifications/repository.js';
 
 const env = loadEnv();
 const prisma = new PrismaClient();
@@ -46,6 +47,7 @@ const app = createApp({
   slots: new PrismaSlotsRepository(prisma),
   appointments: new PrismaAppointmentRepository(prisma),
   events: new PrismaEventRepository(prisma),
+  notifications: new PrismaNotificationRepository(prisma),
   risk: new PrismaRiskRepository(prisma),
   explainer,
   aiRateLimit: { limit: env.AI_RATE_LIMIT_PER_USER, windowMs: env.AI_RATE_LIMIT_WINDOW_MS },

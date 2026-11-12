@@ -33,6 +33,7 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
           }
         }
         stage = 'businesses';
+        const newBusinesses = new Set<string>();
         for (const business of data.businesses) {
           const existing = await tx.business.findUnique({ where: { id: business.id } });
           if (
@@ -41,6 +42,7 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
           )
             throw new SeedError('Un ID reservado del seed pertenece a otro negocio/configuracion.');
           await tx.business.upsert({ where: { id: business.id }, create: business, update: {} });
+          if (!existing) newBusinesses.add(business.id);
         }
         stage = 'profiles';
         for (const profile of profiles) {
@@ -65,13 +67,39 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
           await tx.service.upsert({ where: { id: service.id }, create: service, update: service });
         }
         stage = 'availability';
+        const customSchedules = new Set<string>();
+        for (const business of data.businesses) {
+          if (newBusinesses.has(business.id)) continue;
+          const existing = await tx.availabilityRule.findMany({
+            where: { businessId: business.id },
+          });
+          const defaults = data.rules.filter((rule) => rule.businessId === business.id);
+          if (
+            existing.length !== defaults.length ||
+            !defaults.every((rule) =>
+              existing.some(
+                (row) =>
+                  row.id === rule.id &&
+                  row.dayOfWeek === rule.dayOfWeek &&
+                  row.startTime.getTime() === rule.startTime.getTime() &&
+                  row.endTime.getTime() === rule.endTime.getTime() &&
+                  row.active === rule.active,
+              ),
+            )
+          )
+            customSchedules.add(business.id);
+        }
         for (const rule of data.rules) {
+          // La semana existente es completa aunque esté vacía. No reponer franjas omitidas.
+          if (!newBusinesses.has(rule.businessId)) continue;
           const existing = await tx.availabilityRule.findUnique({ where: { id: rule.id } });
           if (existing && existing.businessId !== rule.businessId)
             throw new SeedError('ID de disponibilidad ocupado por otro negocio.');
           await tx.availabilityRule.upsert({ where: { id: rule.id }, create: rule, update: rule });
         }
         for (const appointment of data.appointments) {
+          // Los turnos de demostración fueron generados para la semana original.
+          if (customSchedules.has(appointment.businessId)) continue;
           stage = 'appointments';
           const existing = await tx.appointment.findUnique({ where: { id: appointment.id } });
           if (existing && existing.businessId !== appointment.businessId)

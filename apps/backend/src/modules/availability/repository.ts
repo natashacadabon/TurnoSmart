@@ -1,5 +1,5 @@
 import { Prisma, type AvailabilityRule, type PrismaClient } from '@prisma/client';
-import type { AvailabilityRuleInput } from '@turnosmart/shared';
+import { replaceAvailabilityRulesSchema, type AvailabilityRuleInput } from '@turnosmart/shared';
 import { AppError } from '../../lib/errors.js';
 
 export type AvailabilityRecord = AvailabilityRule;
@@ -28,6 +28,28 @@ export function localTime(value: Date): string {
   )
     throw new AppError('INTERNAL_ERROR', 'Configuracion de disponibilidad invalida');
   return value.toISOString().slice(11, 16);
+}
+
+export function toAvailabilityRuleInput(row: AvailabilityRecord): AvailabilityRuleInput {
+  return {
+    dayOfWeek: row.dayOfWeek,
+    startTime: localTime(row.startTime),
+    endTime: localTime(row.endTime),
+    active: row.active,
+  };
+}
+
+/** La lectura para editar puede mostrar solapamientos. Operar con ellos requiere corregirlos. */
+export function operationalAvailabilityRules(rows: AvailabilityRecord[]): AvailabilityRuleInput[] {
+  const parsed = replaceAvailabilityRulesSchema.safeParse({
+    rules: rows.map(toAvailabilityRuleInput),
+  });
+  if (!parsed.success)
+    throw new AppError(
+      'INTERNAL_ERROR',
+      'La disponibilidad guardada tiene franjas inválidas. Revisalas en Servicios → Disponibilidad.',
+    );
+  return parsed.data.rules;
 }
 
 export function timezoneFormatter(timezone: string) {

@@ -9,6 +9,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { UnsavedChangesProvider } from '@/components/UnsavedChangesProvider';
 import { AppSidebar } from '@/components/AppSidebar';
 import { useAuth } from '@/components/AuthProvider';
+import { ToastProvider } from '@/components/ToastProvider';
+import { NotificationProvider } from '@/components/notifications/NotificationProvider';
 import { Brand, softDangerButtonSx } from '@/components/ui';
 import styles from './layout.module.css';
 
@@ -34,10 +36,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <UnsavedChangesProvider>
-      <main className={styles.shell}>
-        <AppSidebar />
-        <section className={styles.content}>{children}</section>
-      </main>
+      <ToastProvider key={me.business.id + '/' + me.user.id}>
+        <NotificationProvider>
+          <main className={styles.shell}>
+            <AppSidebar />
+            <section className={styles.content}>{children}</section>
+          </main>
+        </NotificationProvider>
+      </ToastProvider>
     </UnsavedChangesProvider>
   );
 }
