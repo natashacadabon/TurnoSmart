@@ -3,7 +3,9 @@
 Objetivo: USD 0 de dinero personal. Lo que consume créditos se registra como costo aunque el desembolso sea cero.
 Precios públicos consultados el 19/10/2026 (East US, USD, sin impuestos); no reemplazan las condiciones de la cuenta.
 
-## Relevamiento de la cuenta
+La configuración actual prevé Vercel para el frontend y Render para el backend de Dev. El uso de Azure se considera para la ventana de checkpoint. Los envíos reales requieren un dominio verificado en Resend. Registrar el consumo de correo en el entorno que lo active. Ver [infraestructura](../infra/README.md) y [operación de notificaciones](operations.md#notificaciones-de-turnos).
+
+## Relevamiento histórico de la cuenta
 
 Relevado por A el 23/10/2026. Los IDs de suscripción y de cuenta de facturación se omiten a propósito.
 

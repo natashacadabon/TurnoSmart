@@ -1,5 +1,7 @@
 # Auditoria y limpieza — 2026-10-30
 
+> Registro histórico del 30 de octubre de 2026. Consultar el [README](../README.md) y el [backlog](backlog.md) para el estado vigente.
+
 ## Alcance y cambios
 
 Revision de archivos versionados, instrucciones de `apps/frontend/AGENTS.md`,

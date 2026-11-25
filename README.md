@@ -1,341 +1,95 @@
 # TurnoSmart
 
-TurnoSmart es un proyecto academico de plataforma SaaS para la gestion inteligente de turnos en pequenos y medianos negocios. Su objetivo es combinar una agenda online con analisis de riesgo de no-show para ayudar a reducir ausencias sin aviso, cancelaciones tardias y huecos dificiles de cubrir. La reserva de turnos y el calculo del riesgo todavia estan pendientes.
+TurnoSmart es un proyecto académico de SaaS para negocios que atienden con turnos. El personal administra clientes, servicios y disponibilidad, opera la agenda y consulta el riesgo de inasistencia de cada turno. Los clientes pueden gestionar una reserva existente desde los enlaces de correo.
 
-El proyecto fue pensado para negocios con atencion por reserva, como peluquerias, centros de estetica, consultorios, estudios y servicios profesionales.
+## Estado del repositorio
 
-## Problema
+La descripción incluye el código en curso de la rama `feat/confirma-turnos`. La activación y las pruebas en cada entorno publicado se registran por separado en el [backlog](docs/backlog.md).
 
-Los negocios que trabajan con turnos pierden tiempo e ingresos cuando los clientes no asisten, cancelan tarde o dejan espacios libres en la agenda. Las agendas tradicionales permiten registrar reservas, pero no aprovechan el historial de clientes para anticipar riesgos ni ayudar a tomar mejores decisiones operativas.
+| Área                 | Funcionalidad disponible en el código                                                                                                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identidad y clientes | Inicio y cierre de sesión con Supabase Auth, onboarding del negocio, roles OWNER/ADMIN/STAFF, configuración de nombre y zona horaria, alta, edición, búsqueda y baja de clientes sin turnos.                                                                          |
+| Servicios y horarios | Pantalla y API para administrar servicios, editar la disponibilidad semanal y consultar slots. Cada negocio tiene una agenda y una grilla de comienzos cada 15 minutos desde la apertura de cada franja.                                                              |
+| Agenda y turnos      | Vistas de día, semana y mes, alta, edición de notas, confirmación, cancelación, reprogramación, cierre, registro de ausencias e historial. La API vuelve a validar el horario dentro de la transacción.                                                               |
+| Riesgo               | Score heurístico persistido y explicación bajo demanda con Gemini cuando se configura su clave.                                                                                                                                                                       |
+| Notificaciones       | Avisos de agenda y centro interno con lecturas por perfil. La rama incorpora preferencias, correo transaccional, recordatorios de 48 y 24 horas y enlaces para confirmar, cancelar o solicitar un cambio. El negocio aprueba o descarta solicitudes desde el detalle. |
+| Operación            | Docker Compose local, checks de GitHub Actions, configuración de Vercel y Render y artefactos para un despliegue manual del backend en Azure. La API expone health, readiness y métricas en memoria.                                                                  |
 
-## Propuesta de valor
+Queda por validar el recorrido completo con la base migrada, Resend, Supabase Cron y el frontend publicado. El [backlog](docs/backlog.md) detalla además la cobertura pendiente en CI, el endurecimiento de permisos de la Data API y las capacidades previstas fuera del alcance actual.
 
-La propuesta es administrar turnos, clientes, servicios y recordatorios desde un unico lugar. El diferencial previsto es un score de riesgo de no-show por turno, calculado a partir de reglas explicables y complementado con recomendaciones generadas por IA.
+## Stack y estructura
 
-Con esta informacion, el negocio puede:
+| Directorio         | Responsabilidad                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `apps/frontend/`   | Next.js 16, React 19, Material UI, FullCalendar y pruebas Playwright.                                         |
+| `apps/backend/`    | Node.js 22, Express 5, Prisma 6.12, PostgreSQL, Supabase Auth, Gemini, correo y pruebas con Vitest/Supertest. |
+| `packages/shared/` | Tipos, esquemas Zod y códigos de error compartidos.                                                           |
+| `infra/`           | Docker Compose, guías de Vercel y Render, Bicep y empaquetado para Azure, y SQL de Supabase Cron.             |
+| `docs/`            | Arquitectura, contratos, operación, costos y backlog.                                                         |
 
-- identificar turnos con mayor probabilidad de ausencia;
-- reforzar recordatorios para clientes de riesgo;
-- priorizar confirmaciones antes de horarios criticos;
-- mejorar la ocupacion de la agenda;
-- reducir capacidad ociosa.
+## Desarrollo local con Docker
 
-## Usuarios objetivo
+Requiere Node.js 22, npm y Docker Desktop con contenedores Linux. Ejecutar desde la raíz Git:
 
-- Negocios con atencion por turnos.
-- Personal administrativo que organiza agenda, clientes, servicios y recordatorios.
-- Clientes finales que necesitan reservar, cancelar o reprogramar de forma simple.
-
-## Estado actual
-
-### Implementado
-
-- Monorepo con npm workspaces y contratos compartidos (`@turnosmart/shared`) entre frontend y backend.
-- Inicio y cierre de sesion con Supabase Auth; la sesion se recupera al recargar.
-- Onboarding: una cuenta nueva crea su negocio y queda como OWNER. Roles OWNER, ADMIN y STAFF con permisos aplicados en la API.
-- Clientes: alta, consulta, edicion, baja (OWNER y ADMIN; no se puede eliminar un cliente con turnos), listado paginado y busqueda por nombre, email o telefono.
-- Configuracion del negocio (nombre y zona horaria).
-- API de servicios: listado paginado, alta y edicion/desactivacion (`GET/POST /api/services`, `PATCH /api/services/:id`); sin borrado fisico ni pantalla de servicios.
-- Historial de eventos de un turno y explicacion del riesgo con Gemini, bajo demanda.
-- Agenda con el diseÃ±o del dashboard y datos reales del negocio; dashboard de ejemplo en `/demo`.
-- Aislamiento entre negocios en la API (cada consulta filtra por `businessId`) y RLS en la base.
-- Errores uniformes en la API y pantalla de error recuperable en el frontend.
-- Modelo PostgreSQL multi-tenant con Prisma, migraciones, RLS y seed idempotente.
-- Pruebas unitarias, de integracion con PostgreSQL y end-to-end con Playwright.
-- CI con formato, lint, typecheck, tests unitarios y build; CD en Vercel Hobby y Render Free.
-- Docker Compose de desarrollo y Git hooks con Husky, lint-staged y Commitlint.
-
-### En desarrollo
-
-- Modulo B: servicios implementados en API; contratos de disponibilidad y slots presentes en shared y propuesta B01 con decisiones pendientes. No existen endpoints de disponibilidad o slots.
-- Integracion de la agenda: dashboard con contexto real del negocio, sin ciclo de reservas operativo.
-
-### Pendiente
-
-- Pantallas de servicios, disponibilidad semanal y consulta de horarios libres.
-- Reserva, confirmacion, reprogramacion y cancelacion de turnos; calculo del score de riesgo.
-- Registro publico, recuperacion de contraseÃ±a e invitaciones de miembros.
-- Recordatorios por email.
-- Despliegue del backend en Azure App Service y observabilidad.
-
-El despliegue continuo desde `dev` se habilita con la configuracion de [Vercel](infra/vercel/README.md) y [Render](infra/render/README.md).
-
-## Stack
-
-| Capa            | En uso                                                                         | Previsto                           |
-| --------------- | ------------------------------------------------------------------------------ | ---------------------------------- |
-| Frontend        | Next.js 16, React 19, TypeScript, Material UI, CSS Modules, Supabase JS (Auth) | Calendario de agenda               |
-| Backend         | Node.js 22, Express 5, TypeScript 5, Zod 4, helmet, Prisma 6.12                | Disponibilidad, turnos y score     |
-| Datos           | Supabase PostgreSQL y Auth, migraciones, seed y RLS                            | â€”                                |
-| IA              | Gemini API (`@google/genai`) con salida validada, timeout y limite por usuario | â€”                                |
-| Pruebas         | Vitest, Supertest y Playwright                                                 | Pruebas de turnos y concurrencia   |
-| Infraestructura | Docker Compose, GitHub Actions, Vercel Hobby y Render Free                     | Azure App Service y observabilidad |
-
-## Estructura
-
-```text
-apps/frontend/       Aplicacion Next.js (pantallas, componentes y E2E en e2e/)
-apps/backend/        API Express, Prisma y tests en test/
-packages/shared/     Contratos, validaciones y tipos compartidos
-docs/                Arquitectura, contratos, costos y backlog
-infra/docker/        Docker de desarrollo
-tests/               Estrategia de pruebas
-.github/workflows/   CI y despliegue Vercel
-AI-DECISIONS.md      Decisiones asistidas por IA
-.codex/agents/       Configuraciones de agentes para revision del modulo B
-.husky/              Hooks de calidad y Conventional Commits
-```
-
-## Arquitectura y modulos
-
-El navegador usa Supabase Auth para la sesion y consume Express mediante REST/JSON con el token. La API resuelve perfil, rol y negocio, valida con Zod y accede a PostgreSQL con Prisma. `packages/shared` publica contratos ESM desde `dist/`; debe compilarse antes de consumirlo. Los modulos A, B y C son responsabilidades de desarrollo dentro de estas apps, no workspaces separados.
-
-| Modulo | Responsabilidad                                    | Estado real                                                                                                                                      |
-| ------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A      | Autenticacion, autorizacion y contexto del negocio | Login, onboarding, roles, negocio y clientes; historial y explicacion IA disponibles como capacidades transversales.                             |
-| B      | Servicios, disponibilidad semanal y slots          | API de servicios implementada y probada; disponibilidad y slots tienen tipos/propuestas, sin implementacion operativa.                           |
-| C      | Gestion de turnos y ciclo de reservas              | Modelos, contratos y lectura del historial/riesgo existentes; reserva, confirmacion, cancelacion, reprogramacion y calculo del score pendientes. |
-
-Los repositorios de la API filtran por `businessId`. Gemini explica un score existente; no lo calcula ni modifica turnos.
-
-## Requisitos
-
-- Node.js 22 (ver `.nvmrc` y `engines`) y npm. El lockfile es version 3; usar `npm ci` desde la raiz Git, donde estan `package.json` y `package-lock.json`.
-- Un proyecto de Supabase (Auth + PostgreSQL). Puede ser el del equipo o uno propio para probar.
-- Una clave de Gemini API (opcional: sin ella, "Explicar con IA" responde 503 y el resto funciona).
-- Docker Desktop, opcional.
-
-## Configuracion
-
-### 1. Dependencias
-
-```bash
+```sh
 npm ci
-```
-
-### 2. Variables de entorno
-
-Hay dos archivos, ambos ignorados por Git. Cada app lee el suyo: un `.env` en la raiz **no** se usa.
-
-Copiar `.env.example` a `apps/backend/.env` y `apps/frontend/.env.example` a `apps/frontend/.env.local`; completar los valores para el mismo proyecto Supabase. No versionar estos archivos ni compartir sus valores.
-
-**`apps/backend/.env`** (plantilla: `.env.example` de la raiz)
-
-| Variable            | Donde se obtiene                                                                                                |
-| ------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `SUPABASE_URL`      | Supabase â†’ Project Settings â†’ API â†’ Project URL                                                           |
-| `SUPABASE_ANON_KEY` | Supabase â†’ Project Settings â†’ API â†’ `anon` / publishable key                                              |
-| `DATABASE_URL`      | Supabase â†’ Connect â†’ ORMs â†’ Prisma: transaction pooler, puerto **6543**, con `?pgbouncer=true`            |
-| `DIRECT_URL`        | Supabase â†’ Connect â†’ ORMs â†’ Prisma: conexion directa o session pooler, puerto **5432** (solo migraciones) |
-| `CORS_ORIGIN`       | `http://localhost:3000` (varios origenes separados por coma)                                                    |
-| `GEMINI_API_KEY`    | Google AI Studio. Opcional                                                                                      |
-
-En las URLs de la base, reemplazar `[YOUR-PASSWORD]` (corchetes incluidos) por el password de la base y codificar los caracteres especiales (`@` â†’ `%40`, `#` â†’ `%23`, `/` â†’ `%2F`). No hacen falta comillas. El backend no usa la `service_role` key.
-
-`PORT` vale 4000 por defecto. Las opciones `GEMINI_*` y `AI_RATE_LIMIT_*` de la plantilla controlan modelo, timeout, salida y cuota. `SUPABASE_SERVICE_ROLE_KEY` se usa exclusivamente en el seed de desarrollo, nunca en el frontend ni para iniciar la API. `EMAIL_PROVIDER` y `EMAIL_FROM` estan reservadas: no hay envio de recordatorios implementado.
-
-**`apps/frontend/.env.local`** (plantilla: `apps/frontend/.env.example`)
-
-| Variable                        | Valor                                                      |
-| ------------------------------- | ---------------------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | El mismo `SUPABASE_URL` del backend                        |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | La misma `SUPABASE_ANON_KEY` del backend                   |
-| `NEXT_PUBLIC_USE_AZURE`         | `false` (Render); `true` (Azure). Ausente equivale a false |
-| `NEXT_PUBLIC_API_URL_RENDER`    | Origen HTTPS publico Render                                |
-| `NEXT_PUBLIC_API_URL_AZURE`     | Origen HTTPS publico Azure, aun si esta apagado            |
-
-El backend valida sus variables al arrancar: si falta alguna, termina con `ConfiguraciÃ³n de entorno invÃ¡lida: <variables>` sin mostrar valores.
-
-### 3. Base de datos
-
-```bash
-npm run prisma:generate --workspace=@turnosmart/backend
-```
-
-```bash
-npm run prisma:migrate --workspace=@turnosmart/backend
-```
-
-`prisma:migrate` ejecuta `prisma migrate deploy` y aplica las migraciones pendientes (actualmente tablas y RLS); no crea migraciones nuevas. Prisma 6.12 toma `DATABASE_URL` y `DIRECT_URL` del schema; `DIRECT_URL` se usa para migraciones. Configurar ambas variables antes de ejecutarlo y revisar el destino. `npx prisma migrate status` (desde `apps/backend`) muestra el estado.
-
-El seed es opcional y funciona con Supabase local o Cloud de desarrollo autorizado. Crea datos de dos negocios
-y cuentas de Auth de prueba, incluido `admin@turnosmart.test` con rol OWNER. Requiere
-`SEED_ADMIN_PASSWORD` y claves del destino configuradas en la terminal; Cloud exige lista de Project Refs, URLs coherentes, `ALLOW_REMOTE_SEED=true` y confirmacion explicita. El seed no cambia passwords
-de cuentas existentes ni borra datos. Ver [instrucciones y validaciones del seed](apps/backend/prisma/README.md).
-
-```bash
-npm run prisma:seed --workspace=@turnosmart/backend
-```
-
-### 4. Usuario para ingresar
-
-La app no tiene registro publico. En Supabase â†’ Authentication â†’ Add user, crear un usuario con email y contraseÃ±a y tildar "Auto confirm". La primera vez que ingresa pasa por el onboarding, que crea el negocio y lo asigna como OWNER.
-
-## Desarrollo
-
-```bash
-npm run build:shared
-```
-
-En dos terminales:
-
-```bash
-npm run dev:backend
-```
-
-```bash
-npm run dev:frontend
-```
-
-| URL                               | Que es                                                       |
-| --------------------------------- | ------------------------------------------------------------ |
-| `http://localhost:3000/`          | Agenda del negocio (requiere sesion)                         |
-| `http://localhost:3000/demo`      | Dashboard con datos de ejemplo (publico)                     |
-| `http://localhost:3000/login`     | Inicio de sesion                                             |
-| `http://localhost:3000/customers` | Clientes (requiere sesion y negocio)                         |
-| `http://localhost:3000/settings`  | Datos del negocio (editable por OWNER y ADMIN)               |
-| `http://localhost:4000/health`    | Proceso de la API                                            |
-| `http://localhost:4000/ready`     | API + conexion a PostgreSQL: `{"status":"ready"}` si conecta |
-
-`dev:backend` y `dev:frontend` compilan `packages/shared` antes de arrancar; el paso `build:shared` de arriba solo hace falta si se levanta una app con `npm run dev --workspace=...`. `build` y `typecheck` generan el cliente de Prisma solo si falta (por ejemplo, despues de `npm ci`) o si cambio el schema; asi funcionan aunque la API este corriendo, que en Windows bloquea el motor de Prisma.
-
-Con Docker Desktop, levantÃ¡ PostgreSQL, Supabase Auth y las dos apps locales:
-
-```bash
 npm run docker:dev
 ```
 
-AbrÃ­ `http://localhost:3000/login`. La cuenta ficticia es
-`admin@turnosmart.test` con la contraseÃ±a `TS_SEED_PASSWORD` de `.env.dev`.
-El archivo es opcional y se copia de `.env.dev.example` si necesitás cambiar puertos. Los comandos de logs, apagado y
-reset, y los puertos internos y publicados, estÃ¡n en la guÃ­a de [infraestructura](infra/README.md).
+Abrir `http://localhost:3000/login`. La cuenta de prueba es `admin@turnosmart.test`, con la contraseña local indicada en la [guía de infraestructura](infra/README.md) o la configurada con `TS_SEED_PASSWORD` al crear la cuenta. Docker levanta PostgreSQL y Supabase Auth locales, aplica las migraciones y carga los datos de prueba. Ambas apps corren en el host con recarga en desarrollo.
 
-### Problemas frecuentes
+## Desarrollo con un proyecto de Supabase
 
-| Sintoma                                               | Causa y solucion                                                                                                  |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `/ready` responde 503                                 | El backend no llega a la base: revisar `DATABASE_URL` (password, puerto 6543, `?pgbouncer=true`).                 |
-| "No se pudo cargar tu cuenta" despues del login       | La API no pudo leer la cuenta. Si el log del backend muestra `P2021`, faltan las tablas: correr `prisma:migrate`. |
-| "Email o contraseÃ±a incorrectos" con datos correctos | El usuario no existe en ese proyecto de Supabase o no esta confirmado.                                            |
-| Error de CORS en la consola del navegador             | `CORS_ORIGIN` no incluye la URL del frontend.                                                                     |
-| `Another next dev server is already running`          | Ya hay un `next dev` en esa carpeta: usar `localhost:3000` o cerrarlo (`taskkill /PID <pid> /F`).                 |
+1. Ejecutar `npm ci` con Node.js 22 desde la raíz Git.
+2. Copiar [la plantilla raíz](.env.example) a `apps/backend/.env` y [la plantilla del frontend](apps/frontend/.env.example) a `apps/frontend/.env.local`. Usar el mismo proyecto Supabase en ambas apps.
+3. En el backend, completar `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `DATABASE_URL`, `DIRECT_URL` y `CORS_ORIGIN=http://localhost:3000`. Para Supabase Cloud, usar el pooler transaccional (6543, con `?pgbouncer=true`) para la API y conexión directa o pooler de sesión (5432) para migraciones. Codificar los caracteres especiales de la contraseña en las URLs.
+4. En el frontend, completar `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` con la URL y la clave pública del mismo proyecto. `next dev` usa la API en `http://localhost:4000`. Los builds requieren además los dos orígenes HTTPS públicos de la plantilla, incluso si uno está inactivo.
+5. Generar el cliente y aplicar las migraciones al entorno elegido:
 
-## Calidad, pruebas y CI
+```sh
+npm run prisma:generate --workspace=apps/backend
+npm run prisma:migrate --workspace=apps/backend
+```
 
-```bash
-npm run format
+6. Crear y confirmar un usuario desde Supabase Auth para completar el onboarding como OWNER. También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
+7. En terminales separadas, ejecutar `npm run dev:backend` y `npm run dev:frontend`. Ambos comandos compilan `packages/shared`.
+
+Configurar `GEMINI_API_KEY` para habilitar las explicaciones. La [guía de operación](docs/operations.md#notificaciones-de-turnos) cubre los modos de correo, los enlaces firmados y el cron. Las claves privadas se configuran en el backend o en los almacenes de secretos del entorno.
+
+| Ruta                                                     | Uso                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `/login`, `/onboarding`                                  | Acceso y alta inicial del negocio.                                              |
+| `/`, `/appointments/[id]`                                | Agenda y detalle de turno.                                                      |
+| `/customers`, `/services`, `/settings`, `/notifications` | Clientes, servicios y disponibilidad, configuración y centro de notificaciones. |
+| `/turno/gestionar`                                       | Página pública que requiere un enlace válido para operar sobre un turno.        |
+| API `/health`, `/ready`, `/metrics`                      | Estado del proceso, conectividad a PostgreSQL y métricas de la instancia.       |
+
+Si `/ready` devuelve 503, revisar la conexión de la API a PostgreSQL. Si el backend registra `P2021`, comprobar las migraciones. Si el navegador bloquea la API por CORS, comprobar el origen exacto en `CORS_ORIGIN`.
+
+## Pruebas y despliegue
+
+```sh
 npm run format:check
 npm run lint
 npm run typecheck
-npm run build
 npm test
+npm run test:config --workspace=apps/frontend
 ```
 
-`npm test` corre los tests unitarios del backend, sin base de datos. GitHub Actions valida pushes a `dev` y `main`, y PRs hacia esas ramas, incluidos borradores. Una feature sin PR no tiene CI remoto ni Preview.
+GitHub Actions valida pushes a `dev` y `main` y PRs hacia ambas ramas. También valida el schema Prisma y compila las dos apps. Las pruebas de integración con PostgreSQL y las pruebas de navegador tienen comandos y requisitos propios. [Guía de pruebas](tests/README.md)
 
-`format` escribe archivos; `format:check` solo verifica. Si hay cambios ajenos en curso, formatear unicamente los archivos propios con `npx prettier --write <archivos>`. No hay suites de tests propias en frontend o shared ejecutadas por `npm test`; E2E es un comando separado. Los comandos de raiz compilan shared en el orden necesario.
+Para configurar Preview o Production y comprobar el backend seleccionado, consultar [Vercel](infra/vercel/README.md) y [Render](infra/render/README.md). El procedimiento de Azure vive en su [guía de infraestructura](infra/azure/README.md).
 
-Para comprobar los tres workspaces: `npm ls --workspaces --depth=0`. Para validar el schema sin migrar: `npm run prisma:validate --workspace=@turnosmart/backend`. Para validar Compose sin imprimir variables resueltas: `npm run docker:config`.
-
-**Integracion** (API + PostgreSQL real). Crea y borra negocios de prueba: usar una base descartable con las migraciones aplicadas, nunca la del equipo ni la de la demo.
-
-```bash
-npm run test:integration
-```
-
-La suite `tenant-isolation.test.ts` requiere PostgreSQL real. `services-http.test.ts` usa fakes y puede ejecutarse por separado sin base: `npm run test:integration --workspace=@turnosmart/backend -- services-http.test.ts`. Estos tests no prueban RLS de PostgreSQL.
-
-**End-to-end** (sin mocks). Requiere frontend, backend y Supabase levantados, y un usuario de prueba de ese Supabase en `E2E_USER_EMAIL` y `E2E_USER_PASSWORD`. Ese usuario crea un "Negocio E2E" y clientes en la base. `E2E_BASE_URL` cambia la URL del frontend (por defecto `http://localhost:3000`).
-
-```bash
-npm run test:e2e --workspace=@turnosmart/frontend
-```
-
-Cubre login invalido, redireccion de rutas protegidas, recuperacion ante una API caida (error visible, reintento y cierre de sesion) y el recorrido alta â†’ recarga â†’ edicion â†’ baja â†’ logout de un cliente.
-
-## Despliegue del frontend
-
-Con CD activado, **Frontend preview** (`workflow_run`, definido en la rama por
-defecto) corre tras **TurnoSmart CI**. Una PR interna elegible desde `feat/**` publica Preview si tiene
-cambios relevantes de frontend. Production se publica por dispatch desde la rama
-configurada. Render observa CI y despliega Dev desde `dev` segun sus filtros.
-Ver [Vercel Hobby](infra/vercel/README.md) y [Render Free](infra/render/README.md)
-para activacion, variables, CORS, validacion y rollback.
-
-Durante `next dev`, el frontend se conecta directamente a `http://localhost:4000`;
-los builds de produccion siguen requiriendo origenes HTTPS publicos.
-
-La CLI usa la **raiz del monorepo** y toma las variables publicas de Production
-o Preview en Vercel antes de compilar con Node 22.
-
-## Datos y multi-tenancy
-
-El esquema incluye `Business`, `Profile`, `Customer`, `Service`, `AvailabilityRule`, `Appointment`, `AppointmentEvent`, `RiskScore` y `Reminder`.
-
-Las entidades operativas incluyen `businessId`. Las relaciones compuestas evitan referencias entre tenants y RLS protege el acceso desde Supabase. Como la conexion de Prisma omite RLS, el backend resuelve el negocio desde el perfil del usuario (nunca desde el body) y filtra cada consulta por `businessId`; un recurso de otro negocio responde 404.
-
-## Alcance planificado del MVP
-
-- Autenticacion, perfiles y alta de negocio.
-- CRUD de servicios y clientes.
-- Reglas de disponibilidad y agenda diaria/semanal.
-- Creacion, reprogramacion y cancelacion de turnos.
-- Historial de eventos y estados.
-- Score heuristico de riesgo de no-show.
-- Recordatorios por email segun riesgo.
-- Explicaciones y recomendaciones asistidas por Gemini.
-
-Lista de espera, WhatsApp, pagos o senas y analitica avanzada quedan fuera del MVP inicial.
-
-## Identidad visual
-
-La identidad visual es SaaS profesional, moderna y limpia, apta para rubros como estetica, salud, consultoria y servicios profesionales. Los colores son los del tema de Material UI (`apps/frontend/src/app/theme.ts`):
-
-| Uso                        | Color          | Hex       |
-| -------------------------- | -------------- | --------- |
-| Primario                   | Azul           | `#2563EB` |
-| Primario hover             | Azul oscuro    | `#1D4ED8` |
-| Secundario                 | Cian           | `#0891B2` |
-| Exito / confirmado         | Verde          | `#15803D` |
-| Advertencia / riesgo medio | Ambar          | `#B45309` |
-| Error / riesgo alto        | Rojo           | `#B91C1C` |
-| Fondo                      | Gris muy claro | `#F6F8FB` |
-| Cards                      | Blanco         | `#FFFFFF` |
-| Texto principal            | Slate          | `#0F172A` |
-| Texto secundario           | Slate gris     | `#64748B` |
-| Bordes                     | Gris           | `#E2E8F0` |
-
-## Plan de desarrollo
-
-1. **Sprint 0:** setup, CI, entornos, arquitectura y datos.
-2. **Sprint 1:** autenticacion, onboarding, perfiles y layout.
-3. **Sprint 2:** servicios, clientes y disponibilidad.
-4. **Sprint 3:** agenda, turnos y eventos.
-5. **Sprint 4:** calculo y visualizacion del riesgo.
-6. **Sprint 5:** recordatorios y trazabilidad.
-7. **Sprint 6:** explicaciones y recomendaciones con Gemini.
-8. **Sprint 7:** UX, errores, metricas, pruebas, documentacion y despliegue.
-
-El detalle de prioridades se mantiene en [docs/backlog.md](docs/backlog.md).
-
-## Documentacion
+## Documentación
 
 - [Arquitectura](docs/architecture.md)
-- [Contratos de la API](docs/contracts.md)
-- [Creditos y costos](docs/costs.md)
-- [Backlog](docs/backlog.md)
-- [Decisiones de IA](AI-DECISIONS.md)
-- [Backend](apps/backend/README.md)
-- [Frontend](apps/frontend/README.md)
-- [Infraestructura](infra/README.md)
-- [Pruebas](tests/README.md)
-- [Servicios implementados](apps/backend/src/modules/services/README.md)
-- [Propuesta de disponibilidad y slots](docs/api-services-availability.md)
-- [Seed y cuentas locales](apps/backend/prisma/README.md)
-- [Auditoria y limpieza del repositorio](docs/repository-audit.md)
+- [Contratos generales de la API](docs/contracts.md) y [servicios, disponibilidad y slots](docs/api-services-availability.md)
+- [Operación y recorrido de demo](docs/operations.md)
+- [Notificaciones de turnos](docs/notifications-plan.md)
+- [Backlog](docs/backlog.md) y [costos](docs/costs.md)
+- [Backend](apps/backend/README.md), [frontend](apps/frontend/README.md) y [contratos compartidos](packages/shared/README.md)
+- [Registro de decisiones asistidas por IA](AI-DECISIONS.md) y [auditoría histórica](docs/repository-audit.md)
 
-## Git y contribucion
+## Contribución
 
-Usar ramas `feat/<tema>`, `fix/<tema>` o `chore/<tema>` desde `dev` y abrir PR hacia `dev`; integrar a `main` mediante PR para entregas. Es el flujo recomendado para el equipo; los workflows verifican ambas ramas y no configuran por si solos protecciones de GitHub.
-
-Usar Conventional Commits, por ejemplo `docs: actualizar instalacion local`. Husky ejecuta lint-staged en pre-commit (ESLint y Prettier sobre archivos staged), Commitlint en commit-msg y typecheck en pre-push. Ejecutar los controles de CI antes de pedir revision; conservar `package-lock.json` y justificar cambios de dependencias.
+Usar ramas `feat/<tema>`, `fix/<tema>` o `chore/<tema>` desde `dev` y abrir PR hacia `dev`. Integrar a `main` mediante PR para las entregas. Usar Conventional Commits. Husky ejecuta lint-staged en pre-commit, Commitlint en commit-msg y typecheck en pre-push.

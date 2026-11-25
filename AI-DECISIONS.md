@@ -1,5 +1,7 @@
 # AI-DECISIONS.md - TurnoSmart
 
+Las entradas registran las decisiones y el estado de su fecha. Consultar el [README](README.md) y el [backlog](docs/backlog.md) para el estado vigente.
+
 Este archivo registra decisiones relevantes de producto, arquitectura e implementacion tomadas por el equipo con asistencia de ChatGPT/Codex. La IA funciono como herramienta de analisis y desarrollo; la seleccion, validacion y responsabilidad final de cada decision corresponden al equipo de TurnoSmart.
 
 ## 2026-09-22 - Alcance y arquitectura del MVP

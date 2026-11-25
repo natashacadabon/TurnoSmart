@@ -91,6 +91,10 @@ reutilizando el build actual. Repetir el preflight contra la API y comprobar
 204 con `Access-Control-Allow-Origin` igual al origen solicitado.
 [Variables de entorno en Render](https://render.com/docs/configure-environment-variables).
 
+### Migraciones y correo
+
+Antes de publicar una versión que cambie el esquema, aplicar las migraciones desde un entorno con `DIRECT_URL` que apunte a la base del servicio. El Blueprint configura el build y el proceso de la API. El procesador de correo se activa desde Environment con la configuración de [notificaciones](../../docs/operations.md#notificaciones-de-turnos). Para envíos durante la suspensión de Render, el cron necesita el origen HTTPS de este servicio y el secreto compartido en Supabase Vault.
+
 ### CORS automático de Preview en Render Dev
 
 Mantener `CORS_ORIGIN` para dominios fijos. Configurar estas variables solo
