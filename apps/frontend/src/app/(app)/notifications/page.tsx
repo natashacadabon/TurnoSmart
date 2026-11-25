@@ -10,7 +10,8 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material';
-import type { NotificationReadResponse, NotificationsResponse } from '@turnosmart/shared';
+import type { NotificationReadResponse } from '@turnosmart/shared';
+import type { CenterNotifications } from '@/components/notifications/NotificationProvider';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
@@ -33,7 +34,7 @@ export default function NotificationsPage() {
   const changes = useRef(0);
   const [response, setResponse] = useState<{
     key: string;
-    data?: NotificationsResponse;
+    data?: CenterNotifications;
     error?: string;
   } | null>(null);
   const cursor = anchors.at(-1);

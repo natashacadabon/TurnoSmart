@@ -5,6 +5,7 @@ import {
   APPOINTMENT_STATUSES,
   type AppointmentEventDto,
   type AppointmentEventType,
+  type AppointmentRescheduleEventType,
   type AppointmentStatus,
 } from '@turnosmart/shared';
 import { useEffect, useState } from 'react';
@@ -28,15 +29,20 @@ const ICON = {
   CANCELLED: CircleX,
   COMPLETED: CircleCheck,
   MARKED_NO_SHOW: UserX,
+  RESCHEDULE_REQUESTED: CalendarClock,
+  RESCHEDULE_REQUEST_DISMISSED: CircleX,
 };
 
-const TYPE_LABEL: Record<AppointmentEventType, string> = {
+type EventType = AppointmentEventType | AppointmentRescheduleEventType;
+const TYPE_LABEL: Record<EventType, string> = {
   CREATED: 'Turno creado',
   RESCHEDULED: 'Turno reprogramado',
   CONFIRMED: 'Turno confirmado',
   CANCELLED: 'Turno cancelado',
   COMPLETED: 'Turno completado',
   MARKED_NO_SHOW: 'Marcado como ausente',
+  RESCHEDULE_REQUESTED: 'Reprogramación solicitada',
+  RESCHEDULE_REQUEST_DISMISSED: 'Solicitud de reprogramación rechazada',
 };
 
 function statusFrom(value: unknown): AppointmentStatus | undefined {
@@ -57,14 +63,16 @@ export function EventHistory({
   timezone: string;
   revision?: number;
 }) {
-  const [events, setEvents] = useState<AppointmentEventDto[] | null>(null);
+  const [events, setEvents] = useState<AppointmentEventDto<EventType>[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
-    api<AppointmentEventDto[]>(`/api/appointments/${appointmentId}/events`).then(
+    api<AppointmentEventDto<EventType>[]>(
+      `/api/appointments/${appointmentId}/events?includeRequests=true`,
+    ).then(
       (result) => {
         if (!active) return;
         setEvents(result);

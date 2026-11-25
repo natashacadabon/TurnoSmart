@@ -34,7 +34,7 @@ import {
   type AppointmentDto,
   type AvailabilityRuleInput,
 } from '@turnosmart/shared';
-import { CalendarDays, LockKeyhole } from 'lucide-react';
+import { CalendarClock, CalendarDays, LockKeyhole } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   agendaHours,
@@ -141,7 +141,22 @@ function renderAppointment(
   const status = appointmentStatusSchema.safeParse(event.extendedProps.status);
   const name =
     typeof event.extendedProps.customerName === 'string' ? event.extendedProps.customerName : '';
-  const tooltip = [timeText, name, event.title].filter(Boolean).join(' · ');
+  const active = status.data === 'SCHEDULED' || status.data === 'CONFIRMED';
+  const confirmation = active
+    ? status.data === 'CONFIRMED' || event.extendedProps.confirmationStatus === 'CONFIRMED'
+      ? 'Asistencia confirmada'
+      : 'Pendiente de confirmación'
+    : undefined;
+  const requested = active && event.extendedProps.rescheduleRequested === true;
+  const tooltip = [
+    timeText,
+    name,
+    event.title,
+    confirmation,
+    requested && 'Reprogramación solicitada',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const monthly = view.type === 'dayGridMonth';
   return (
     <>
@@ -153,11 +168,20 @@ function renderAppointment(
       <Box
         className={titleClass}
         title={tooltip}
+        aria-label={tooltip}
         data-agenda-event-content=""
         data-agenda-visible-event={visibleInGrid ? '' : undefined}
         sx={{ display: 'flex', alignItems: 'center', gap: 0.375, minWidth: 0 }}
       >
         {status.success && <AppointmentStatusIcon status={status.data} inEvent />}
+        {requested && (
+          <Box
+            component="span"
+            sx={{ color: 'warning.dark', display: 'inline-flex', flexShrink: 0 }}
+          >
+            <CalendarClock size={14} aria-hidden />
+          </Box>
+        )}
         <Box
           component="span"
           sx={{

@@ -4,12 +4,13 @@ import CloudOffRoundedIcon from '@mui/icons-material/CloudOffRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import { Button, Card, CardContent, CircularProgress, Stack, Typography } from '@mui/material';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { UnsavedChangesProvider } from '@/components/UnsavedChangesProvider';
 import { AppSidebar } from '@/components/AppSidebar';
 import { useAuth } from '@/components/AuthProvider';
 import { ToastProvider } from '@/components/ToastProvider';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { NotificationProvider } from '@/components/notifications/NotificationProvider';
 import { Brand, softDangerButtonSx } from '@/components/ui';
 import styles from './layout.module.css';
@@ -18,6 +19,7 @@ import styles from './layout.module.css';
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { status, me, meError } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (status === 'signedOut') router.replace('/login');
@@ -40,6 +42,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <NotificationProvider>
           <main className={styles.shell}>
             <AppSidebar />
+            <div className={styles.notificationDock}>
+              <NotificationBell key={pathname} timezone={me.business.timezone} />
+            </div>
             <section className={styles.content}>{children}</section>
           </main>
         </NotificationProvider>

@@ -12,7 +12,11 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { rescheduleAppointmentSchema, type AppointmentDto } from '@turnosmart/shared';
+import {
+  rescheduleAppointmentSchema,
+  type AppointmentDto,
+  type PendingRescheduleRequestDto,
+} from '@turnosmart/shared';
 import { useRef, useState, type FormEvent } from 'react';
 import { ToastViewport, useToastState } from '@/components/ToastProvider';
 import { api, ApiError, errorMessage } from '@/lib/api';
@@ -21,7 +25,7 @@ import { businessDate } from '@/lib/booking';
 import { appointmentWindowLabel } from '@/lib/calendar-events';
 import { AppointmentSlotPicker, useAppointmentSlots } from './AppointmentSlotPicker';
 
-async function reschedule(appointment: AppointmentDto, startsAt: string) {
+async function reschedule(appointment: AppointmentDto, startsAt: string, requestId?: string) {
   const path = '/api/appointments/' + appointment.id;
   const fresh = await api<AppointmentDto>(path);
   if (appointmentChanged(appointment, fresh) || !canRescheduleAppointment(fresh, Date.now())) {
@@ -29,10 +33,16 @@ async function reschedule(appointment: AppointmentDto, startsAt: string) {
   }
   return {
     kind: 'saved' as const,
-    appointment: await api<AppointmentDto>(path + '/reschedule', {
-      method: 'POST',
-      body: rescheduleAppointmentSchema.parse({ startsAt }),
-    }),
+    appointment: await api<AppointmentDto>(
+      path + (requestId ? '/reschedule-request/approve' : '/reschedule'),
+      {
+        method: 'POST',
+        body: {
+          ...rescheduleAppointmentSchema.parse({ startsAt }),
+          ...(requestId && { requestId }),
+        },
+      },
+    ),
   };
 }
 
@@ -43,6 +53,7 @@ export function RescheduleAppointmentDialog({
   onSaved,
   onStale,
   onRefresh,
+  request,
 }: {
   appointment: AppointmentDto;
   timezone: string;
@@ -50,12 +61,17 @@ export function RescheduleAppointmentDialog({
   onSaved(appointment: AppointmentDto): void;
   onStale(appointment: AppointmentDto): void;
   onRefresh(): void;
+  request?: PendingRescheduleRequestDto | undefined;
 }) {
   const fullScreen = useMediaQuery(useTheme().breakpoints.down('sm'));
   const slots = useAppointmentSlots({
     timezone,
     serviceId: appointment.serviceId,
-    initialDate: businessDate(new Date(appointment.startsAt), timezone),
+    initialDate: businessDate(
+      new Date(request?.requestedStartsAt ?? appointment.startsAt),
+      timezone,
+    ),
+    ...(request?.requestedStartsAt && { initialStartsAt: request.requestedStartsAt }),
     excludeAppointmentId: appointment.id,
     omitStart: appointment.startsAt,
   });
@@ -76,7 +92,7 @@ export function RescheduleAppointmentDialog({
     pending.current = true;
     setSaving(true);
     try {
-      const result = await reschedule(appointment, selection.startsAt);
+      const result = await reschedule(appointment, selection.startsAt, request?.id);
       if (result.kind === 'stale') onStale(result.appointment);
       else onSaved(result.appointment);
     } catch (err) {
@@ -112,7 +128,9 @@ export function RescheduleAppointmentDialog({
         aria-busy={saving}
         sx={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}
       >
-        <DialogTitle id="reschedule-title">Reprogramar turno</DialogTitle>
+        <DialogTitle id="reschedule-title">
+          {request ? 'Aprobar reprogramación' : 'Reprogramar turno'}
+        </DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
             <Box sx={{ bgcolor: 'background.default', borderRadius: 2, p: 2 }}>
