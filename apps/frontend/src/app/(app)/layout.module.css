@@ -57,3 +57,9 @@
     padding: 20px;
   }
 }
+
+/* Configuración usa el ancho disponible sin alterar la navegación global. */
+.content:has(> [data-settings-page]) {
+  max-width: 1540px;
+  padding: 20px;
+}

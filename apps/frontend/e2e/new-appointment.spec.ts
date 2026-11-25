@@ -464,6 +464,99 @@ const notificationPreferences = () => ({
   rescheduleMinimumHours: 0,
 });
 
+test('guarda configuración de correos y hasta tres recordatorios únicos en móvil', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const preferences = notificationPreferences();
+  const writes: object[] = [];
+  await page.route('**/api/business/notification-preferences', (route) => {
+    if (route.request().method() === 'OPTIONS') return respond(route, {});
+    if (route.request().method() === 'PATCH') {
+      const update = route.request().postDataJSON() as Partial<typeof preferences>;
+      writes.push(update);
+      Object.assign(preferences, update);
+    }
+    return respond(route, preferences);
+  });
+  await page.route('**/api/business/notification-preferences/preview/BOOKED', (route) =>
+    respond(route, { subject: 'Tu turno está reservado', html: '<p>Vista previa de reserva</p>' }),
+  );
+  await openAgenda(page);
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Configuración', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Configuración', exact: true })).toBeVisible();
+  const settings = page.getByRole('region', { name: 'Notificaciones', exact: true });
+  const save = settings.getByRole('button', { name: 'Guardar cambios', exact: true });
+  await expect(save).toBeDisabled();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 1' })).toBeDisabled();
+  await settings.getByLabel('Email al reservar').check();
+  await settings.getByLabel('Email de confirmación', { exact: true }).check();
+  await settings.getByLabel('Recordatorios automáticos').check();
+  await settings.getByRole('button', { name: 'Agregar recordatorio' }).click();
+  await expect(settings.getByRole('button', { name: 'Agregar recordatorio' })).toBeDisabled();
+  await settings.getByRole('combobox', { name: 'Recordatorio 3' }).click();
+  await expect(page.getByRole('option', { name: '24 h antes', exact: true })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await page.getByRole('option', { name: '6 h antes', exact: true }).click();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 3' })).toHaveText('6 h antes');
+  await settings.getByLabel('Anticipación mínima para cancelar (horas)').fill('12');
+  await settings.getByLabel('Anticipación mínima para solicitar un cambio (horas)').fill('6');
+  await settings.getByLabel('Permitir confirmación mediante enlace').uncheck();
+  await expect(settings.getByRole('status')).toContainText('Cambios sin guardar');
+  await save.click();
+  await expect(page.getByText('Preferencias de notificaciones guardadas')).toBeVisible();
+  expect(writes).toEqual([
+    {
+      bookingEmailEnabled: true,
+      confirmationEmailEnabled: true,
+      remindersEnabled: true,
+      reminderHours: [48, 24, 6],
+      customerConfirmationEnabled: false,
+      cancellationMinimumHours: 12,
+      rescheduleMinimumHours: 6,
+    },
+  ]);
+  await page.reload();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 3' })).toHaveText('6 h antes');
+  await expect(save).toBeDisabled();
+  await settings.getByRole('button', { name: 'Eliminar recordatorio 3' }).click();
+  await settings.getByLabel('Recordatorios automáticos').uncheck();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 1' })).toBeDisabled();
+  await save.click();
+  expect(writes.at(-1)).toEqual({ remindersEnabled: false, reminderHours: [48, 24] });
+  await settings.getByRole('button', { name: 'Vista previa de emails' }).click();
+  await expect(
+    page.frameLocator('iframe[title="Contenido del email"]').getByText('Vista previa de reserva'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  expect(await page.locator('html').evaluate((element) => element.scrollWidth)).toBe(390);
+});
+
+test('STAFF puede consultar configuración y no tiene controles de escritura', async ({ page }) => {
+  const writes: object[] = [];
+  await page.route('**/api/business/notification-preferences', (route) => {
+    if (route.request().method() === 'PATCH') writes.push(route.request().postDataJSON());
+    return respond(route, notificationPreferences());
+  });
+  await openAgenda(page, false, [], { role: 'STAFF' });
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Configuración', exact: true })
+    .click();
+  const settings = page.getByRole('region', { name: 'Notificaciones', exact: true });
+  await expect(
+    settings.getByText('Solo dueños y administradores pueden modificar estas preferencias.'),
+  ).toBeVisible();
+  await expect(settings.getByLabel('Email al reservar')).toBeDisabled();
+  await expect(settings.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
 test('muestra la solicitud en agenda y permite rechazarla desde el detalle', async ({ page }) => {
   const item = { ...reminderFixture(95, 60), rescheduleRequested: true };
   const pending = {
