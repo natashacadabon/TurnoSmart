@@ -63,3 +63,8 @@
   max-width: 1540px;
   padding: 20px;
 }
+
+.content:has(> [data-services-page]) {
+  max-width: none;
+  padding: 20px;
+}

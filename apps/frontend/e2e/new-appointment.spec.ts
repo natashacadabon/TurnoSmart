@@ -1769,3 +1769,47 @@ for (const width of [1366, 375]) {
     await expect(bell).toHaveCount(1);
   });
 }
+
+test('la campana global respeta los horarios sin guardar al navegar desde una notificación', async ({
+  page,
+}) => {
+  const item = reminderFixture(907, 60);
+  const { notifications } = await openAgenda(page, false, [item]);
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Servicios', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true }).click();
+  await page.getByLabel('Inicio lunes 1').fill('10:00');
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  notifications.push({
+    id: id(10401),
+    appointmentId: item.id,
+    kind: 'CONFIRMED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  const bell = page.getByRole('button', { name: 'Notificaciones (1 sin leer)' });
+  await expect(bell).toBeVisible({ timeout: 12_000 });
+  await bell.click();
+  const popup = page.getByRole('dialog', { name: 'Notificaciones', exact: true });
+  for (const target of [
+    popup.getByRole('link', { name: 'Ver todas las notificaciones', exact: true }),
+    popup.getByRole('button', { name: 'Ver turno', exact: true }),
+  ]) {
+    page.once('dialog', (dialog) => dialog.dismiss());
+    await target.click();
+    await expect(page).toHaveURL(/\/services$/);
+    await expect(popup).toBeVisible();
+    expect(notifications[0]!.readAt).toBeNull();
+  }
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true }).click();
+  await expect(page.getByLabel('Inicio lunes 1')).toHaveValue('10:00');
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await bell.click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await popup.getByRole('link', { name: 'Ver todas las notificaciones', exact: true }).click();
+  await expect(page).toHaveURL(/\/notifications$/);
+});

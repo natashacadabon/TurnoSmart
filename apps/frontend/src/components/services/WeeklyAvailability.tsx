@@ -18,8 +18,7 @@ import {
   IconButton,
   FormControlLabel,
   Stack,
-  Tab,
-  Tabs,
+  Tooltip,
   Switch,
   TextField,
   Typography,
@@ -29,6 +28,7 @@ import {
   type AvailabilityRuleInput,
   type AvailabilityRulesResponse,
 } from '@turnosmart/shared';
+import { Eye, Pencil } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useUnsavedChanges } from '../UnsavedChangesProvider';
 import { api, errorMessage, fieldErrors } from '../../lib/api';
@@ -84,9 +84,11 @@ function minutes(time: string) {
 export function WeeklyAvailability({
   canWrite,
   onSaved,
+  onSummary,
 }: {
   canWrite: boolean;
   onSaved: () => void;
+  onSummary?: (minutes: number | null) => void;
 }) {
   const { setDirty } = useUnsavedChanges();
   const [saved, setSaved] = useState<Week>();
@@ -94,6 +96,7 @@ export function WeeklyAvailability({
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
   const pending = useRef<Promise<AvailabilityRulesResponse> | null>(null);
+  const [editing, setEditing] = useState(false);
   const [selectedDay, setSelectedDay] = useState(1);
   const [copyTargets, setCopyTargets] = useState<number[] | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -163,6 +166,18 @@ export function WeeklyAvailability({
     };
   }, [reload]);
 
+  const weeklyMinutes =
+    saved && replaceAvailabilityRulesSchema.safeParse({ rules: payload(saved.rules) }).success
+      ? saved.rules.reduce(
+          (sum, rule) =>
+            rule.active ? sum + minutes(rule.endTime) - minutes(rule.startTime) : sum,
+          0,
+        )
+      : null;
+  useEffect(() => {
+    onSummary?.(weeklyMinutes);
+  }, [onSummary, weeklyMinutes]);
+
   useEffect(() => {
     setDirty(dirty);
     return () => setDirty(false);
@@ -171,7 +186,7 @@ export function WeeklyAvailability({
   useEffect(() => {
     if (!dirty) return;
     function confirmLeave(event: BeforeUnloadEvent) {
-      event.preventDefault();
+      event?.preventDefault();
       event.returnValue = true;
     }
     window.addEventListener('beforeunload', confirmLeave);
@@ -206,8 +221,8 @@ export function WeeklyAvailability({
     edit(next.map((rule) => (rule.dayOfWeek === dayOfWeek ? { ...rule, active } : rule)));
   }
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
+  async function save(event?: FormEvent) {
+    event?.preventDefault();
     if (!canSave || !parsed.success) return;
 
     setSaving(true);
@@ -240,147 +255,252 @@ export function WeeklyAvailability({
     setCopyTargets(null);
   }
 
+  const activeRules = rules.filter(
+    (rule) =>
+      rule.active &&
+      /^\d{2}:\d{2}$/.test(rule.startTime) &&
+      /^\d{2}:\d{2}$/.test(rule.endTime) &&
+      minutes(rule.endTime) > minutes(rule.startTime),
+  );
+  const axisStart = Math.max(
+    0,
+    Math.floor(Math.min(8 * 60, ...activeRules.map((rule) => minutes(rule.startTime))) / 60) * 60,
+  );
+  const axisEnd = Math.min(
+    1440,
+    Math.ceil(Math.max(18 * 60, ...activeRules.map((rule) => minutes(rule.endTime))) / 60) * 60,
+  );
+  const axisLength = axisEnd - axisStart;
+  const timeLabel = (minute: number) =>
+    `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+  const feedback = (
+    <>
+      {dirty && (
+        <Typography variant="caption" role="status" color="warning.main">
+          Hay cambios de disponibilidad sin guardar.
+        </Typography>
+      )}
+      {!parsed.success && (
+        <Alert severity="warning">
+          {fieldIssues.rules ??
+            (dirty
+              ? 'Revisá las franjas indicadas antes de guardar.'
+              : 'La disponibilidad guardada tiene errores. Revisá los días marcados como «Revisar».')}
+        </Alert>
+      )}
+      {message && <Alert severity="error">{message}</Alert>}
+      {success && <Alert severity="success">Disponibilidad guardada.</Alert>}
+    </>
+  );
   return (
-    <Card component="section" aria-labelledby="weekly-title" sx={{ minWidth: 0 }}>
-      <CardContent>
-        <Stack component="form" spacing={2.5} onSubmit={save} noValidate sx={{ minWidth: 0 }}>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={1.5}
-            sx={{ justifyContent: 'space-between', alignItems: { sm: 'flex-start' } }}
-          >
-            <Stack spacing={0.5}>
-              <Typography variant="h2" id="weekly-title">
+    <>
+      <Card component="section" aria-labelledby="weekly-title" sx={{ minWidth: 0 }}>
+        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+          <Stack spacing={1.5}>
+            <Box>
+              <Typography component="h2" variant="h2" id="weekly-title" sx={{ fontSize: 17 }}>
                 Disponibilidad semanal
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Configurá los horarios de atención de tu negocio.
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ overflowWrap: 'anywhere' }}
+              >
+                Horarios de atención · {saved?.timezone ?? 'Cargando…'}
               </Typography>
-              {saved && (
-                <Chip
-                  label={`Zona horaria · ${saved.timezone}`}
-                  size="small"
-                  variant="outlined"
-                  sx={{
-                    alignSelf: 'flex-start',
-                    maxWidth: '100%',
-                    height: 'auto',
-                    color: '#7C3AED',
-                    borderColor: 'divider',
-                    '& .MuiChip-label': { whiteSpace: 'normal', py: 0.5 },
-                  }}
-                />
-              )}
-            </Stack>
-            {canWrite && saved && (
-              <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap' }}>
-                {dirty && (
-                  <Button size="small" disabled={saving} onClick={() => edit(saved.rules)}>
-                    Descartar cambios
+            </Box>
+            {loadError ? (
+              <Alert
+                severity="error"
+                action={
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setLoadError('');
+                      setReload((value) => value + 1);
+                    }}
+                  >
+                    Reintentar
                   </Button>
+                }
+              >
+                {loadError}
+              </Alert>
+            ) : !saved ? (
+              <CircularProgress size={24} aria-label="Cargando disponibilidad semanal" />
+            ) : (
+              <>
+                {!editing && feedback}
+                <Box role="group" aria-label="Semana de atención">
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '72px minmax(0, 1fr) 20px',
+                      mb: 0.5,
+                    }}
+                  >
+                    <Box />
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }} aria-hidden>
+                      {[0, 0.5, 1].map((fraction) => (
+                        <Typography key={fraction} sx={{ fontSize: 10 }} color="text.secondary">
+                          {timeLabel(axisStart + Math.round(axisLength * fraction))}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  </Box>
+                  {week.map(({ number, label, entries, invalid, active }) => {
+                    const ranges = entries.filter(
+                      ({ rule }) => rule.active && rule.startTime && rule.endTime,
+                    );
+                    return (
+                      <Tooltip
+                        key={number}
+                        describeChild
+                        title={
+                          invalid
+                            ? 'Revisar horarios'
+                            : active
+                              ? ranges
+                                  .map(({ rule }) => `${rule.startTime}–${rule.endTime}`)
+                                  .join(' · ')
+                              : 'Cerrado'
+                        }
+                      >
+                        <Button
+                          fullWidth
+                          aria-label={`${canWrite ? 'Editar' : 'Ver'} disponibilidad del ${label.toLowerCase()}`}
+                          onClick={() => {
+                            setSelectedDay(number);
+                            setEditing(true);
+                          }}
+                          sx={{
+                            display: 'grid',
+                            gridTemplateColumns: '64px minmax(0, 1fr) 20px',
+                            gap: 1,
+                            px: 0,
+                            py: 0.5,
+                            minHeight: 36,
+                            textAlign: 'left',
+                            color: 'text.primary',
+                            borderBottom: 1,
+                            borderColor: 'divider',
+                            borderRadius: 0,
+                            '&:last-child': { borderBottom: 0 },
+                          }}
+                        >
+                          <Typography component="span" sx={{ fontSize: 12, fontWeight: 600 }}>
+                            {label}
+                          </Typography>
+                          <Box
+                            component="span"
+                            sx={{
+                              display: 'grid',
+                              gridTemplateColumns: `repeat(${axisLength}, minmax(0, 1fr))`,
+                              alignItems: 'center',
+                              minHeight: 26,
+                              borderRadius: 1,
+                              bgcolor: 'action.hover',
+                            }}
+                          >
+                            {!active && !invalid && (
+                              <Typography
+                                component="span"
+                                sx={{ gridColumn: '1 / -1', px: 1, fontSize: 12 }}
+                                color="text.secondary"
+                              >
+                                Cerrado
+                              </Typography>
+                            )}
+                            {invalid ? (
+                              <Typography
+                                component="span"
+                                sx={{ gridColumn: '1 / -1', px: 1, fontSize: 12 }}
+                                color="error.main"
+                              >
+                                Revisar horarios
+                              </Typography>
+                            ) : (
+                              ranges.map(({ rule }) => (
+                                <Box
+                                  key={rule.id}
+                                  component="span"
+                                  sx={{
+                                    gridRow: 1,
+                                    gridColumn: `${Math.max(1, minutes(rule.startTime) - axisStart + 1)} / ${Math.min(axisLength + 1, minutes(rule.endTime) - axisStart + 1)}`,
+                                    bgcolor: 'primary.main',
+                                    color: 'primary.contrastText',
+                                    px: 0.5,
+                                    py: 0.5,
+                                    borderRadius: 0.5,
+                                    fontSize: { xs: 12, sm: 11 },
+                                    lineHeight: 1.3,
+                                    display: 'flex',
+                                    flexDirection: { xs: 'column', sm: 'row' },
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                    textAlign: 'center',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                >
+                                  <Box component="span">{rule.startTime}</Box>
+                                  <Box
+                                    component="span"
+                                    sx={{ display: { xs: 'none', sm: 'inline' } }}
+                                  >
+                                    –
+                                  </Box>
+                                  <Box component="span">{rule.endTime}</Box>
+                                </Box>
+                              ))
+                            )}
+                          </Box>
+                          {canWrite ? (
+                            <Pencil size={14} aria-hidden />
+                          ) : (
+                            <Eye size={14} aria-hidden />
+                          )}
+                        </Button>
+                      </Tooltip>
+                    );
+                  })}
+                </Box>
+                {canWrite && dirty && !editing && (
+                  <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+                    <Button size="small" disabled={saving} onClick={() => edit(saved.rules)}>
+                      Descartar cambios
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={!canSave}
+                      onClick={() => void save()}
+                    >
+                      {saving ? 'Guardando…' : 'Guardar cambios'}
+                    </Button>
+                  </Stack>
                 )}
-                <Button type="submit" variant="contained" disabled={!canSave}>
-                  {saving ? 'Guardando…' : 'Guardar cambios'}
-                </Button>
-              </Stack>
+              </>
             )}
           </Stack>
-          {loadError ? (
-            <Alert
-              severity="error"
-              action={
-                <Button
-                  color="inherit"
-                  size="small"
-                  onClick={() => {
-                    setLoadError('');
-                    setReload((value) => value + 1);
-                  }}
-                >
-                  Reintentar
-                </Button>
-              }
-            >
-              {loadError}
-            </Alert>
-          ) : !saved ? (
-            <CircularProgress size={24} aria-label="Cargando disponibilidad semanal" />
-          ) : (
-            <>
-              {!canWrite && (
-                <Typography variant="body2">Podés consultar las franjas con tu rol.</Typography>
-              )}
-              {dirty && (
-                <Typography
-                  variant="body2"
-                  role="status"
-                  sx={{ color: 'warning.main', fontWeight: 600 }}
-                >
-                  Hay cambios de disponibilidad sin guardar.
-                </Typography>
-              )}
-              {!parsed.success && (
-                <Alert severity="warning">
-                  {fieldIssues.rules ??
-                    (dirty
-                      ? 'Revisá las franjas indicadas antes de guardar.'
-                      : 'La disponibilidad guardada tiene errores. Revisá los días marcados como «Revisar».')}
-                </Alert>
-              )}
-              {message && <Alert severity="error">{message}</Alert>}
-              {success && <Alert severity="success">Disponibilidad guardada.</Alert>}
-              <Tabs
-                value={selectedDay}
-                onChange={(_, value: number) => setSelectedDay(value)}
-                aria-label="Disponibilidad por día"
-                variant="scrollable"
-                scrollButtons="auto"
-                allowScrollButtonsMobile
-                sx={{ minWidth: 0, borderBottom: 1, borderColor: 'divider' }}
-              >
-                {week.map(({ number, label, short, status }) => {
-                  return (
-                    <Tab
-                      key={number}
-                      id={`weekly-tab-${number}`}
-                      aria-controls="weekly-day-panel"
-                      aria-label={`${label}, ${status}`}
-                      value={number}
-                      label={
-                        <>
-                          <span>{short}</span>
-                          <Typography component="span" variant="caption">
-                            {status}
-                          </Typography>
-                        </>
-                      }
-                      sx={{
-                        minWidth: 82,
-                        minHeight: 56,
-                        px: 1.25,
-                        textTransform: 'none',
-                        '&.Mui-selected': {
-                          bgcolor: 'action.selected',
-                          color: 'primary.dark',
-                          fontWeight: 700,
-                        },
-                        '&:focus-visible': {
-                          outline: '2px solid',
-                          outlineColor: 'primary.dark',
-                          outlineOffset: -2,
-                        },
-                      }}
-                    />
-                  );
-                })}
-              </Tabs>
-
-              <Stack
-                spacing={1.5}
-                role="tabpanel"
-                id="weekly-day-panel"
-                aria-labelledby={`weekly-tab-${selectedDay}`}
-              >
+        </CardContent>
+      </Card>
+      <Dialog
+        open={editing}
+        onClose={saving ? undefined : () => setEditing(false)}
+        fullWidth
+        maxWidth="sm"
+        aria-labelledby="weekly-editor-title"
+      >
+        <Box component="form" onSubmit={save} noValidate>
+          <DialogTitle id="weekly-editor-title" sx={{ fontSize: 18 }}>
+            Horarios del {day.label.toLowerCase()}
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={1.5} sx={{ pt: 1 }}>
+              {feedback}
+              <Stack spacing={1.5}>
                 <Stack
                   direction={{ xs: 'column', sm: 'row' }}
                   spacing={1}
@@ -479,78 +599,25 @@ export function WeeklyAvailability({
                   </Stack>
                 )}
               </Stack>
-
-              <Box
-                component="section"
-                aria-labelledby="weekly-summary"
-                sx={{ borderTop: 1, borderColor: 'divider', pt: 2 }}
-              >
-                <Typography component="h3" id="weekly-summary" sx={{ fontWeight: 700, mb: 1 }}>
-                  Resumen semanal
-                </Typography>
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: {
-                      xs: 'repeat(2, minmax(0, 1fr))',
-                      sm: 'repeat(4, minmax(0, 1fr))',
-                      lg: 'repeat(7, minmax(0, 1fr))',
-                    },
-                    gap: 0.75,
-                  }}
-                >
-                  {week.map(({ number, label, short, entries, status }) => {
-                    return (
-                      <Button
-                        key={number}
-                        aria-label={`${canWrite ? 'Editar' : 'Ver'} disponibilidad del ${label.toLowerCase()}`}
-                        aria-pressed={selectedDay === number}
-                        onClick={() => {
-                          setSelectedDay(number);
-                          document.getElementById(`weekly-tab-${number}`)?.focus();
-                        }}
-                        sx={{
-                          minWidth: 0,
-                          py: 0.75,
-                          px: 1,
-                          justifyContent: 'flex-start',
-                          textAlign: 'left',
-                          '&:focus-visible': {
-                            outline: '2px solid',
-                            outlineColor: 'primary.dark',
-                            outlineOffset: -2,
-                          },
-                          alignItems: 'flex-start',
-                          color: 'text.primary',
-                          bgcolor:
-                            selectedDay === number ? 'action.selected' : 'background.default',
-                        }}
-                      >
-                        <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                            {short}
-                          </Typography>
-                          <Typography variant="caption" color="text.primary">
-                            {status}
-                          </Typography>
-                          {entries
-                            .filter(({ rule }) => rule.startTime && rule.endTime)
-                            .map(({ rule }) => (
-                              <Typography key={rule.id} variant="caption">
-                                {rule.startTime}–{rule.endTime}
-                                {!rule.active && ' · Inactiva'}
-                              </Typography>
-                            ))}
-                        </Stack>
-                      </Button>
-                    );
-                  })}
-                </Box>
-              </Box>
-            </>
-          )}
-        </Stack>
-      </CardContent>
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 2, pb: 2, flexWrap: 'wrap' }}>
+            <Button disabled={saving} onClick={() => setEditing(false)}>
+              Cerrar
+            </Button>
+            {canWrite && (
+              <>
+                <Button disabled={!dirty || saving} onClick={() => saved && edit(saved.rules)}>
+                  Descartar cambios
+                </Button>
+                <Button type="submit" variant="contained" disabled={!canSave}>
+                  {saving ? 'Guardando…' : 'Guardar cambios'}
+                </Button>
+              </>
+            )}
+          </DialogActions>
+        </Box>
+      </Dialog>
       {copyTargets && (
         <Dialog
           open
@@ -605,6 +672,6 @@ export function WeeklyAvailability({
           </DialogActions>
         </Dialog>
       )}
-    </Card>
+    </>
   );
 }
