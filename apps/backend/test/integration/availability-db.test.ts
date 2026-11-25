@@ -44,7 +44,15 @@ async function appointment(
     data: { businessId, name: randomUUID(), durationMinutes: 15 },
   });
   return prisma.appointment.create({
-    data: { businessId, serviceId: service.id, customerId: customer.id, startsAt, endsAt, status },
+    data: {
+      businessId,
+      serviceId: service.id,
+      customerId: customer.id,
+      startsAt,
+      endsAt,
+      status: status === 'CONFIRMED' ? 'SCHEDULED' : status,
+      confirmationStatus: status === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING',
+    },
   });
 }
 beforeEach(async () => {

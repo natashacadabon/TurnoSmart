@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import {
   createAppointmentSchema,
+  approveRescheduleRequestSchema,
+  dismissRescheduleRequestSchema,
+  issueAppointmentActionSchema,
+  projectAppointmentStatus,
   listAppointmentsQuerySchema,
   rescheduleAppointmentSchema,
   updateAppointmentSchema,
@@ -13,6 +17,7 @@ import { notFound } from '../../lib/errors.js';
 import { parse, parseId } from '../../lib/http.js';
 import type { AppointmentRecord } from './repository.js';
 import { AppointmentService } from './service.js';
+import type { AppointmentActionLinks } from './action-links.js';
 
 function toDto(row: AppointmentRecord): AppointmentDto {
   return {
@@ -21,7 +26,10 @@ function toDto(row: AppointmentRecord): AppointmentDto {
     serviceId: row.serviceId,
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
-    status: row.status,
+    status: projectAppointmentStatus(row.status, row.confirmationStatus),
+    operationalStatus: row.status,
+    confirmationStatus: row.confirmationStatus,
+    ...(row.rescheduleRequested !== undefined && { rescheduleRequested: row.rescheduleRequested }),
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -38,6 +46,7 @@ const actions: Record<string, AppointmentStatus> = {
 export function appointmentsRouter(deps: {
   appointments: ConstructorParameters<typeof AppointmentService>[0];
   risk: ConstructorParameters<typeof AppointmentService>[1];
+  actionLinks?: AppointmentActionLinks | undefined;
 }): Router {
   const router = Router();
   const service = new AppointmentService(deps.appointments, deps.risk);
@@ -90,8 +99,52 @@ export function appointmentsRouter(deps: {
   for (const [action, status] of Object.entries(actions)) {
     router.post(`/:id/${action}`, requirePermission('appointments:write'), async (req, res) => {
       const id = parseId(req.params.id, 'Turno');
-      res.json(toDto(await service.transition(req.auth!.businessId, id, status)));
+      res.json(toDto(await service.transition(req.auth!.businessId, id, status, req.auth!.userId)));
     });
+  }
+
+  router.post(
+    '/:id/reschedule-request/approve',
+    requirePermission('appointments:write'),
+    async (req, res) => {
+      const { businessId, userId } = req.auth!;
+      const id = parseId(req.params.id, 'Turno');
+      const { requestId, startsAt } = parse(approveRescheduleRequestSchema, req.body);
+      res.json(toDto(await service.reschedule(businessId, id, { startsAt }, requestId, userId)));
+    },
+  );
+
+  const links = deps.actionLinks;
+  if (links) {
+    router.post('/:id/action-links', requirePermission('appointments:write'), async (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      const id = parseId(req.params.id, 'Turno');
+      const { action } = parse(issueAppointmentActionSchema, req.body);
+      res.json(await links.issue(req.auth!.businessId, id, action));
+    });
+
+    router.get(
+      '/:id/reschedule-request',
+      requirePermission('appointments:read'),
+      async (req, res) => {
+        const id = parseId(req.params.id, 'Turno');
+        res
+          .set('Cache-Control', 'no-store')
+          .json(await links.getPendingRequest(req.auth!.businessId, id));
+      },
+    );
+
+    router.post(
+      '/:id/reschedule-request/dismiss',
+      requirePermission('appointments:write'),
+      async (req, res) => {
+        const { businessId, userId } = req.auth!;
+        const id = parseId(req.params.id, 'Turno');
+        const { requestId } = parse(dismissRescheduleRequestSchema, req.body);
+        await links.dismissRequest(businessId, id, requestId, userId);
+        res.status(204).end();
+      },
+    );
   }
 
   return router;

@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@prisma/client';
-import type { AppointmentEventDto, AppointmentEventType } from '@turnosmart/shared';
+import type { AppointmentEventType, PrismaClient } from '@prisma/client';
+import type { AppointmentEventDto } from '@turnosmart/shared';
 
 export interface EventRecord {
   id: string;
@@ -35,7 +35,7 @@ export class PrismaEventRepository implements EventRepository {
   }
 }
 
-export function toEventDto(e: EventRecord): AppointmentEventDto {
+export function toEventDto(e: EventRecord): AppointmentEventDto<AppointmentEventType> {
   const metadata =
     e.metadata && typeof e.metadata === 'object' && !Array.isArray(e.metadata)
       ? (e.metadata as Record<string, unknown>)

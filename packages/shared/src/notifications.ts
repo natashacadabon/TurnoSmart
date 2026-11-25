@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
 export const NOTIFICATION_LEAD_MS = 10 * 60_000;
+export const emailPreviewKindSchema = z.enum([
+  'BOOKED',
+  'CONFIRMED',
+  'REMINDER_24H',
+  'REMINDER_48H',
+  'CANCELLED',
+  'RESCHEDULED',
+  'RESCHEDULE_DECLINED',
+]);
+export interface EmailPreviewDto {
+  subject: string;
+  html: string;
+}
 
 export type NotificationKind =
   | 'APPOINTMENT_UPCOMING'
@@ -10,10 +23,10 @@ export type NotificationKind =
   | 'MARKED_NO_SHOW'
   | 'COMPLETED';
 
-export interface NotificationDto {
+export interface NotificationDto<K = NotificationKind> {
   id: string;
   appointmentId: string | null;
-  kind: NotificationKind;
+  kind: K;
   startsAt: string;
   createdAt: string;
   readAt: string | null;
@@ -24,12 +37,13 @@ export const notificationsQuerySchema = z
     limit: z.coerce.number().int().min(1).max(50).default(20),
     cursor: z.string().uuid().optional(),
     filter: z.enum(['all', 'unread']).default('all'),
+    includeRequests: z.stringbool().optional(),
   })
   .strict();
 
 export type NotificationsQuery = z.infer<typeof notificationsQuerySchema>;
-export interface NotificationsResponse {
-  items: NotificationDto[];
+export interface NotificationsResponse<K = NotificationKind> {
+  items: NotificationDto<K>[];
   unreadCount: number;
   nextCursor: string | null;
 }

@@ -1,5 +1,4 @@
 import {
-  canTransitionAppointmentStatus,
   type AppointmentStatus,
   type CreateAppointmentRequest,
   type ListAppointmentsQuery,
@@ -62,7 +61,13 @@ export class AppointmentService {
     return row;
   }
 
-  async reschedule(businessId: string, id: string, input: RescheduleAppointmentRequest) {
+  async reschedule(
+    businessId: string,
+    id: string,
+    input: RescheduleAppointmentRequest,
+    requestId?: string,
+    actorId?: string,
+  ) {
     const startsAt = new Date(input.startsAt);
     const result = await this.appointments.rescheduleAtomically(
       businessId,
@@ -70,9 +75,10 @@ export class AppointmentService {
       startsAt,
       {
         type: 'RESCHEDULED',
-        metadata: { startsAt: startsAt.toISOString() },
+        metadata: { startsAt: startsAt.toISOString(), ...(actorId && { actorId }) },
       },
       this.clock,
+      requestId,
     );
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'conflict') {
@@ -82,29 +88,8 @@ export class AppointmentService {
     return result.row;
   }
 
-  async transition(businessId: string, id: string, status: AppointmentStatus) {
-    const current = await this.appointments.findById(businessId, id);
-    if (!current) throw notFound('Turno');
-    if (!canTransitionAppointmentStatus(current.status, status)) {
-      throw new AppError(
-        'APPOINTMENT_INVALID_TRANSITION',
-        `No se puede pasar de ${current.status} a ${status}`,
-      );
-    }
-    const eventType =
-      status === 'NO_SHOW'
-        ? ('MARKED_NO_SHOW' as const)
-        : (status as 'CONFIRMED' | 'CANCELLED' | 'COMPLETED');
-    const result = await this.appointments.transitionAtomically(
-      businessId,
-      id,
-      current.status,
-      status,
-      {
-        type: eventType,
-        metadata: { previousStatus: current.status, status },
-      },
-    );
+  async transition(businessId: string, id: string, status: AppointmentStatus, actorId?: string) {
+    const result = await this.appointments.transitionAtomically(businessId, id, status, actorId);
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'invalid_transition') {
       throw new AppError(

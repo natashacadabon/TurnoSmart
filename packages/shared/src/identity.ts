@@ -43,6 +43,44 @@ export interface BusinessDto {
   createdAt: string;
 }
 
+export const REMINDER_HOUR_OPTIONS = [2, 6, 12, 24, 48, 72] as const;
+export const reminderHoursSchema = z
+  .array(
+    z
+      .number()
+      .int()
+      .refine((hours) => REMINDER_HOUR_OPTIONS.some((option) => option === hours), {
+        message: 'Elegí una anticipación de 2, 6, 12, 24, 48 o 72 horas.',
+      }),
+  )
+  .max(3, 'Podés configurar hasta tres recordatorios.')
+  .refine((hours) => new Set(hours).size === hours.length, {
+    message: 'Las anticipaciones de los recordatorios no pueden repetirse.',
+  });
+
+export const businessNotificationPreferencesSchema = z.strictObject({
+  bookingEmailEnabled: z.boolean(),
+  confirmationEmailEnabled: z.boolean(),
+  remindersEnabled: z.boolean(),
+  reminderHours: reminderHoursSchema,
+  reminder24hEnabled: z.boolean(),
+  reminder48hEnabled: z.boolean(),
+  cancellationEmailEnabled: z.boolean(),
+  rescheduleEmailEnabled: z.boolean(),
+  customerCancellationEnabled: z.boolean(),
+  customerConfirmationEnabled: z.boolean(),
+  customerRescheduleEnabled: z.boolean(),
+  cancellationMinimumHours: z.number().int().min(0).max(720),
+  rescheduleMinimumHours: z.number().int().min(0).max(720),
+});
+export type BusinessNotificationPreferences = z.infer<typeof businessNotificationPreferencesSchema>;
+
+export const updateBusinessNotificationPreferencesSchema = businessNotificationPreferencesSchema
+  .partial()
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: 'Debe informar al menos un campo',
+  });
+
 export interface ProfileDto {
   id: string;
   fullName: string | null;

@@ -31,6 +31,28 @@ const envSchema = z.object({
     .optional(),
   SUPABASE_ANON_KEY: z.string().min(1),
   DATABASE_URL: z.string().min(1),
+  APPOINTMENT_ACTION_SECRET: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/)
+    .optional(),
+  EMAIL_PROVIDER: z.enum(['disabled', 'console', 'resend']).default('disabled'),
+  EMAIL_CRON_SECRET: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/)
+    .optional(),
+  EMAIL_FROM: z
+    .string()
+    .trim()
+    .regex(/^(?:[^<>\r\n]+ <[^<>\s@]+@[^<>\s@]+>|[^<>\s@]+@[^<>\s@]+)$/)
+    .optional(),
+  RESEND_API_KEY: z.string().trim().min(1).optional(),
+  APPOINTMENT_ACTIONS_URL: z
+    .url({ protocol: /^https?$/ })
+    .refine((value) => {
+      const url = new URL(value);
+      return !url.username && !url.password && !url.search && !url.hash;
+    })
+    .optional(),
   // Gemini (A08): sin clave, la explicación de riesgo responde 503 AI_UNAVAILABLE.
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
@@ -54,6 +76,27 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     (!result.data.CORS_VERCEL_PROJECT_ID || !result.data.CORS_VERCEL_TOKEN)
   ) {
     throw new Error('Configuración de entorno inválida: CORS_VERCEL_PROJECT_ID, CORS_VERCEL_TOKEN');
+  }
+  const env = result.data;
+  if (env.EMAIL_PROVIDER !== 'disabled') {
+    const missing = [
+      ...(!env.EMAIL_FROM ? ['EMAIL_FROM'] : []),
+      ...(!env.APPOINTMENT_ACTION_SECRET ? ['APPOINTMENT_ACTION_SECRET'] : []),
+      ...(!env.APPOINTMENT_ACTIONS_URL ? ['APPOINTMENT_ACTIONS_URL'] : []),
+      ...(env.EMAIL_PROVIDER === 'resend' && !env.RESEND_API_KEY ? ['RESEND_API_KEY'] : []),
+    ];
+    if (missing.length) throw new Error(`Configuración de entorno inválida: ${missing.join(', ')}`);
+    if (env.EMAIL_PROVIDER === 'resend') {
+      const actionsUrl = new URL(env.APPOINTMENT_ACTIONS_URL!);
+      const localDevelopment =
+        env.NODE_ENV !== 'production' &&
+        actionsUrl.protocol === 'http:' &&
+        ['localhost', '127.0.0.1', '[::1]'].includes(actionsUrl.hostname);
+      if (actionsUrl.protocol !== 'https:' && !localDevelopment)
+        throw new Error(
+          'Configuración de entorno inválida: APPOINTMENT_ACTIONS_URL debe usar HTTPS con Resend; HTTP local solo se admite en desarrollo o test',
+        );
+    }
   }
   return result.data;
 }

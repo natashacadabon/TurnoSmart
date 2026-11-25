@@ -4,7 +4,11 @@ import { bookingEnd } from '../src/modules/appointments/booking.js';
 import { localTime, type AvailabilityRepository } from '../src/modules/availability/repository.js';
 import type { CustomerRepository } from '../src/modules/customers/repository.js';
 import type { ServiceRepository } from '../src/modules/services/repository.js';
-import type { AppointmentStatus } from '@prisma/client';
+import {
+  canTransitionAppointmentStatus,
+  projectAppointmentStatus,
+  type AppointmentStatus,
+} from '@turnosmart/shared';
 import type {
   AppointmentEventInput,
   AppointmentListQuery,
@@ -50,7 +54,11 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       .filter((row) => row.businessId === businessId)
       .filter((row) => !query.from || row.startsAt >= query.from)
       .filter((row) => !query.to || row.startsAt < query.to)
-      .filter((row) => !query.status || row.status === query.status)
+      .filter(
+        (row) =>
+          !query.status ||
+          projectAppointmentStatus(row.status, row.confirmationStatus) === query.status,
+      )
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || a.id.localeCompare(b.id));
     return {
       items: all.slice((query.page - 1) * query.pageSize, query.page * query.pageSize),
@@ -72,6 +80,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       id: randomUUID(),
       businessId,
       status: 'SCHEDULED',
+      confirmationStatus: 'PENDING',
+      scheduleVersion: 1,
       createdAt: now,
       updatedAt: now,
     };
@@ -109,7 +119,14 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
   async reschedule(businessId: string, id: string, startsAt: Date, endsAt: Date) {
     const row = await this.findById(businessId, id);
     if (!row) return null;
-    Object.assign(row, { startsAt, endsAt, updatedAt: new Date() });
+    if (row.startsAt.getTime() !== startsAt.getTime()) {
+      Object.assign(row, {
+        startsAt,
+        endsAt,
+        updatedAt: new Date(),
+        scheduleVersion: row.scheduleVersion + 1,
+      });
+    }
     return row;
   }
 
@@ -123,7 +140,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     const current = await this.findById(businessId, id);
     if (!current) return { kind: 'not_found' as const };
     const now = clock();
-    if (!['SCHEDULED', 'CONFIRMED'].includes(current.status) || current.startsAt <= now) {
+    if (current.status !== 'SCHEDULED' || current.startsAt <= now) {
       throw new AppError('APPOINTMENT_NOT_RESCHEDULABLE', 'El turno no admite reprogramacion');
     }
     const endsAt = await this.end(businessId, current.customerId, current.serviceId, startsAt, now);
@@ -136,30 +153,17 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     };
   }
 
-  async updateStatus(businessId: string, id: string, status: AppointmentStatus) {
-    const row = await this.findById(businessId, id);
-    if (!row) return null;
-    row.status = status;
-    row.updatedAt = new Date();
-    return row;
-  }
-
-  async transitionAtomically(
-    businessId: string,
-    id: string,
-    expectedStatus: AppointmentStatus,
-    nextStatus: AppointmentStatus,
-    _event?: AppointmentEventInput,
-  ) {
+  async transitionAtomically(businessId: string, id: string, nextStatus: AppointmentStatus) {
     const current = await this.findById(businessId, id);
     if (!current) return { kind: 'not_found' as const };
-    if (current.status !== expectedStatus) {
-      return { kind: 'invalid_transition' as const, currentStatus: current.status };
+    const currentStatus = projectAppointmentStatus(current.status, current.confirmationStatus);
+    if (!canTransitionAppointmentStatus(currentStatus, nextStatus) || nextStatus === 'SCHEDULED') {
+      return { kind: 'invalid_transition' as const, currentStatus };
     }
-    return {
-      kind: 'updated' as const,
-      row: (await this.updateStatus(businessId, id, nextStatus)) as AppointmentRecord,
-    };
+    if (nextStatus === 'CONFIRMED') current.confirmationStatus = 'CONFIRMED';
+    else current.status = nextStatus;
+    current.updatedAt = new Date();
+    return { kind: 'updated' as const, row: current };
   }
 
   async hasConflict(businessId: string, startsAt: Date, endsAt: Date, excludeId?: string) {
@@ -171,7 +175,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       (row) =>
         row.businessId === businessId &&
         row.id !== excludeId &&
-        ['SCHEDULED', 'CONFIRMED'].includes(row.status) &&
+        row.status === 'SCHEDULED' &&
         row.startsAt < endsAt &&
         row.endsAt > startsAt,
     );

@@ -1,0 +1,2 @@
+ALTER TYPE "AppointmentEmailKind" ADD VALUE 'REMINDER_48H';
+ALTER TYPE "AppointmentEmailKind" ADD VALUE 'REMINDER_24H';
