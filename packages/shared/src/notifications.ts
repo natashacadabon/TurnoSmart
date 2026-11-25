@@ -20,6 +20,7 @@ export type NotificationKind =
   | 'CONFIRMED'
   | 'CANCELLED'
   | 'RESCHEDULED'
+  | 'RESCHEDULE_REQUESTED'
   | 'MARKED_NO_SHOW'
   | 'COMPLETED';
 

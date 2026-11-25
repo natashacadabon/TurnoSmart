@@ -18,7 +18,7 @@ import {
   type CustomerDto,
   type Paginated,
 } from '@turnosmart/shared';
-import { CalendarDays, Eye, Mail, TriangleAlert, UsersRound } from 'lucide-react';
+import { CalendarDays, Mail, TriangleAlert, UsersRound } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';

@@ -14,7 +14,7 @@ import { useToast } from '@/components/ToastProvider';
 import { useUnsavedChanges } from '@/components/UnsavedChangesProvider';
 import { useNotifications } from './NotificationProvider';
 
-type CenterKind = NotificationKind | 'RESCHEDULE_REQUESTED';
+type CenterKind = NotificationKind;
 const kinds: Record<
   CenterKind,
   {

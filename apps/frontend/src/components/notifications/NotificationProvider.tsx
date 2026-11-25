@@ -2,7 +2,6 @@
 
 import type {
   NotificationReadResponse,
-  NotificationKind,
   NotificationsResponse,
   UpcomingNotification,
 } from '@turnosmart/shared';
@@ -25,7 +24,7 @@ export function listNotifications(filter: 'all' | 'unread', limit: number, curso
   return api<CenterNotifications>('/api/notifications?' + query);
 }
 
-export type CenterNotifications = NotificationsResponse<NotificationKind | 'RESCHEDULE_REQUESTED'>;
+export type CenterNotifications = NotificationsResponse;
 
 interface Center {
   recent: CenterNotifications | null;
