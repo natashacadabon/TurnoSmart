@@ -40,6 +40,7 @@ const previewLabels: Record<(typeof emailPreviewKindSchema.options)[number], str
   CONFIRMED: 'Confirmación de asistencia',
   REMINDER_24H: 'Recordatorio de 24 h',
   REMINDER_48H: 'Recordatorio de 48 h',
+  REMINDER: 'Recordatorio personalizado',
   CANCELLED: 'Cancelación',
   RESCHEDULED: 'Reprogramación',
   RESCHEDULE_DECLINED: 'Solicitud rechazada',

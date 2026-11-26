@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import type { BusinessNotificationPreferences } from '@turnosmart/shared';
-import { renderAppointmentEmail } from '../../backend/src/modules/notifications/email-templates';
+import { renderAppointmentEmail, APPOINTMENT_EMAIL_KINDS } from '@turnosmart/shared';
 
 const emailDetails = {
   business: 'Consultorio Sur',
@@ -245,16 +245,7 @@ for (const width of [1366, 375]) {
   });
   test(`plantillas de correo desktop y mobile ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: width === 1366 ? 680 : width, height: 900 });
-    for (const kind of [
-      'BOOKED',
-      'CONFIRMED',
-      'CANCELLED',
-      'RESCHEDULED',
-      'RESCHEDULE_DECLINED',
-      'REMINDER_24H',
-      'REMINDER_48H',
-      'REMINDER',
-    ] as const) {
+    for (const kind of APPOINTMENT_EMAIL_KINDS) {
       const rendered = renderAppointmentEmail(
         kind,
         {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { APPOINTMENT_EMAIL_KINDS } from './email-templates.js';
 
 export const NOTIFICATION_LEAD_MS = 10 * 60_000;
 export const emailPreviewKindSchema = z.enum([
@@ -6,10 +7,21 @@ export const emailPreviewKindSchema = z.enum([
   'CONFIRMED',
   'REMINDER_24H',
   'REMINDER_48H',
+  'REMINDER',
   'CANCELLED',
   'RESCHEDULED',
   'RESCHEDULE_DECLINED',
 ]);
+
+// Type check: ensure emailPreviewKindSchema values match APPOINTMENT_EMAIL_KINDS
+type _PreviewKindCheck =
+  z.infer<typeof emailPreviewKindSchema> extends (typeof APPOINTMENT_EMAIL_KINDS)[number]
+    ? (typeof APPOINTMENT_EMAIL_KINDS)[number] extends z.infer<typeof emailPreviewKindSchema>
+      ? true
+      : false
+    : false;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _: _PreviewKindCheck = true;
 export interface EmailPreviewDto {
   subject: string;
   html: string;
