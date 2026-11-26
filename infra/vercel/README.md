@@ -153,15 +153,28 @@ sigue su propio workflow.
 
 ## Activacion de CD y rollback
 
+Antes de desplegar estos controles, definir las cuatro variables publicas
+`EXPECTED_DEV_API`, `EXPECTED_DEV_SUPABASE`, `EXPECTED_PRODUCTION_API` y
+`EXPECTED_PRODUCTION_SUPABASE` en el repositorio GitHub, o con valores coherentes
+en **ambos** environments. Preview y el checkpoint tambien necesitan conocer los
+origenes Production para rechazarlos. Los origenes deben ser HTTPS canonicos,
+sin slash final, y distintos entre Dev y Production. No son secretos ni deben
+contener claves. Revisar overrides de environments antes de activar el cambio.
+
+La arquitectura utiliza un repositorio con `dev` como rama predeterminada y un
+unico proyecto Vercel: `dev` publica Preview y `main` publica Production. Cada
+entorno tiene su propio servicio Render y proyecto Supabase. Publicar Production
+no requiere cambiar la rama predeterminada a `main`.
+
 1. Confirmar Hobby y el proyecto existente. Usar **GitHub Actions como unico
    publicador** y desconectar Git en Vercel. Si el proyecto aun tiene Git conectado,
-   alinear Production Branch con la rama del dispatch. El `vercel.json`
+   alinear Production Branch con `main` para Production. El `vercel.json`
    mantiene los despliegues Git deshabilitados. Configurar los dos scopes publicos
    de la tabla y mantener Node 22.
 2. En GitHub crear los environments `vercel-production` y `vercel-preview`.
-   Restringir Production a `main` al completar la transicion. Para Preview
-   permitir la rama predeterminada real del repositorio (Settings > Branches;
-   no se asume `dev`) y, si se usan checkpoints manuales, `dev`: los Previews corren en el workflow
+   Restringir Production a `main`. Para Preview
+   permitir `dev`, la rama predeterminada y la utilizada por el checkpoint Azure:
+   los Previews corren en el workflow
    confiable `Frontend preview` (`workflow_run`), no en `refs/pull/*/merge`. En `vercel-preview` definir
    `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
    sin slash final. Los Previews de Render fallan si el scope Preview apunta a
@@ -197,11 +210,20 @@ sigue su propio workflow.
    Las reglas y secretos de environments requieren un plan compatible con la
    visibilidad del repo. Ver [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 4. Confirmar que el proyecto existente ya tiene un deployment Production READY.
-   Mantener el dispatch existente disponible durante el piloto. Su rama por
-   defecto es `dev` por compatibilidad. Cuando Production tenga backend y DB
-   separados, fijar `VERCEL_PRODUCTION_BRANCH=main`, alinear Vercel y restringir
-   el environment de GitHub a `main`. El dispatch requiere CI de push exitosa
-   para el SHA exacto. Si falta el deployment inicial, aplicar primero esa
+   El dispatch de Production exige `main` y `VERCEL_PRODUCTION_BRANCH=main`
+   como **variable de repositorio** en GitHub → Settings → Secrets and variables
+   → Actions → Variables. No definirla solo en `vercel-production`: el job
+   `preflight` no esta asociado a un environment. Si falta, esta vacia, contiene
+   otro valor o la ref no es `refs/heads/main`, se bloquea antes del deploy,
+   aunque Dev tenga CI aprobada. No hay fallback a `dev`.
+   El checkpoint Azure permanece separado como Preview desde `dev` y no
+   requiere esa variable Production. Alinear Vercel y restringir el environment
+   Production de GitHub a `main`. El dispatch requiere CI de push exitosa
+   para el SHA exacto. Antes de promover, consulta `/health` y `/ready` de la API
+   Production esperada sin seguir redirects; exige servicio correcto, SHA completo
+   igual al candidato y estado ready. Un fallo, timeout o SHA anterior bloquea
+   la promocion. El health tiene hasta 90 s para un cold start y ready hasta 15 s.
+   Despues vuelve a comprobar la rama vigente. Si falta el deployment inicial, aplicar primero esa
    configuracion y hacer el bootstrap manual desde `main`.
 5. Habilitar `VERCEL_CD_ENABLED=true` como variable del repositorio. Para
    validar el cambio, comprobar una PR interna en borrador, una externa,

@@ -86,6 +86,8 @@ jobs:
           HEAD_REF: ${{ needs.select.outputs.branch }}
           EXPECTED_DEV_API: ${{ vars.EXPECTED_DEV_API }}
           EXPECTED_DEV_SUPABASE: ${{ vars.EXPECTED_DEV_SUPABASE }}
+          EXPECTED_PRODUCTION_API: ${{ vars.EXPECTED_PRODUCTION_API }}
+          EXPECTED_PRODUCTION_SUPABASE: ${{ vars.EXPECTED_PRODUCTION_SUPABASE }}
         run: |
           : "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}" "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_PROJECT_ID:?Configurar VERCEL_PROJECT_ID}"
           npx --yes "vercel@$VERCEL_CLI_VERSION" pull --yes --environment=preview --git-branch "$HEAD_REF" --token="$VERCEL_TOKEN"

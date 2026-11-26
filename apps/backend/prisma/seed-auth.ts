@@ -1,3 +1,4 @@
+import { databaseProject as readDatabaseProject } from '../src/config/supabase-target.js';
 import { randomBytes } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SEED_ADMIN_EMAIL, type SeedData } from './seed-data.js';
@@ -23,46 +24,12 @@ function seedUrl(env: NodeJS.ProcessEnv, key: string, protocols: string[]) {
   return { raw, url };
 }
 
-/** Solo hosts oficiales identificables; sin DNS, red ni decodificacion de passwords. */
 function databaseProject(url: URL, key: string) {
-  const direct = /^db\.([a-z0-9]{20})\.supabase\.co$/.exec(url.hostname);
-  const pooler = /^aws-[0-9]+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(url.hostname);
-  let username: string;
   try {
-    username = decodeURIComponent(url.username);
-  } catch {
-    throw new SeedError(`${key}: usuario no valido.`);
+    return readDatabaseProject(url, key);
+  } catch (error) {
+    throw new SeedError((error as Error).message);
   }
-  const pooledUser = /^postgres\.([a-z0-9]{20})$/.exec(username);
-  if ((!direct || username !== 'postgres') && (!pooler || !pooledUser))
-    throw new SeedError(`${key}: host/usuario Supabase no autorizado.`);
-  if (url.pathname !== '/postgres' || url.hash || !['', '5432', '6543'].includes(url.port))
-    throw new SeedError(`${key}: base o puerto no permitido.`);
-  if (key === 'DIRECT_URL' && url.port === '6543')
-    throw new SeedError('DIRECT_URL requiere conexion directa o pooler de sesion (5432).');
-  // No permitir parametros que redirijan la conexion o seleccionen otro schema.
-  const allowedParams = new Set([
-    'pgbouncer',
-    'schema',
-    'sslmode',
-    'sslaccept',
-    'connection_limit',
-    'pool_timeout',
-    'connect_timeout',
-    'socket_timeout',
-    'statement_cache_size',
-  ]);
-  for (const name of url.searchParams.keys()) {
-    if (!allowedParams.has(name) || url.searchParams.getAll(name).length !== 1)
-      throw new SeedError(`${key}: parametro de conexion no permitido.`);
-  }
-  if (!['require', 'verify-ca', 'verify-full'].includes(url.searchParams.get('sslmode') ?? ''))
-    throw new SeedError(`${key}: se requiere una conexion TLS.`);
-  if (url.searchParams.has('sslaccept') && url.searchParams.get('sslaccept') !== 'strict')
-    throw new SeedError(`${key}: no se permite omitir la validacion del certificado TLS.`);
-  if (url.searchParams.has('schema') && url.searchParams.get('schema') !== 'public')
-    throw new SeedError(`${key}: solo se admite schema public.`);
-  return direct?.[1] ?? pooledUser![1]!;
 }
 
 /** Se valida antes de crear clientes o hacer la primera llamada de red. */

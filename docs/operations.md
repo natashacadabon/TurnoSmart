@@ -168,6 +168,41 @@ La expresión de endpoints locales admite `npipe:////./pipe/docker_engine`, `npi
 
 El ensayo aplica las nueve migraciones SQL originales a una base nueva y genera un historial sintético `_prisma_migrations` con sus checksums. Compara registros/hashes, propietarios, concesiones efectivas, RLS, migraciones y referencias después de recuperar. Esto acredita recuperación PostgreSQL del fixture; no una recuperación de Supabase Auth ni una ejecución de Prisma Migrate contra producción. Los tiempos observados se registran en la salida del ensayo y dependen del tamaño real de datos/infraestructura; no son un SLA.
 
+## FINAL-05C: barreras antes del primer merge y de la publicacion
+
+El primer merge incorpora codigo, no autoriza una publicacion. Conservar dev
+como default branch y un proyecto Vercel. Antes del merge, comprobar manualmente
+que Render Production tiene Auto-Deploy Off y que el publicador manual Production
+esta bloqueado hasta autorizar FINAL-05D. No apagar el publicador de Preview ni
+el Auto-Deploy de Render Dev. Vercel declara Git deployment deshabilitado; verificar
+que el proyecto real usa esa configuracion y que no existen hooks externos de
+Production. Estos controles de dashboard no se modifican desde este repositorio.
+
+Preparar ANTES de publicar los cambios las cuatro EXPECTED_* de GitHub, las dos
+EXPECTED_*_SUPABASE de cada backend y VERCEL_PRODUCTION_BRANCH=main como variable
+de repositorio. Los settings de Preview/Production y los secrets se resuelven en
+sus environments respectivos; los IDs del unico proyecto Vercel son los mismos.
+Sin las expectativas correctas, los nuevos controles fallan cerrados, incluido Dev.
+En Render usar Save only para preparar las variables sin iniciar una publicacion;
+no sincronizar el Blueprint ni elegir Save and deploy durante este cierre.
+
+El runtime remoto y la configuracion Prisma para comandos migrate reutilizan el
+parser de proyecto del seed. Se exige correspondencia de SUPABASE_URL, DATABASE_URL
+y DIRECT_URL si existe; migraciones remotas requieren DIRECT_URL directa/session,
+proyectos Dev/Production distintos, TLS y destino seleccionado explicitamente o
+derivado de la rama Render. No se cambio la allowlist ni la prohibicion del seed
+en Production. No ejecutar migraciones con otros comandos que omitan la configuracion
+Prisma del workspace. Las claves publishable opacas no pueden atribuirse offline a
+un proyecto; su validez se comprueba por Supabase Auth al usar el servicio.
+
+La promocion frontend exige health del backend del mismo SHA y readiness. Readiness
+prueba conectividad, no certifica por si sola todas las migraciones o compatibilidad
+funcional: validar el esquema y el recorrido real en la ventana de FINAL-05D.
+No usar console para simular correo en una base cloud ni activar el proveedor sin
+revisar pendientes. El rollback mantiene las restricciones de esquema documentadas
+arriba. La habilitacion del Auto-Deploy Production posterior al bootstrap requiere
+coordinar primero esquema y backend; no puede inferirse de un merge ni del CI verde.
+
 ## Recorrido de demo
 
 1. Iniciar sesión y completar onboarding.
