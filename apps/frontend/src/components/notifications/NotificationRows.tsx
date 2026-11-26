@@ -7,11 +7,9 @@ import type {
   NotificationReadResponse,
 } from '@turnosmart/shared';
 import { BadgeCheck, CalendarClock, CheckCircle2, CircleX, Clock3, UserX } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
-import { useUnsavedChanges } from '@/components/UnsavedChangesProvider';
 import { useNotifications } from './NotificationProvider';
 
 type CenterKind = NotificationKind;
@@ -110,9 +108,7 @@ function NotificationRow({
   onRead?: ((id: string, result: NotificationReadResponse) => void) | undefined;
   onNavigate?: (() => void) | undefined;
 }) {
-  const router = useRouter();
-  const { allowNavigation } = useUnsavedChanges();
-  const { markRead } = useNotifications();
+  const { markRead, openAppointment } = useNotifications();
   const { notify } = useToast();
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -121,18 +117,22 @@ function NotificationRow({
 
   async function act(navigate: boolean) {
     if (pending.current) return;
-    if (navigate && item.appointmentId && !allowNavigation()) return;
     pending.current = true;
     setBusy(true);
     try {
-      if (isUnread) {
-        const result = await markRead(item.id);
-        onRead?.(item.id, result);
-      }
+      const read = async () => {
+        if (isUnread) {
+          const result = await markRead(item.id);
+          onRead?.(item.id, result);
+        }
+      };
       if (navigate && item.appointmentId) {
-        onNavigate?.();
-        router.push('/appointments/' + item.appointmentId);
+        await openAppointment(item, async () => {
+          await read();
+          onNavigate?.();
+        });
       } else {
+        await read();
         notify('Notificación marcada como leída');
       }
     } catch (err) {
@@ -186,7 +186,7 @@ function NotificationRow({
         <Stack direction="row" sx={{ mt: 0.25, ml: -0.75, flexWrap: 'wrap' }}>
           {item.appointmentId ? (
             <Button size="small" disabled={busy} onClick={() => void act(true)}>
-              Ver turno
+              {item.kind === 'RESCHEDULE_REQUESTED' ? 'Revisar solicitud' : 'Ver turno'}
             </Button>
           ) : (
             <Typography variant="caption" color="text.secondary" sx={{ px: 0.75, py: 1 }}>

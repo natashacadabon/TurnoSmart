@@ -2,7 +2,7 @@
 
 ## Alcance implementado
 
-- **Personal.** La agenda muestra avisos de turnos próximos y el centro interno guarda avisos, incluidas solicitudes de cambio, con lecturas por perfil. La campana permanece fija en todas las pantallas privadas. La consulta cada cinco segundos mientras la pestaña está visible actualiza la agenda y muestra toasts nuevos, con reconciliación completa cada minuto o ante cambios para eventos tardíos. La carga inicial es silenciosa y los avisos repetidos se deduplican por ID; los toasts conservan la notificación sin leer.
+- **Personal.** La agenda muestra avisos de turnos próximos y el centro interno guarda avisos, incluidas solicitudes de cambio, con lecturas por perfil. La campana permanece a la derecha de un header global compacto en todas las pantallas privadas. La consulta cada cinco segundos mientras la pestaña está visible actualiza la agenda y muestra toasts nuevos, con reconciliación completa cada minuto o ante cambios para eventos tardíos. La carga inicial es silenciosa y los avisos repetidos se deduplican por ID. Los toasts se encolan y ofrecen navegación al turno; las solicitudes enfocan su revisión después de consultar el estado vigente. Cerrar o navegar desde el toast conserva la notificación sin leer y no resuelve solicitudes. Marcar una notificación como leída tampoco equivale a resolverla; la aceptación o el rechazo requieren las acciones explícitas existentes del detalle.
 - **Estado.** La confirmación se guarda aparte del estado operativo. Reprogramar conserva la confirmación histórica y, si cambia el horario, incrementa la versión para invalidar los enlaces anteriores. La API conserva la proyección `status: CONFIRMED` para un turno activo confirmado.
 - **Cliente.** En `/turno/gestionar`, un enlace firmado permite confirmar, cancelar según la política del negocio o solicitar un cambio. El pedido puede incluir un horario propuesto y un comentario. La consulta del enlace y de slots es de solo lectura. La ejecución requiere confirmación explícita.
 - **Solicitudes.** El negocio ve el pedido en el detalle y puede aprobarlo con un slot vigente o descartarlo. El turno conserva el horario original mientras se revisa el cambio. La decisión queda en el historial.
@@ -11,7 +11,7 @@
 
 ## Presentación de correos y vista previa
 
-Todas las clases de correo usan `renderAppointmentEmail`: reserva, confirmación, cancelación, reprogramación, rechazo y recordatorios de cualquier anticipación admitida. Los datos se agrupan en un bloque gris claro y la zona se muestra como ciudad y offset del turno, por ejemplo Buenos Aires (UTC-03:00). El footer identifica a TurnoSmart.
+Todas las clases de correo usan `renderAppointmentEmail` de `packages/shared/src/email-templates.ts`, reexportado por el módulo del backend: reserva, confirmación, cancelación, reprogramación, rechazo y recordatorios de cualquier anticipación admitida. Los datos se agrupan en un bloque gris claro y la zona se muestra como ciudad y offset del turno, por ejemplo Buenos Aires (UTC-03:00). El footer identifica a TurnoSmart.
 
 Los enlaces recibidos por la plantilla se muestran verticalmente, con tamaño uniforme: confirmar en verde, solicitar reprogramación con borde azul y cancelar con borde rojo, en ese orden. Solo se renderizan los enlaces suministrados por el backend según la acción y sus preferencias. El correo usa tablas, estilos inline y fuentes del sistema; la comprobación en clientes reales sigue siendo parte de la validación del entorno.
 

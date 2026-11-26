@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import { Bell } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useToast } from '@/components/ToastProvider';
 import { useUnsavedChanges } from '@/components/UnsavedChangesProvider';
 import { errorMessage } from '@/lib/api';
@@ -26,6 +26,7 @@ export function NotificationBell({ timezone }: { timezone: string }) {
   const { notify } = useToast();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const paper = useRef<HTMLDivElement>(null);
   const unread = recent?.unreadCount ?? 0;
 
   useEffect(() => () => setPopoverOpen(false), [setPopoverOpen]);
@@ -34,6 +35,7 @@ export function NotificationBell({ timezone }: { timezone: string }) {
     setBusy(true);
     try {
       await markAllRead();
+      paper.current?.focus();
       notify('Notificaciones marcadas como leídas');
       void refresh();
     } catch (err) {
@@ -51,13 +53,13 @@ export function NotificationBell({ timezone }: { timezone: string }) {
     <>
       <IconButton
         sx={{
-          width: 44,
-          height: 44,
+          width: 40,
+          height: 40,
           bgcolor: 'background.paper',
           border: 1,
           borderColor: 'divider',
           borderRadius: '12px',
-          boxShadow: 1,
+          boxShadow: 0,
           '&:hover': { bgcolor: 'action.hover' },
         }}
         aria-label={unread ? `Notificaciones (${unread} sin leer)` : 'Notificaciones'}
@@ -83,6 +85,8 @@ export function NotificationBell({ timezone }: { timezone: string }) {
         marginThreshold={12}
         slotProps={{
           paper: {
+            ref: paper,
+            tabIndex: -1,
             id: 'notifications-popover',
             role: 'dialog',
             'aria-labelledby': 'notifications-heading',

@@ -140,7 +140,7 @@ export function NotificationSettings({ editable }: { editable: boolean }) {
   return (
     <Box component="section" aria-labelledby="notification-settings-title">
       <Box component="form" onSubmit={submit} noValidate aria-busy={saving}>
-        <Stack spacing={2}>
+        <Stack spacing={{ xs: 2, lg: 1 }}>
           <Stack
             direction="row"
             spacing={1}

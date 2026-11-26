@@ -216,6 +216,7 @@ function renderAppointment(
 }
 
 interface Props {
+  scope: string;
   timezone: string;
   canBook: boolean;
   rules: AvailabilityRuleInput[];
@@ -228,6 +229,7 @@ interface Props {
 }
 
 export function AgendaCalendar({
+  scope,
   timezone,
   canBook,
   rules,
@@ -257,6 +259,20 @@ export function AgendaCalendar({
     [appointments, customerNames],
   );
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const storageKey = `turnosmart:agenda-view:${scope}:${timezone}`;
+  const [savedView] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null');
+      return saved?.day === businessDate(new Date(), timezone) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(saved.date) &&
+        new Date(saved.date + 'T12:00:00Z').toISOString().slice(0, 10) === saved.date &&
+        ['timeGridDay', 'timeGridWeek', 'dayGridMonth'].includes(saved.type)
+        ? (saved as ViewPosition)
+        : null;
+    } catch {
+      return null;
+    }
+  });
   const [initialPosition] = useState(() => agendaTodayPosition(rules, new Date(), timezone));
   const [viewPosition, setViewPosition] = useState<ViewPosition | null>(null);
   const [todayPosition, setTodayPosition] = useState<TodayPosition | null>(null);
@@ -269,7 +285,9 @@ export function AgendaCalendar({
   const error = result?.key === requestKey ? result.error : '';
   const week = useMemo(() => agendaHours(rules), [rules]);
   const hasHours = week.bounds !== null;
-  const initialView = !hasHours ? 'dayGridMonth' : compact ? 'timeGridDay' : 'timeGridWeek';
+  const initialView = !hasHours
+    ? 'dayGridMonth'
+    : (savedView?.type ?? (compact ? 'timeGridDay' : 'timeGridWeek'));
   const viewType = viewPosition?.type ?? initialView;
   const day =
     viewType === 'timeGridDay' ? (viewPosition?.date ?? initialPosition?.date) : undefined;
@@ -306,6 +324,14 @@ export function AgendaCalendar({
         type === 'timeGridDay' ? currentStart : instance.getDate(),
         timezone,
       );
+      try {
+        sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({ day: businessDate(new Date(), timezone), date, type }),
+        );
+      } catch {
+        /* Storage can be unavailable in private browsing. */
+      }
       const notification = ++version;
       // FullCalendar emite datesSet durante su commit. Publicar fuera de ese ciclo.
       queueMicrotask(() => {
@@ -325,7 +351,7 @@ export function AgendaCalendar({
       active = false;
       instance.off('datesSet', syncView);
     };
-  }, [timezone]);
+  }, [timezone, storageKey]);
 
   useLayoutEffect(() => {
     const instance = calendar.current?.getApi();
@@ -585,7 +611,7 @@ export function AgendaCalendar({
           locale={es}
           timeZone={timezone}
           initialView={initialView}
-          initialDate={initialPosition?.date}
+          initialDate={savedView?.date ?? initialPosition?.date}
           headerToolbar={
             !hasHours ? monthToolbar : viewType === 'dayGridMonth' ? toolbar : timeToolbar
           }

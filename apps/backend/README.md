@@ -10,6 +10,8 @@ API REST Express con TypeScript, Prisma 6.12 y PostgreSQL. `src/app.ts` construy
 | `ai`                                | Score heurístico de no-show y explicación bajo demanda con Gemini.                        |
 | `notifications`                     | Avisos internos y lecturas por perfil, preferencias, cola de correo y recordatorios.      |
 
+El módulo de correo reutiliza el render puro de `packages/shared/src/email-templates.ts` tanto en Resend como en la vista previa autenticada. La cola persiste solo los avisos habilitados y con destinatario válido; se solicita el procesamiento después del commit y de completar la respuesta HTTP. El polling de cinco segundos y Supabase Cron recuperan trabajos pendientes.
+
 Las rutas autenticadas usan el perfil para resolver negocio y permisos. Prisma filtra las lecturas y escrituras operativas por negocio. Las mutaciones de reserva y configuración relacionadas comparten el bloqueo de la fila `Business`. Los enlaces públicos validan su firma y vigencia antes de consultar o mutar un turno específico. Ver [arquitectura](../../docs/architecture.md) y [contratos de la API](../../docs/contracts.md).
 
 ## Desarrollo y validación

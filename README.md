@@ -4,7 +4,7 @@ TurnoSmart es un proyecto académico de SaaS para negocios que atienden con turn
 
 ## Estado del repositorio
 
-La descripción corresponde al código actual de la rama `feat/confirma-turnos`. La activación y las pruebas en cada entorno publicado se registran por separado en el [backlog](docs/backlog.md).
+La descripción corresponde al código actual del repositorio. La activación y las pruebas en cada entorno publicado se registran por separado en el [backlog](docs/backlog.md).
 
 | Área                 | Funcionalidad disponible en el código                                                                                                                                                                                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -29,7 +29,7 @@ La instalación limpia de migraciones y las suites locales ya se verificaron; lo
 
 ## Desarrollo local con Docker
 
-Requiere Node.js 22, npm y Docker Desktop con contenedores Linux. Ejecutar desde la raíz Git:
+Requiere Node.js 22.x (única versión soportada), npm y Docker Desktop con contenedores Linux. Las pruebas de backup incluidas en `npm test` requieren `pwsh` 7.4+ en PATH. Ver [validación de backups](docs/operations.md#backup). Ejecutar desde la raíz Git:
 
 ```sh
 npm ci
