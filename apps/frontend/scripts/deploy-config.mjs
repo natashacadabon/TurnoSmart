@@ -21,6 +21,117 @@ const publicNames = [
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
 ];
 
+// workflow_run y pull_request_target se ejecutan desde la rama predeterminada,
+// no desde la rama candidata. Fallar antes de solicitar el environment Preview.
+export function assertTrustedPreviewContext(context) {
+  assert(
+    ['workflow_run', 'pull_request_target'].includes(context.eventName) &&
+      context.payload.repository?.default_branch === 'dev' &&
+      context.ref === 'refs/heads/dev' &&
+      /^[a-f0-9]{40}$/.test(context.sha),
+    'Preview requiere dev como default branch y referencia confiable; revisar las restricciones de vercel-preview.',
+  );
+}
+
+export function previewOutcome(sha, results, url, alias) {
+  const required = ['select', 'settings', 'build', 'deploy'];
+  if (required.some((job) => !Object.hasOwn(results, job)))
+    return { status: 'fallido', message: 'Preview no publicado: informe de jobs incompleto.' };
+  if (Object.values(results).some((value) => ['failure', 'cancelled'].includes(value)))
+    return {
+      status: 'fallido',
+      message: 'Preview no publicado: revisar el job fallido o cancelado.',
+    };
+  if (!sha && required.slice(1).some((job) => results[job] !== 'skipped'))
+    return {
+      status: 'fallido',
+      message: 'Preview no publicado: jobs ejecutados sin una revisión seleccionada.',
+    };
+  if (!sha)
+    return {
+      status: 'omitido',
+      message:
+        'Sin revisión elegible: CD, evento, rama, origen, cambios o vigencia no cumplen los filtros.',
+    };
+  const validUrl = (value) => /^https:\/\/[a-z0-9-]+\.vercel\.app\/?$/i.test(value ?? '');
+  if (
+    !/^[a-f0-9]{40}$/.test(sha) ||
+    Object.values(results).some((value) => value !== 'success') ||
+    !validUrl(alias) ||
+    (url && !validUrl(url))
+  )
+    return {
+      status: 'fallido',
+      message: 'Preview no publicado: faltan jobs aprobados o un alias verificado.',
+    };
+  return {
+    status: 'publicado',
+    message: url
+      ? 'Nuevo Preview publicado con alias verificado.'
+      : 'Preview existente verificado y reutilizado; no se creó otro deployment.',
+  };
+}
+
+// Solo GET; no registra respuestas, identidad personal ni credenciales.
+export async function verifyVercelAccess(env, request = fetch) {
+  assert(env.VERCEL_TOKEN, 'Falta VERCEL_TOKEN');
+  assert(
+    /^team_[a-z0-9]+$/i.test(env.VERCEL_ORG_ID),
+    'VERCEL_ORG_ID debe ser un ID de equipo team_...',
+  );
+  assert(
+    /^prj_[a-z0-9]+$/i.test(env.VERCEL_PROJECT_ID),
+    'VERCEL_PROJECT_ID debe ser un ID prj_...',
+  );
+  assert(['preview', 'production'].includes(env.DEPLOY_TARGET), 'DEPLOY_TARGET inválido');
+  async function get(path, label, teamScoped = true) {
+    const url = new URL(path, 'https://api.vercel.com');
+    if (teamScoped) url.searchParams.set('teamId', env.VERCEL_ORG_ID);
+    let response;
+    try {
+      response = await request(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${env.VERCEL_TOKEN}` },
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      throw new Error(`Vercel: no se pudo verificar ${label} (red, timeout o redirect).`);
+    }
+    assert(
+      response.ok,
+      `Vercel: no se pudo verificar ${label} (HTTP ${response.status}). No ampliar permisos sin diagnosticar el token.`,
+    );
+    try {
+      return await response.json();
+    } catch {
+      throw new Error(`Vercel: respuesta inválida al verificar ${label}.`);
+    }
+  }
+  const project = await get(`/v9/projects/${env.VERCEL_PROJECT_ID}`, 'acceso al proyecto');
+  assert(
+    project?.id === env.VERCEL_PROJECT_ID && project.accountId === env.VERCEL_ORG_ID,
+    'El proyecto Vercel no corresponde al equipo esperado',
+  );
+  const team = await get(`/v2/teams/${env.VERCEL_ORG_ID}`, 'equipo');
+  assert(
+    team?.id === env.VERCEL_ORG_ID &&
+      typeof team.slug === 'string' &&
+      /^[a-z0-9-]+$/i.test(team.slug),
+    'Equipo Vercel inválido',
+  );
+  if (env.DEPLOY_TARGET === 'production') {
+    // CLI 65.9.0 consulta /v2/user incluso al resolver --scope. Un token puede
+    // acceder al proyecto y aun así fallar aquí; detectarlo antes de subir nada.
+    const identity = await get('/v2/user', 'identidad requerida por CLI 65.9.0 (/v2/user)', false);
+    assert(
+      typeof identity.user?.id === 'string' && identity.user.id.length > 0,
+      'Vercel no devolvió una identidad de usuario compatible con CLI 65.9.0',
+    );
+  }
+  return { teamId: team.id, teamSlug: team.slug, projectId: project.id };
+}
+
 // No filtrar por conclusion: un exito anterior no debe ocultar un run nuevo fallido/en curso.
 export function assertSuccessfulCi(runs, sha) {
   const latest = runs
@@ -422,5 +533,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     );
   else if (command === 'backend')
     await verifyProductionBackend(process.env, process.env.GITHUB_SHA);
-  else throw new Error('Comando de verificacion desconocido');
+  else if (command === 'vercel-access') {
+    await verifyVercelAccess(process.env);
+    console.log(
+      'Equipo y proyecto Vercel verificados por lectura; no se verificó una promoción real.',
+    );
+  } else throw new Error('Comando de verificacion desconocido');
 }

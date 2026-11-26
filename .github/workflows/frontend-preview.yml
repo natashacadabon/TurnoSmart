@@ -36,6 +36,7 @@ jobs:
       - name: Checkout trusted scripts
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Select eligible revision
@@ -43,7 +44,8 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const { selectFrontendPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const { assertTrustedPreviewContext, selectFrontendPreview } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            assertTrustedPreviewContext(context);
             const preview = await selectFrontendPreview(github, context);
             if (!preview) return core.info('Sin Preview para esta revision.');
             const pr = preview.payload.pull_request;
@@ -73,6 +75,7 @@ jobs:
       - name: Checkout trusted scripts
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -90,6 +93,7 @@ jobs:
           EXPECTED_PRODUCTION_SUPABASE: ${{ vars.EXPECTED_PRODUCTION_SUPABASE }}
         run: |
           : "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}" "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_PROJECT_ID:?Configurar VERCEL_PROJECT_ID}"
+          node apps/frontend/scripts/deploy-config.mjs vercel-access
           npx --yes "vercel@$VERCEL_CLI_VERSION" pull --yes --environment=preview --git-branch "$HEAD_REF" --token="$VERCEL_TOKEN"
           node apps/frontend/scripts/deploy-config.mjs prepare
           # vercel pull guarda secretos (p. ej. VERCEL_OIDC_TOKEN); prepare los descarta y aqui se exige.
@@ -164,6 +168,9 @@ jobs:
   # de la PR se trata como datos y se sube con el proyecto y la PR resueltos aqui.
   deploy:
     needs: [select, build]
+    outputs:
+      url: ${{ steps.upload.outputs.url }}
+      alias: ${{ steps.preview-alias.outputs.url || steps.revision.outputs.existing }}
     concurrency:
       group: vercel-preview-mutation-${{ needs.select.outputs.pr || 'dev' }}
       queue: max
@@ -186,6 +193,7 @@ jobs:
       - name: Checkout trusted scripts
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -262,3 +270,29 @@ jobs:
         run: |
           echo "Frontend (preview): $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
           echo "Preview estable: $STABLE_PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    if: ${{ always() }}
+    needs: [select, settings, build, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Report Preview outcome
+        uses: actions/github-script@v8
+        env:
+          PREVIEW_SHA: ${{ needs.select.outputs.sha }}
+          PREVIEW_RESULTS: ${{ toJSON(needs) }}
+          PREVIEW_URL: ${{ needs.deploy.outputs.url }}
+          PREVIEW_ALIAS: ${{ needs.deploy.outputs.alias }}
+        with:
+          script: |
+            const { previewOutcome } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const results = Object.fromEntries(Object.entries(JSON.parse(process.env.PREVIEW_RESULTS)).map(([job, value]) => [job, value.result]));
+            const outcome = previewOutcome(process.env.PREVIEW_SHA, results, process.env.PREVIEW_URL, process.env.PREVIEW_ALIAS);
+            await core.summary.addHeading(`Preview: ${outcome.status}`).addRaw(outcome.message).write();
+            if (outcome.status === 'fallido') core.setFailed(outcome.message);

@@ -102,6 +102,11 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Verify Vercel identity and project access
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node apps/frontend/scripts/deploy-config.mjs vercel-access
+
       - name: Pull Vercel settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -184,7 +189,7 @@ jobs:
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes "vercel@$VERCEL_CLI_VERSION" promote "$DEPLOYMENT_URL" --yes --token="$VERCEL_TOKEN"
+        run: npx --yes "vercel@$VERCEL_CLI_VERSION" promote "$DEPLOYMENT_URL" --yes --scope="${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" --token="${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}"
 
       - name: Report deployment URL
         env:
