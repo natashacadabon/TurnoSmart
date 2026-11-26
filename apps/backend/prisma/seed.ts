@@ -48,25 +48,25 @@ async function main() {
         '[seed] Comprobacion de tablas y permisos de lectura (sin aplicar migraciones).',
       );
       await seedStep('migrations', () => checkSeedSchema(prisma));
-      const owner = await ensureSeedUsers(
+      const admin = await ensureSeedUsers(
         adminClient.auth.admin,
         fixtures.accounts.filter((a) => a.email === SEED_ADMIN_EMAIL),
         env.password,
       );
-      await verifyAdminLogin(loginClient.auth, env.password, owner[0]!.id);
-      const others = await ensureSeedUsers(
+      await verifyAdminLogin(loginClient.auth, env.password, admin[0]!.id);
+      const owners = await ensureSeedUsers(
         adminClient.auth.admin,
         fixtures.accounts.filter((a) => a.email !== SEED_ADMIN_EMAIL),
         env.password,
       );
-      const counts = await seedDomain(prisma, fixtures, [...owner, ...others]);
+      const counts = await seedDomain(prisma, fixtures, [...admin, ...owners]);
       await seedStep('profiles', async () => {
-        const profile = await prisma.profile.findUnique({ where: { id: owner[0]!.id } });
-        if (profile?.role !== 'OWNER' || profile.businessId !== fixtures.businesses[0]!.id)
-          throw new SeedError('No se pudo verificar el perfil OWNER del administrador.');
+        const profile = await prisma.profile.findUnique({ where: { id: admin[0]!.id } });
+        if (profile?.role !== 'ADMIN' || profile.businessId !== null)
+          throw new SeedError('No se pudo verificar el perfil ADMIN global.');
       });
-      console.info('Seed completado. Login Auth y perfil OWNER verificados.');
-      console.info(`Administrador: ${SEED_ADMIN_EMAIL}`);
+      console.info('Seed completado. Login Auth y perfil ADMIN global verificados.');
+      console.info(`ADMIN global: ${SEED_ADMIN_EMAIL}`);
       console.info(JSON.stringify(counts));
     },
     () => prisma.$disconnect(),

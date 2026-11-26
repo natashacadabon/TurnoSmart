@@ -1,6 +1,6 @@
 # API de servicios, disponibilidad y slots
 
-Las rutas usan el token de Supabase y el negocio del perfil. OWNER, ADMIN y STAFF pueden leer. OWNER y ADMIN pueden editar servicios y disponibilidad. Los errores siguen el [contrato general](contracts.md#errores) y los esquemas viven en [shared](../packages/shared/src).
+Las rutas usan el token de Supabase y el negocio del perfil OWNER. ADMIN es global y no puede acceder a servicios ni disponibilidad. OWNER puede leer y editar estos recursos. Los errores siguen el [contrato general](contracts.md#errores) y los esquemas viven en [shared](../packages/shared/src).
 
 | Método y ruta                 | Entrada                                                                                        | Respuesta                                                            |
 | ----------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
