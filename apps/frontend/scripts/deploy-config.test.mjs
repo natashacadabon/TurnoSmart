@@ -17,6 +17,9 @@ import {
   verifyStandaloneOutput,
   verifyPublished,
   verifyProductionBackend,
+  verifyVercelAccess,
+  assertTrustedPreviewContext,
+  previewOutcome,
 } from './deploy-config.mjs';
 import { assignPreviewAlias } from './preview-alias.mjs';
 
@@ -43,6 +46,180 @@ function fixture(t) {
   }
   return { root, write };
 }
+
+test('Los contextos privilegiados Preview exigen la referencia Dev confiable en ambos eventos', () => {
+  for (const eventName of ['workflow_run', 'pull_request_target']) {
+    const context = {
+      eventName,
+      ref: 'refs/heads/dev',
+      sha: 'a'.repeat(40),
+      payload: { repository: { default_branch: 'dev' } },
+    };
+    assert.doesNotThrow(() => assertTrustedPreviewContext(context));
+    for (const change of [
+      { ref: 'refs/heads/feat/untrusted' },
+      { ref: 'refs/pull/23/merge' },
+      { ref: 'refs/heads/main' },
+      { ref: 'refs/tags/dev' },
+      { sha: 'head' },
+      { eventName: 'pull_request' },
+      { eventName: 'push' },
+      { payload: { repository: { default_branch: 'main' } } },
+      { payload: { repository: {} } },
+    ])
+      assert.throws(
+        () => assertTrustedPreviewContext({ ...context, ...change }),
+        /referencia confiable/,
+      );
+  }
+});
+
+test('El resumen distingue publicado, reutilizado, omitido y fallido sin falsos positivos', () => {
+  const sha = 'a'.repeat(40);
+  const results = { select: 'success', settings: 'success', build: 'success', deploy: 'success' };
+  const url = 'https://fixture.vercel.app';
+  const alias = 'https://turnosmart-dev-42.vercel.app';
+  assert.deepEqual(previewOutcome(sha, results, url, alias), {
+    status: 'publicado',
+    message: 'Nuevo Preview publicado con alias verificado.',
+  });
+  assert.match(previewOutcome(sha, results, '', alias).message, /reutilizado/);
+  assert.equal(
+    previewOutcome('', { ...results, settings: 'skipped', build: 'skipped', deploy: 'skipped' })
+      .status,
+    'omitido',
+  );
+  assert.equal(
+    previewOutcome('', Object.fromEntries(Object.keys(results).map((job) => [job, 'skipped'])))
+      .status,
+    'omitido',
+  );
+  for (const [candidate, jobs, output, stable] of [
+    ['', results, url, alias],
+    ['', { ...results, select: 'failure' }],
+    [sha, { ...results, settings: 'failure' }],
+    [sha, { ...results, build: 'cancelled' }],
+    [sha, { ...results, deploy: 'skipped' }],
+    [sha, results, url, ''],
+    ['head', results, url, alias],
+    [sha, {}, url, alias],
+    [sha, results, 'https://fixture.vercel.app/?token=secret', alias],
+    [sha, results, url, 'https://unexpected.example.com'],
+  ])
+    assert.equal(previewOutcome(candidate, jobs, output, stable).status, 'fallido');
+});
+
+test('El preflight Vercel comprueba proyecto, equipo e identidad por GET sin exponer errores del proveedor', async () => {
+  const source = { ...env, VERCEL_TOKEN: 'fixture-secret' };
+  const calls = [];
+  const project = { id: env.VERCEL_PROJECT_ID, accountId: env.VERCEL_ORG_ID };
+  const team = { id: env.VERCEL_ORG_ID, slug: 'natcads-projects' };
+  const bodies = {
+    [`/v9/projects/${env.VERCEL_PROJECT_ID}`]: project,
+    [`/v2/teams/${env.VERCEL_ORG_ID}`]: team,
+    '/v2/user': { user: { id: 'fixture-user' } },
+  };
+  const request = async (url, options) => {
+    calls.push(url.pathname);
+    assert.equal(url.origin, 'https://api.vercel.com');
+    assert.equal(
+      url.searchParams.get('teamId'),
+      url.pathname === '/v2/user' ? null : env.VERCEL_ORG_ID,
+    );
+    assert.equal(options.method, 'GET');
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.Authorization, 'Bearer fixture-secret');
+    assert(options.signal instanceof AbortSignal);
+    return Response.json(bodies[url.pathname]);
+  };
+  assert.deepEqual(await verifyVercelAccess(source, request), {
+    teamId: team.id,
+    teamSlug: team.slug,
+    projectId: project.id,
+  });
+  assert.deepEqual(calls, Object.keys(bodies));
+  calls.length = 0;
+  await verifyVercelAccess({ ...source, DEPLOY_TARGET: 'preview' }, request);
+  assert(!calls.includes('/v2/user'), 'Preview no requiere acceso a la identidad personal');
+
+  for (const status of [401, 403, 404, 429, 500]) {
+    await assert.rejects(
+      () => verifyVercelAccess(source, async () => new Response('fixture-secret', { status })),
+      (error) => {
+        assert.match(error.message, new RegExp(`HTTP ${status}`));
+        assert(!error.message.includes('fixture-secret'));
+        return true;
+      },
+    );
+  }
+  await assert.rejects(
+    () =>
+      verifyVercelAccess(source, async (url) =>
+        url.pathname === '/v2/user'
+          ? new Response(null, { status: 404 })
+          : Response.json(bodies[url.pathname]),
+      ),
+    /identidad requerida.*\/v2\/user.*HTTP 404/,
+  );
+  await assert.rejects(
+    () =>
+      verifyVercelAccess(source, async () => {
+        throw new Error('fixture-secret');
+      }),
+    /red, timeout o redirect/,
+  );
+  await assert.rejects(
+    () => verifyVercelAccess(source, async () => new Response('not-json')),
+    /respuesta inválida/,
+  );
+  for (const override of [
+    { ...project, id: 'prj_other' },
+    { ...project, accountId: 'team_other' },
+  ])
+    await assert.rejects(
+      () => verifyVercelAccess(source, async () => Response.json(override)),
+      /no corresponde/,
+    );
+  await assert.rejects(
+    () =>
+      verifyVercelAccess(source, async (url) =>
+        Response.json(
+          url.pathname.startsWith('/v2/teams')
+            ? { ...team, id: 'team_other' }
+            : bodies[url.pathname],
+        ),
+      ),
+    /Equipo Vercel inválido/,
+  );
+  for (const slug of [undefined, null, '', '../another-team'])
+    await assert.rejects(
+      () =>
+        verifyVercelAccess(source, async (url) =>
+          Response.json(
+            url.pathname.startsWith('/v2/teams') ? { ...team, slug } : bodies[url.pathname],
+          ),
+        ),
+      /Equipo Vercel inválido/,
+    );
+  await assert.rejects(
+    () =>
+      verifyVercelAccess(source, async (url) =>
+        Response.json(url.pathname === '/v2/user' ? { user: null } : bodies[url.pathname]),
+      ),
+    /identidad de usuario compatible/,
+  );
+  for (const override of [
+    { VERCEL_TOKEN: '' },
+    { VERCEL_ORG_ID: 'natcads-projects' },
+    { VERCEL_PROJECT_ID: 'another-project' },
+    { DEPLOY_TARGET: 'invalid' },
+  ])
+    await assert.rejects(() =>
+      verifyVercelAccess({ ...source, ...override }, async () =>
+        assert.fail('No debe consultar con configuración inválida'),
+      ),
+    );
+});
 
 test('Production manual exige main y Render Dev conserva su configuración', () => {
   const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
@@ -96,6 +273,7 @@ test('Production manual exige main y Render Dev conserva su configuración', () 
   );
   const script = deploy.steps.map((step) => step.run ?? '').join('\n');
   const commands = [
+    'deploy-config.mjs vercel-access',
     'pull --yes',
     'deploy-config.mjs prepare',
     'build "${flags[@]}" --output .vercel/output',
@@ -223,7 +401,7 @@ test('Preview descarga settings y publica sin consultar Production; Production c
         printf '%s\\n' "$*" >> commands.log
         if [[ "$*" == *' deploy '* ]]; then printf '%s\\n' 'https://fixture.vercel.app'; fi
       }
-      node() { test "$*" = 'apps/frontend/scripts/deploy-config.mjs prepare'; }
+      node() { [[ "$*" == 'apps/frontend/scripts/deploy-config.mjs prepare' || "$*" == 'apps/frontend/scripts/deploy-config.mjs vercel-access' ]]; }
       curl() { echo 'Consulta remota inesperada' >&2; return 97; }
       jq() { return 97; }
     `;
@@ -260,6 +438,7 @@ test('Preview descarga settings y publica sin consultar Production; Production c
     assert.equal(result.status, 0, result.stderr || result.error?.message);
     const commands = readFileSync(join(root, 'commands.log'), 'utf8').trim().split('\n');
     assert.equal(commands.length, 2);
+    for (const command of commands) assert.match(command, /--token=fixture-token(?:\s|$)/);
     assert.match(commands[0], new RegExp(`pull --yes --environment=${target}`));
     assert.match(commands[1], /deploy --prebuilt --archive=tgz --yes/);
     if (target === 'preview') {
@@ -285,6 +464,79 @@ test('Preview descarga settings y publica sin consultar Production; Production c
       .if,
     "env.DEPLOY_TARGET == 'production'",
   );
+});
+
+test('Promote usa el mismo token y equipo que upload; falla si faltan o la CLI rechaza', (t) => {
+  const {
+    jobs: { deploy },
+  } = yaml.load(readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'));
+  const promote = deploy.steps.find((step) => step.name === 'Promote Production');
+  const upload = deploy.steps.find((step) => step.id === 'upload');
+  const pull = deploy.steps.find((step) => step.name === 'Pull Vercel settings');
+  assert.equal(deploy.env.VERCEL_CLI_VERSION, '65.9.0');
+  assert.equal(deploy.env.VERCEL_ORG_ID, '${{ vars.VERCEL_ORG_ID }}');
+  assert.equal(promote.env.VERCEL_TOKEN, '${{ secrets.VERCEL_TOKEN }}');
+  assert.equal(upload.env.VERCEL_TOKEN, promote.env.VERCEL_TOKEN);
+  assert.equal(pull.env.VERCEL_TOKEN, promote.env.VERCEL_TOKEN);
+  const access = deploy.steps.find(
+    (step) => step.name === 'Verify Vercel identity and project access',
+  );
+  assert.equal(access.env.VERCEL_TOKEN, promote.env.VERCEL_TOKEN);
+  assert(deploy.steps.indexOf(access) < deploy.steps.indexOf(pull));
+  assert.equal(promote.env.DEPLOYMENT_URL, '${{ steps.upload.outputs.url }}');
+  const gitBash = join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe');
+  const bash = process.platform === 'win32' && existsSync(gitBash) ? gitBash : 'bash';
+  for (const [org, token, cliExit, expected] of [
+    ['team_fixture', 'fixture-token', '0', 0],
+    ['', 'fixture-token', '0', 1],
+    ['team_fixture', '', '0', 1],
+    ['team_fixture', 'fixture-token', '1', 1],
+  ]) {
+    const { root } = fixture(t);
+    const result = spawnSync(
+      bash,
+      [
+        '--noprofile',
+        '--norc',
+        '-euo',
+        'pipefail',
+        '-c',
+        `
+      npx() { printf '%s\\n' "$@" > args.log; return "$CLI_EXIT"; }
+      ${promote.run}
+    `,
+      ],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          VERCEL_ORG_ID: org,
+          VERCEL_TOKEN: token,
+          VERCEL_CLI_VERSION: '65.9.0',
+          DEPLOYMENT_URL: 'https://fixture.vercel.app',
+          CLI_EXIT: cliExit,
+        },
+        encoding: 'utf8',
+        timeout: 10000,
+      },
+    );
+    assert.ifError(result.error);
+    assert.equal(result.status, expected, result.stderr);
+    if (!org || !token) {
+      assert(!existsSync(join(root, 'args.log')));
+      assert.match(result.stderr, /Configurar VERCEL_(ORG_ID|TOKEN)/);
+    } else {
+      assert.deepEqual(readFileSync(join(root, 'args.log'), 'utf8').trim().split('\n'), [
+        '--yes',
+        'vercel@65.9.0',
+        'promote',
+        'https://fixture.vercel.app',
+        '--yes',
+        '--scope=team_fixture',
+        '--token=fixture-token',
+      ]);
+    }
+  }
 });
 
 test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', async () => {
@@ -406,7 +658,7 @@ test('Preview separa codigo de la PR, secretos y definicion del workflow', () =>
   assert.deepEqual(preview.permissions, { contents: 'read' });
   assert(!text.includes('pull_request_target'));
   assert(!text.includes('VERCEL_AUTOMATION_BYPASS'));
-  assert.deepEqual(Object.keys(preview.jobs), ['select', 'settings', 'build', 'deploy']);
+  assert.deepEqual(Object.keys(preview.jobs), ['select', 'settings', 'build', 'deploy', 'report']);
   const { select, settings, build, deploy } = preview.jobs;
   assert(select.if.includes("github.event.workflow_run.conclusion == 'success'"));
   assert(select.if.includes("github.event.workflow_run.event == 'pull_request'"));
@@ -422,10 +674,23 @@ test('Preview separa codigo de la PR, secretos y definicion del workflow', () =>
   for (const job of [select, settings, deploy]) {
     assert.equal(
       checkout(job).with.ref,
-      undefined,
+      '${{ github.sha }}',
       'Scripts con secretos salen de la rama confiable',
     );
   }
+  assert(
+    select.steps
+      .find((step) => step.id === 'select')
+      .with.script.includes('assertTrustedPreviewContext(context)'),
+  );
+  const report = preview.jobs.report;
+  assert.equal(report.if, '${{ always() }}');
+  assert.deepEqual(report.needs, ['select', 'settings', 'build', 'deploy']);
+  assert.equal(report.environment, undefined);
+  assert.equal(checkout(report).with.ref, '${{ github.sha }}');
+  assert(!JSON.stringify(report).includes('secrets.'));
+  assert(report.steps[1].with.script.includes('previewOutcome'));
+  assert(report.steps[1].with.script.includes("outcome.status === 'fallido'"));
   for (const job of [select, settings, build, deploy])
     assert.equal(checkout(job).with['persist-credentials'], false);
   for (const job of [settings, deploy]) assert.equal(job.environment, 'vercel-preview');
