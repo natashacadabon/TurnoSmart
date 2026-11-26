@@ -40,14 +40,20 @@ jobs:
           FRONTEND_TARGET: ${{ inputs.frontend_target }}
           API_TARGET: ${{ inputs.target }}
           HOBBY_ELIGIBLE: ${{ inputs.hobby_eligible }}
-          PRODUCTION_BRANCH: ${{ vars.VERCEL_PRODUCTION_BRANCH || 'dev' }}
+          PRODUCTION_BRANCH: ${{ vars.VERCEL_PRODUCTION_BRANCH }}
         run: |
           test "$FRONTEND_TARGET" = "vercel" || { echo "Azure frontend bloqueado: faltan infraestructura, ZIP standalone y startup comprobados."; exit 1; }
           test "$HOBBY_ELIGIBLE" = "true" || { echo "Confirmar elegibilidad Hobby antes de desplegar; no hay upgrade automatico."; exit 1; }
-          if [[ "$API_TARGET" == azure ]]; then
-            PRODUCTION_BRANCH=dev
-          fi
-          test "$GITHUB_REF" = "refs/heads/$PRODUCTION_BRANCH" || { echo "Ref no autorizada para este deploy."; exit 1; }
+          case "$API_TARGET" in
+            render)
+              test "${PRODUCTION_BRANCH:-}" = "main" || { echo "Configurar VERCEL_PRODUCTION_BRANCH=main como variable del repositorio."; exit 1; }
+              test "${GITHUB_REF:-}" = "refs/heads/main" || { echo "Production solo puede publicarse desde main."; exit 1; }
+              ;;
+            azure)
+              test "${GITHUB_REF:-}" = "refs/heads/dev" || { echo "El checkpoint Azure solo admite dev como Preview."; exit 1; }
+              ;;
+            *) echo "Proveedor de API no autorizado."; exit 1 ;;
+          esac
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}

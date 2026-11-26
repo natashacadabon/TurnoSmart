@@ -43,7 +43,7 @@ function fixture(t) {
   return { root, write };
 }
 
-test('Production manual y Render quedan limitados a dev y sus dependencias', () => {
+test('Production manual exige main y Render Dev conserva su configuración', () => {
   const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
   const workflow = yaml.load(
     readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
@@ -112,6 +112,83 @@ test('Production manual y Render quedan limitados a dev y sus dependencias', () 
   }
 });
 
+test('Production sólo autoriza main explícita aunque Dev tenga CI aprobada; Azure sigue en Preview', () => {
+  const workflow = yaml.load(
+    readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
+  );
+  const gate = workflow.jobs.preflight.steps[0];
+  assert.equal(workflow.jobs.preflight.environment, undefined);
+  const gitBash = join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe');
+  const bash = process.platform === 'win32' && existsSync(gitBash) ? gitBash : 'bash';
+  // Una CI aprobada no debe conceder permiso para publicar desde otra rama.
+  assertSuccessfulCi(
+    [
+      {
+        head_sha: 'approved',
+        event: 'push',
+        status: 'completed',
+        conclusion: 'success',
+        run_number: 1,
+      },
+    ],
+    'approved',
+  );
+  for (const [ref, branch, target, allowed] of [
+    ['refs/heads/main', 'main', 'render', true],
+    ['refs/heads/dev', 'dev', 'render', false],
+    ['refs/heads/dev', 'main', 'render', false],
+    ['refs/heads/main', 'dev', 'render', false],
+    ['refs/heads/main', undefined, 'render', false],
+    ['refs/heads/dev', undefined, 'render', false],
+    ['refs/heads/main', '', 'render', false],
+    ['refs/heads/main', ' main', 'render', false],
+    ['refs/heads/main', 'main ', 'render', false],
+    ['refs/heads/main', 'main\n', 'render', false],
+    ['refs/heads/main', 'refs/heads/main', 'render', false],
+    ['refs/heads/feat/main', 'main', 'render', false],
+    ['refs/tags/main', 'main', 'render', false],
+    ['refs/pull/42/merge', 'main', 'render', false],
+    ['', 'main', 'render', false],
+    ['refs/heads/main', 'main', '', false],
+    ['refs/heads/main', 'main', 'invalid', false],
+    ['refs/heads/dev', undefined, 'azure', true],
+    ['refs/heads/dev', 'main', 'azure', true],
+    ['refs/heads/main', 'main', 'azure', false],
+    ['refs/tags/dev', 'main', 'azure', false],
+  ]) {
+    const source = {
+      ...process.env,
+      FRONTEND_TARGET: 'vercel',
+      HOBBY_ELIGIBLE: 'true',
+      API_TARGET: target,
+      GITHUB_REF: ref,
+    };
+    if (branch === undefined) delete source.PRODUCTION_BRANCH;
+    else source.PRODUCTION_BRANCH = branch;
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-euo', 'pipefail', '-c', gate.run], {
+      env: source,
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    assert.ifError(result.error);
+    assert.equal(
+      result.status === 0,
+      allowed,
+      JSON.stringify({ ref, branch, target, status: result.status, error: result.stderr }),
+    );
+  }
+  assert.equal(gate.env.PRODUCTION_BRANCH, '${{ vars.VERCEL_PRODUCTION_BRANCH }}');
+  // El checkpoint conserva los scopes Preview existentes; no recibe el target Production.
+  assert.equal(
+    workflow.jobs.deploy.environment,
+    "vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}",
+  );
+  assert.equal(
+    workflow.jobs.deploy.env.DEPLOY_TARGET,
+    "${{ inputs.target == 'azure' && 'preview' || 'production' }}",
+  );
+});
+
 test('Preview descarga settings y publica sin consultar Production; Production conserva sus flags', (t) => {
   const automatic = yaml.load(
     readFileSync(join(repo, '.github/workflows/frontend-preview.yml'), 'utf8'),
@@ -161,8 +238,8 @@ test('Preview descarga settings y publica sin consultar Production; Production c
             VERCEL_ORG_ID: 'team_fixture',
             VERCEL_PROJECT_ID: 'prj_fixture',
             VERCEL_CLI_VERSION: '65.9.0',
-            HEAD_REF: 'dev',
-            GITHUB_REF_NAME: 'dev',
+            HEAD_REF: target === 'production' ? 'main' : 'dev',
+            GITHUB_REF_NAME: target === 'production' ? 'main' : 'dev',
             GITHUB_HEAD_REF: '',
             GITHUB_REPOSITORY_ID: '42',
             PR_NUMBER: '',
