@@ -325,7 +325,10 @@ export function AgendaReminders({
               )}
               <Stack direction="row" useFlexGap sx={{ gap: 0.5, flexWrap: 'wrap' }}>
                 <Button size="small" disabled={busy} onClick={() => void openAppointment()}>
-                  Ver turno
+                  {appointment.status === 'SCHEDULED' &&
+                  appointment.confirmationStatus !== 'CONFIRMED'
+                    ? 'Gestionar turno'
+                    : 'Ver turno'}
                 </Button>
                 <Button
                   size="small"

@@ -1,6 +1,8 @@
 'use client';
 
 import type {
+  AppointmentDto,
+  NotificationDto,
   NotificationReadResponse,
   NotificationsResponse,
   UpcomingNotification,
@@ -15,6 +17,8 @@ import {
   type ReactNode,
 } from 'react';
 import { api, errorMessage } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { useUnsavedChanges } from '@/components/UnsavedChangesProvider';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 
@@ -29,6 +33,7 @@ export type CenterNotifications = NotificationsResponse;
 interface Center {
   recent: CenterNotifications | null;
   appointmentRevision: number;
+  navigationRevision: number;
   popoverOpen: boolean;
   setPopoverOpen(open: boolean): void;
   error: string;
@@ -36,17 +41,25 @@ interface Center {
   markRead(id: string): Promise<NotificationReadResponse>;
   markAllRead(): Promise<string>;
   syncUpcoming(): Promise<UpcomingNotification[]>;
+  openAppointment(item: NotificationDto, beforeNavigate?: () => Promise<void>): Promise<boolean>;
 }
 
 const Context = createContext<Center | null>(null);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { me } = useAuth();
-  const { notify } = useToast();
+  const { notify, setPaused } = useToast();
+  const router = useRouter();
+  const { allowNavigation } = useUnsavedChanges();
   const timezone = me?.onboarded ? me.business.timezone : 'UTC';
   const [recent, setRecent] = useState<CenterNotifications | null>(null);
   const [appointmentRevision, setAppointmentRevision] = useState(0);
+  const [navigationRevision, setNavigationRevision] = useState(0);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  useEffect(() => {
+    setPaused(popoverOpen);
+    return () => setPaused(false);
+  }, [popoverOpen, setPaused]);
   const seen = useRef<Set<string> | null>(null);
   const observedUnread = useRef<number | null>(null);
   const reconciledAt = useRef(0);
@@ -62,6 +75,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     listing.current = null;
   }, []);
   useEffect(() => invalidate, [invalidate]);
+
+  const openAppointment = useCallback(
+    async (item: NotificationDto, beforeNavigate?: () => Promise<void>) => {
+      if (!item.appointmentId || !allowNavigation()) return false;
+      if (beforeNavigate) await beforeNavigate();
+      setNavigationRevision((value) => value + 1);
+      setAppointmentRevision((value) => value + 1);
+      const target = '/appointments/' + item.appointmentId;
+      router.push(
+        item.kind === 'RESCHEDULE_REQUESTED'
+          ? target +
+              '?solicitud=' +
+              encodeURIComponent(item.createdAt) +
+              '#solicitud-reprogramacion'
+          : target,
+      );
+      return true;
+    },
+    [allowNavigation, router],
+  );
 
   const refresh = useCallback(
     (force = false) => {
@@ -89,6 +122,53 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           }
           if (version !== revision.current) return;
           const added = known ? observed.filter((item) => !known.has(item.id)) : [];
+          const format = new Intl.DateTimeFormat('es-AR', {
+            dateStyle: 'short',
+            timeStyle: 'short',
+            hourCycle: 'h23',
+            timeZone: timezone,
+          });
+          const labels: Record<NotificationDto['kind'], string> = {
+            RESCHEDULE_REQUESTED: 'Nueva solicitud de reprogramación',
+            CANCELLED: 'Turno cancelado',
+            CONFIRMED: 'Asistencia confirmada',
+            RESCHEDULED: 'Turno reprogramado',
+            COMPLETED: 'Turno completado',
+            MARKED_NO_SHOW: 'Inasistencia registrada',
+            APPOINTMENT_UPCOMING: 'Turno próximo',
+          };
+          const priority = (kind: NotificationDto['kind']) =>
+            kind === 'RESCHEDULE_REQUESTED' ? 0 : kind === 'CANCELLED' ? 1 : 2;
+          const toasts: { item: NotificationDto; actionLabel: string }[] = [];
+          for (const item of [...added].sort((a, b) => priority(a.kind) - priority(b.kind))) {
+            if (item.readAt) continue;
+            // Agenda already has its actionable upcoming-turn widget.
+            if (item.kind === 'APPOINTMENT_UPCOMING' && window.location.pathname === '/') continue;
+            let actionLabel =
+              item.kind === 'RESCHEDULE_REQUESTED' ? 'Revisar solicitud' : 'Ver turno';
+            if (item.kind === 'APPOINTMENT_UPCOMING' && item.appointmentId) {
+              try {
+                const current = await api<AppointmentDto>(
+                  '/api/appointments/' + item.appointmentId,
+                );
+                if (
+                  !['SCHEDULED', 'CONFIRMED'].includes(current.status) ||
+                  current.startsAt !== item.startsAt ||
+                  Date.parse(current.startsAt) <= Date.now()
+                )
+                  continue;
+                actionLabel =
+                  current.status === 'SCHEDULED' && current.confirmationStatus !== 'CONFIRMED'
+                    ? 'Gestionar turno'
+                    : 'Ver turno';
+              } catch {
+                continue;
+              }
+            }
+            if (version !== revision.current) return;
+            toasts.push({ item, actionLabel });
+          }
+          if (version !== revision.current) return;
           seen.current ??= new Set();
           for (const item of observed) seen.current.add(item.id);
           observedUnread.current = result.unreadCount;
@@ -96,26 +176,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           if (added.some((item) => item.appointmentId && item.kind !== 'APPOINTMENT_UPCOMING')) {
             setAppointmentRevision((value) => value + 1);
           }
-          const cancelled = added.filter((item) => item.kind === 'CANCELLED');
-          const requested = added.filter((item) => item.kind === 'RESCHEDULE_REQUESTED');
-          const format = new Intl.DateTimeFormat('es-AR', {
-            dateStyle: 'short',
-            timeStyle: 'short',
-            timeZone: timezone,
-          });
-          const messages = [
-            cancelled.length === 1
-              ? `Turno cancelado · ${format.format(new Date(cancelled[0]!.startsAt))}`
-              : cancelled.length
-                ? `${cancelled.length} turnos cancelados`
-                : '',
-            requested.length === 1
-              ? `Nueva solicitud de reprogramación · ${format.format(new Date(requested[0]!.startsAt))}`
-              : requested.length
-                ? `${requested.length} nuevas solicitudes de reprogramación`
-                : '',
-          ].filter(Boolean);
-          if (messages.length) notify(messages.join(' | '), 'info');
+          for (const { item, actionLabel } of toasts) {
+            notify(`${labels[item.kind]} · ${format.format(new Date(item.startsAt))}`, 'info', {
+              key: item.id,
+              enqueue: true,
+              ...(item.appointmentId && {
+                action: { label: actionLabel, onClick: () => openAppointment(item) },
+              }),
+            });
+          }
           setRecent(result);
           setError('');
         })
@@ -128,7 +197,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       listing.current = request;
       return request;
     },
-    [notify, timezone],
+    [notify, timezone, openAppointment],
   );
 
   useEffect(() => {
@@ -225,6 +294,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       value={{
         recent,
         appointmentRevision,
+        navigationRevision,
         popoverOpen,
         setPopoverOpen,
         error,
@@ -232,6 +302,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         markRead,
         markAllRead,
         syncUpcoming,
+        openAppointment,
       }}
     >
       {children}

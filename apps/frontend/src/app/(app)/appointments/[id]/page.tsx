@@ -23,7 +23,6 @@ import {
   type ServiceDto,
 } from '@turnosmart/shared';
 import {
-  ArrowLeft,
   BriefcaseBusiness,
   CalendarClock,
   CalendarDays,
@@ -33,7 +32,9 @@ import {
   StickyNote,
   UserRound,
 } from 'lucide-react';
-import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { PageBreadcrumbs } from '@/components/PageBreadcrumbs';
+import { useNotifications } from '@/components/notifications/NotificationProvider';
 import { use, useEffect, useRef, useState } from 'react';
 import { AppointmentStatusBadge } from '@/components/appointments/AppointmentStatusBadge';
 import { RescheduleAppointmentDialog } from '@/components/appointments/RescheduleAppointmentDialog';
@@ -43,7 +44,7 @@ import { EventHistory } from '@/components/EventHistory';
 import { RiskExplanationPanel } from '@/components/RiskExplanationPanel';
 import { useToast } from '@/components/ToastProvider';
 import { listAgendaServices } from '@/lib/agenda-data';
-import { api, errorMessage } from '@/lib/api';
+import { api, ApiError, errorMessage } from '@/lib/api';
 import {
   appointmentActions,
   canApplyAppointmentAction,
@@ -86,21 +87,26 @@ function AppointmentDetails({
   timezone: string;
   canWrite: boolean;
 }) {
+  const { appointmentRevision, navigationRevision } = useNotifications();
+  const targetRequest = useSearchParams().get('solicitud');
+  const requestRegion = useRef<HTMLDivElement>(null);
+  const focusedRequest = useRef<string | null>(null);
   const [appointment, setAppointment] = useState<AppointmentDto | null>(null);
   const [customer, setCustomer] = useState<CustomerDto | null | undefined>(undefined);
   const [service, setService] = useState<ServiceDto | null | undefined>(undefined);
   const [loadError, setLoadError] = useState('');
+  const [loadedRevision, setLoadedRevision] = useState('');
   const { notify, dismiss } = useToast();
   const [reload, setReload] = useState(0);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [rescheduling, setRescheduling] = useState(false);
   const [requestState, setRequestState] = useState<{
-    revision: number;
+    revision: string;
     data?: PendingRescheduleRequestDto | null;
     error?: string;
   }>();
   const [reviewRequest, setReviewRequest] = useState<PendingRescheduleRequestDto>();
-  const [rejecting, setRejecting] = useState(false);
+  const [rejecting, setRejecting] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<AppointmentAction | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -108,8 +114,10 @@ function AppointmentDetails({
   const customerId = appointment?.customerId;
   const serviceId = appointment?.serviceId;
   const startsAt = appointment?.startsAt;
-  const request = requestState?.revision === historyRevision ? requestState.data : undefined;
-  const requestError = requestState?.revision === historyRevision ? requestState.error : undefined;
+  const freshAppointment = loadedRevision === `${appointmentRevision}/${targetRequest ?? ''}`;
+  const requestKey = `${historyRevision}/${appointmentRevision}/${targetRequest ?? ''}`;
+  const request = requestState?.revision === requestKey ? requestState.data : undefined;
+  const requestError = requestState?.revision === requestKey ? requestState.error : undefined;
   const activeAppointment = appointment && !isTerminalAppointmentStatus(appointment.status);
 
   useEffect(() => {
@@ -117,16 +125,16 @@ function AppointmentDetails({
     let active = true;
     api<PendingRescheduleRequestDto | null>(`/api/appointments/${id}/reschedule-request`).then(
       (data) => {
-        if (active) setRequestState({ revision: historyRevision, data });
+        if (active) setRequestState({ revision: requestKey, data });
       },
       (err) => {
-        if (active) setRequestState({ revision: historyRevision, error: errorMessage(err) });
+        if (active) setRequestState({ revision: requestKey, error: errorMessage(err) });
       },
     );
     return () => {
       active = false;
     };
-  }, [activeAppointment, historyRevision, id]);
+  }, [activeAppointment, requestKey, id]);
 
   useEffect(() => {
     let current = true;
@@ -134,17 +142,21 @@ function AppointmentDetails({
       (result) => {
         if (!current) return;
         setAppointment(result);
+        setLoadedRevision(`${appointmentRevision}/${targetRequest ?? ''}`);
         setNow(Date.now());
         setLoadError('');
       },
       (error) => {
-        if (current) setLoadError(errorMessage(error));
+        if (current) {
+          if (error instanceof ApiError && error.status === 404) setAppointment(null);
+          setLoadError(errorMessage(error));
+        }
       },
     );
     return () => {
       current = false;
     };
-  }, [id, reload]);
+  }, [id, reload, appointmentRevision, targetRequest]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -191,6 +203,29 @@ function AppointmentDetails({
     };
   }, [startsAt]);
 
+  useEffect(() => {
+    if (
+      !targetRequest ||
+      !appointment ||
+      loadedRevision !== `${appointmentRevision}/${targetRequest}`
+    )
+      return;
+    if (activeAppointment && request === undefined && !requestError) return;
+    if (focusedRequest.current === `${targetRequest}/${navigationRevision}`) return;
+    focusedRequest.current = `${targetRequest}/${navigationRevision}`;
+    requestRegion.current?.focus({ preventScroll: true });
+    requestRegion.current?.scrollIntoView({ block: 'nearest' });
+  }, [
+    targetRequest,
+    appointment,
+    loadedRevision,
+    appointmentRevision,
+    navigationRevision,
+    activeAppointment,
+    request,
+    requestError,
+  ]);
+
   function refresh() {
     setReload((value) => value + 1);
     setHistoryRevision((value) => value + 1);
@@ -210,13 +245,21 @@ function AppointmentDetails({
   }
 
   async function rejectRequest() {
-    if (!request || pending.current) return;
+    if (
+      !canWrite ||
+      !activeAppointment ||
+      !request ||
+      request.id !== rejecting ||
+      !freshAppointment ||
+      pending.current
+    )
+      return;
     pending.current = true;
     setBusy(true);
     try {
       await api(`/api/appointments/${id}/reschedule-request/dismiss`, {
         method: 'POST',
-        body: { requestId: request.id },
+        body: { requestId: rejecting },
       });
       notify('Solicitud rechazada. El turno conserva su horario.');
     } catch (err) {
@@ -224,7 +267,7 @@ function AppointmentDetails({
     } finally {
       pending.current = false;
       setBusy(false);
-      setRejecting(false);
+      setRejecting(null);
       refresh();
     }
   }
@@ -253,13 +296,14 @@ function AppointmentDetails({
   }
 
   const actions =
-    appointment && canWrite
+    appointment && canWrite && freshAppointment
       ? (Object.keys(appointmentActions) as AppointmentAction[]).filter((action) =>
           canApplyAppointmentAction(appointment, action, now),
         )
       : [];
   const canReschedule =
     !!appointment &&
+    freshAppointment &&
     canWrite &&
     service?.active !== false &&
     canRescheduleAppointment(appointment, now);
@@ -271,27 +315,21 @@ function AppointmentDetails({
 
   return (
     <Stack spacing={1.5}>
-      <Stack
-        component="header"
-        direction="row"
-        useFlexGap
-        sx={{ alignItems: 'center', gap: { xs: 0.5, sm: 1.5 }, flexWrap: 'wrap' }}
-      >
+      <Stack component="header" spacing={0.5}>
+        <PageBreadcrumbs
+          items={[{ label: 'Agenda', href: '/#agenda' }, { label: 'Detalle del turno' }]}
+        />
         <Typography variant="h1" sx={{ fontSize: { xs: '1.35rem', sm: '1.55rem' } }}>
           Detalle del turno
         </Typography>
-        <Button
-          component={Link}
-          href="/#agenda"
-          size="small"
-          startIcon={<ArrowLeft size={17} aria-hidden />}
-          sx={{ color: 'text.secondary', px: 1 }}
-        >
-          Volver a Agenda
-        </Button>
       </Stack>
       {!appointment && !loadError && <LinearProgress aria-label="Cargando turno" />}
       {!appointment && loadError && (
+        <Alert severity="error" action={<Button onClick={refresh}>Reintentar</Button>}>
+          {loadError}
+        </Alert>
+      )}
+      {appointment && !freshAppointment && loadError && (
         <Alert severity="error" action={<Button onClick={refresh}>Reintentar</Button>}>
           {loadError}
         </Alert>
@@ -356,59 +394,88 @@ function AppointmentDetails({
                     }
                   />
                 </Stack>
-                {activeAppointment && requestError && (
-                  <Alert severity="error" action={<Button onClick={refresh}>Reintentar</Button>}>
-                    {requestError}
-                  </Alert>
-                )}
-                {activeAppointment && !requestError && request === undefined && (
-                  <Typography variant="caption" role="status">
-                    Consultando solicitudes de reprogramación…
-                  </Typography>
-                )}
-                {activeAppointment && request && (
-                  <Alert severity="info" icon={<CalendarClock size={18} aria-hidden />}>
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle2">Reprogramación solicitada</Typography>
-                      {request.requestedStartsAt && (
-                        <Typography variant="body2">
-                          Horario propuesto:{' '}
-                          {new Intl.DateTimeFormat('es-AR', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short',
-                            hourCycle: 'h23',
-                            timeZone: timezone,
-                          }).format(new Date(request.requestedStartsAt))}
-                        </Typography>
-                      )}
-                      {request.message && (
-                        <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
-                          {request.message}
-                        </Typography>
-                      )}
-                      {canWrite && (
-                        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            disabled={!canReschedule || busy}
-                            onClick={() => setReviewRequest(request)}
-                          >
-                            Revisar y aprobar
-                          </Button>
-                          <Button
-                            size="small"
-                            color="error"
-                            disabled={busy}
-                            onClick={() => setRejecting(true)}
-                          >
-                            Rechazar solicitud
-                          </Button>
-                        </Stack>
-                      )}
-                    </Stack>
-                  </Alert>
-                )}
+                <Box
+                  id="solicitud-reprogramacion"
+                  ref={requestRegion}
+                  tabIndex={-1}
+                  aria-label="Revisión de reprogramación"
+                  sx={{
+                    scrollMarginTop: '64px',
+                    '&:focus-visible': {
+                      outline: '2px solid',
+                      outlineColor: 'primary.main',
+                      borderRadius: 1,
+                    },
+                  }}
+                >
+                  {targetRequest &&
+                    loadedRevision === `${appointmentRevision}/${targetRequest}` &&
+                    !requestError &&
+                    (!activeAppointment ||
+                      request === null ||
+                      (request && request.createdAt !== targetRequest)) && (
+                      <Alert severity="info" sx={{ mb: request ? 1 : 0 }}>
+                        {!activeAppointment
+                          ? 'El turno está cerrado. Esta solicitud ya no se puede gestionar.'
+                          : request
+                            ? 'El aviso corresponde a una solicitud anterior. Se muestra la solicitud vigente.'
+                            : 'Esta solicitud ya fue resuelta o no está vigente.'}
+                      </Alert>
+                    )}
+                  {activeAppointment && requestError && (
+                    <Alert severity="error" action={<Button onClick={refresh}>Reintentar</Button>}>
+                      {requestError}
+                    </Alert>
+                  )}
+                  {activeAppointment && !requestError && request === undefined && (
+                    <Typography variant="caption" role="status">
+                      Consultando solicitudes de reprogramación…
+                    </Typography>
+                  )}
+                  {activeAppointment && request && (
+                    <Alert severity="info" icon={<CalendarClock size={18} aria-hidden />}>
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle2">Reprogramación solicitada</Typography>
+                        {request.requestedStartsAt && (
+                          <Typography variant="body2">
+                            Horario propuesto:{' '}
+                            {new Intl.DateTimeFormat('es-AR', {
+                              dateStyle: 'medium',
+                              timeStyle: 'short',
+                              hourCycle: 'h23',
+                              timeZone: timezone,
+                            }).format(new Date(request.requestedStartsAt))}
+                          </Typography>
+                        )}
+                        {request.message && (
+                          <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+                            {request.message}
+                          </Typography>
+                        )}
+                        {canWrite && (
+                          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              disabled={!canReschedule || busy}
+                              onClick={() => setReviewRequest(request)}
+                            >
+                              Revisar y aprobar
+                            </Button>
+                            <Button
+                              size="small"
+                              color="error"
+                              disabled={busy || !freshAppointment}
+                              onClick={() => setRejecting(request.id)}
+                            >
+                              Rechazar solicitud
+                            </Button>
+                          </Stack>
+                        )}
+                      </Stack>
+                    </Alert>
+                  )}
+                </Box>
                 {((canReschedule && !request) || actions.length > 0) && (
                   <Stack
                     aria-label="Acciones del turno"
@@ -566,7 +633,11 @@ function AppointmentDetails({
               appointmentId={id}
               compact
             />
-            <EventHistory appointmentId={id} timezone={timezone} revision={historyRevision} />
+            <EventHistory
+              appointmentId={id}
+              timezone={timezone}
+              revision={historyRevision + appointmentRevision}
+            />
           </Box>
 
           {(rescheduling || reviewRequest) && (
@@ -587,19 +658,36 @@ function AppointmentDetails({
             />
           )}
           <Dialog
-            open={rejecting}
+            open={rejecting !== null}
             onClose={() => {
-              if (!busy) setRejecting(false);
+              if (!busy) setRejecting(null);
             }}
             aria-labelledby="reject-reschedule-title"
           >
             <DialogTitle id="reject-reschedule-title">¿Rechazar la solicitud?</DialogTitle>
-            <DialogContent>El turno conservará su horario actual.</DialogContent>
+            <DialogContent>
+              El turno conservará su horario actual.
+              {rejecting &&
+                freshAppointment &&
+                request !== undefined &&
+                request?.id !== rejecting && (
+                  <Alert severity="warning" sx={{ mt: 1 }}>
+                    La solicitud cambió. Cerrá este diálogo y revisá su estado actual.
+                  </Alert>
+                )}
+            </DialogContent>
             <DialogActions>
-              <Button autoFocus disabled={busy} onClick={() => setRejecting(false)}>
+              <Button autoFocus disabled={busy} onClick={() => setRejecting(null)}>
                 Volver
               </Button>
-              <Button color="error" variant="contained" disabled={busy} onClick={rejectRequest}>
+              <Button
+                color="error"
+                variant="contained"
+                disabled={
+                  busy || !freshAppointment || request?.id !== rejecting || !activeAppointment
+                }
+                onClick={rejectRequest}
+              >
                 {busy ? 'Guardando…' : 'Rechazar solicitud'}
               </Button>
             </DialogActions>

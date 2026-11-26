@@ -42,10 +42,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <NotificationProvider>
           <main className={styles.shell}>
             <AppSidebar />
-            <div className={styles.notificationDock}>
-              <NotificationBell key={pathname} timezone={me.business.timezone} />
+            <div className={styles.workspace}>
+              <header className={styles.globalHeader} aria-label="Herramientas de la aplicación">
+                <NotificationBell key={pathname} timezone={me.business.timezone} />
+              </header>
+              <section className={styles.content}>{children}</section>
             </div>
-            <section className={styles.content}>{children}</section>
           </main>
         </NotificationProvider>
       </ToastProvider>

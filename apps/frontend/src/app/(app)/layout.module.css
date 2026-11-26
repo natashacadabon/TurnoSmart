@@ -28,17 +28,35 @@
   background: #f6f8fb;
 }
 
-.notificationDock {
+.workspace {
+  min-width: 0;
+  padding-top: 48px;
+}
+
+.globalHeader {
   position: fixed;
-  top: 20px;
-  left: calc(var(--sidebar-width) - 44px - 16px);
+  top: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  min-height: 48px;
+  padding: 4px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
   z-index: 1100;
 }
 
 @media (max-width: 1040px) {
-  .notificationDock {
-    left: auto;
-    right: 20px;
+  .globalHeader {
+    left: 0;
+  }
+  .shell {
+    padding-top: 48px;
+  }
+  .workspace {
+    padding-top: 0;
   }
   .shell {
     --sidebar-width: 248px;
@@ -62,6 +80,16 @@
 .content:has(> [data-settings-page]) {
   max-width: 1540px;
   padding: 20px;
+}
+
+@media (min-width: 1041px) {
+  .content:has(> [data-settings-page]) {
+    padding-block: 12px;
+  }
+
+  .content > [data-settings-page] {
+    gap: 8px;
+  }
 }
 
 .content:has(> [data-services-page]) {

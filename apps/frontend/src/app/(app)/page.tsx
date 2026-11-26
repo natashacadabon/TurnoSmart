@@ -313,6 +313,7 @@ function AgendaDashboard({
             )}
             {week ? (
               <AgendaCalendar
+                scope={scope}
                 timezone={week.timezone}
                 rules={week.rules}
                 canBook={canBook}

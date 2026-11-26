@@ -751,7 +751,11 @@ test('la campana abre un historial persistente, marca lecturas y navega al turno
     timeout: 30_000,
   });
   expect(notifications.at(-1)?.readAt).not.toBeNull();
-  await page.getByRole('link', { name: 'Volver a Agenda' }).click();
+  await page
+    .getByRole('navigation', { name: 'Ruta de navegación' })
+    .getByRole('link', { name: 'Agenda', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Agenda', exact: true })).toBeVisible();
   await expect(bell).toHaveAccessibleName('Notificaciones (1 sin leer)');
   await bell.click();
   await popup.getByRole('link', { name: 'Ver todas las notificaciones' }).click();
@@ -924,7 +928,10 @@ test('detalle reprograma con confirmación, maneja errores y actualiza historial
   await expect(history.getByText('Turno confirmado', { exact: true })).toBeVisible();
   await expect(history.getByText('Confirmado', { exact: true })).toBeVisible();
   await expect(confirm).toHaveCount(0);
-  await page.getByRole('link', { name: 'Volver a Agenda' }).click({ timeout: 30_000 });
+  await page
+    .getByRole('navigation', { name: 'Ruta de navegación' })
+    .getByRole('link', { name: 'Agenda', exact: true })
+    .click({ timeout: 30_000 });
   const event = page.locator('#agenda-calendar-grid a[href="/appointments/' + item.id + '"]');
   await expect(event).toContainText('Turno confirmado', { timeout: 30_000 });
   await expect(event).toContainText('11:00');
@@ -994,9 +1001,13 @@ test('el toast de cancelación flota y el detalle conserva dos columnas en escri
   await expect(toast).toHaveCount(1);
   await expect(toast).toHaveAttribute('aria-live', 'polite');
   const toastBox = (await toast.boundingBox())!;
-  const back = (await page.getByRole('link', { name: 'Volver a Agenda' }).boundingBox())!;
+  const back = (await page
+    .getByRole('navigation', { name: 'Ruta de navegación' })
+    .getByRole('link', { name: 'Agenda', exact: true })
+    .boundingBox())!;
   expect(1440 - toastBox.x - toastBox.width).toBeLessThan(32);
-  expect(toastBox.y).toBeLessThan(40);
+  expect(toastBox.y).toBeGreaterThanOrEqual(48);
+  expect(toastBox.y).toBeLessThan(80);
   expect(back.x + back.width).toBeLessThan(toastBox.x);
   expect((await summary.boundingBox())!.y).toBe(top);
   await expect(summary.getByText('Cancelado', { exact: true })).toBeVisible();
@@ -1590,7 +1601,7 @@ test('sincroniza cancelación y solicitud públicas con la agenda y toasts sin r
   await expect(page.getByRole('status').filter({ hasText: 'Turno cancelado ·' })).toHaveCount(0);
 });
 
-test('recupera tras error y agrupa avisos nuevos más allá de la primera página', async ({
+test('recupera tras error y encola avisos nuevos más allá de la primera página', async ({
   page,
 }) => {
   const item = reminderFixture(903, 60);
@@ -1645,7 +1656,14 @@ test('recupera tras error y agrupa avisos nuevos más allá de la primera págin
   });
   setNotificationError(false);
   const toast = page.getByRole('status').filter({ hasText: 'Turno cancelado ·' });
-  await expect(toast).toContainText('Nueva solicitud de reprogramación ·', { timeout: 12_000 });
+  const requested = page
+    .getByRole('status')
+    .filter({ hasText: 'Nueva solicitud de reprogramación ·' });
+  await expect(requested.getByRole('button', { name: 'Revisar solicitud' })).toBeVisible({
+    timeout: 12_000,
+  });
+  await requested.getByRole('button', { name: 'Cerrar notificación' }).click();
+  await expect(toast.getByRole('button', { name: 'Ver turno' })).toBeVisible();
   expect(cursors.length).toBeGreaterThan(0);
   await expect(
     page.locator('[data-agenda-event-content][aria-label*="Turno cancelado"]'),
@@ -1812,4 +1830,329 @@ test('la campana global respeta los horarios sin guardar al navegar desde una no
   page.once('dialog', (dialog) => dialog.accept());
   await popup.getByRole('link', { name: 'Ver todas las notificaciones', exact: true }).click();
   await expect(page).toHaveURL(/\/notifications$/);
+});
+
+for (const width of [1366, 375]) {
+  test(`CTA de solicitud enfoca revisión sin resolver y conserva agenda a ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 768 });
+    const item = { ...reminderFixture(11000, 60), rescheduleRequested: true };
+    const { notifications, transitions } = await openAgenda(page, false, [item]);
+    const grid = page.locator('#agenda-calendar-grid');
+    await grid.getByText('Mes', { exact: true }).click();
+    await grid.getByRole('button', { name: 'Mes siguiente', exact: true }).click();
+    await expect(grid.locator('.booking-calendar-title')).toHaveText('febrero de 2099');
+    await page.route('**/api/appointments/' + item.id + '/reschedule-request', (route) =>
+      respond(route, {
+        id: id(11001),
+        createdAt: now,
+        message: 'Necesito cambiar el horario',
+        requestedStartsAt: second.startsAt,
+      }),
+    );
+    notifications.push({
+      id: id(11002),
+      appointmentId: item.id,
+      kind: 'RESCHEDULE_REQUESTED',
+      startsAt: item.startsAt,
+      createdAt: now,
+      readAt: null,
+    });
+    const toast = page
+      .getByRole('status')
+      .filter({ hasText: 'Nueva solicitud de reprogramación ·' });
+    await expect(toast).toBeVisible({ timeout: 12000 });
+    await toast.getByRole('button', { name: 'Revisar solicitud' }).click();
+    await expect(page).toHaveURL(
+      new RegExp('/appointments/' + item.id + '\\?solicitud=.*#solicitud-reprogramacion$'),
+    );
+    const region = page.getByLabel('Revisión de reprogramación', { exact: true });
+    await expect(region).toBeFocused();
+    await expect(region.getByRole('button', { name: 'Revisar y aprobar' })).toBeEnabled();
+    await expect(region.getByRole('button', { name: 'Rechazar solicitud' })).toBeVisible();
+    expect(transitions).toEqual([]);
+    expect(notifications[0]!.readAt).toBeNull();
+    const crumbs = page.getByRole('navigation', { name: 'Ruta de navegación' });
+    // Medir ambos elementos en el mismo frame: el foco puede desplazar la página.
+    expect(
+      await crumbs.evaluate((element) => {
+        const title = element.closest('header')?.querySelector('h1');
+        if (!title) throw new Error('Falta el título del detalle');
+        return element.getBoundingClientRect().bottom <= title.getBoundingClientRect().top;
+      }),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath(`request-cta-${width}.png`),
+      fullPage: true,
+    });
+    await crumbs.getByRole('link', { name: 'Agenda', exact: true }).click();
+    await expect(grid.getByRole('tab', { name: 'Vista del mes' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(grid.locator('.booking-calendar-title')).toHaveText('febrero de 2099');
+    await expect(page.getByRole('button', { name: 'Notificaciones (1 sin leer)' })).toBeVisible();
+    await page.getByRole('button', { name: 'Notificaciones (1 sin leer)' }).click();
+    await expect(
+      page
+        .getByRole('dialog', { name: 'Notificaciones', exact: true })
+        .getByText('No leída', { exact: false }),
+    ).toBeVisible();
+    expect(transitions).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  });
+}
+
+for (const state of ['resuelta', 'cancelada', 'obsoleta', 'inexistente'] as const) {
+  test(`CTA de solicitud ${state} consulta estado vigente sin mutaciones`, async ({ page }) => {
+    const item = reminderFixture(11100, 60);
+    const { notifications, updateAppointment, transitions } = await openAgenda(page, false, [item]);
+    const pending = {
+      id: id(11101),
+      createdAt: '2099-01-05T12:01:00.000Z',
+      message: 'Solicitud vigente',
+    };
+    await page.route('**/api/appointments/' + item.id + '/reschedule-request', (route) =>
+      respond(route, state === 'obsoleta' ? pending : null),
+    );
+    if (state === 'cancelada') updateAppointment({ ...item, status: 'CANCELLED' });
+    const appointmentId = state === 'inexistente' ? id(11999) : item.id;
+    notifications.push({
+      id: id(11102),
+      appointmentId,
+      kind: 'RESCHEDULE_REQUESTED',
+      startsAt: item.startsAt,
+      createdAt: now,
+      readAt: null,
+    });
+    await page
+      .getByRole('status')
+      .filter({ hasText: 'Nueva solicitud de reprogramación ·' })
+      .getByRole('button', { name: 'Revisar solicitud' })
+      .click({ timeout: 12000 });
+    if (state === 'inexistente') {
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'Turno no encontrado' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Rechazar solicitud' })).toHaveCount(0);
+    } else {
+      const region = page.getByLabel('Revisión de reprogramación', { exact: true });
+      await expect(region).toBeFocused();
+      await expect(region).toContainText(
+        state === 'obsoleta'
+          ? 'El aviso corresponde a una solicitud anterior'
+          : state === 'cancelada'
+            ? 'El turno está cerrado'
+            : 'Esta solicitud ya fue resuelta',
+      );
+      if (state !== 'obsoleta')
+        await expect(region.getByRole('button', { name: 'Revisar y aprobar' })).toHaveCount(0);
+    }
+    expect(transitions).toEqual([]);
+    expect(notifications[0]!.readAt).toBeNull();
+  });
+}
+
+for (const kind of ['CONFIRMED', 'CANCELLED'] as const) {
+  test(`toast ${kind} abre turno vigente y cerrar conserva notificación`, async ({ page }) => {
+    const item = reminderFixture(11200, 60);
+    const { notifications, updateAppointment, transitions } = await openAgenda(page, false, [item]);
+    updateAppointment({ ...item, status: kind });
+    notifications.push({
+      id: id(11201),
+      appointmentId: item.id,
+      kind,
+      startsAt: item.startsAt,
+      createdAt: now,
+      readAt: null,
+    });
+    const toast = page
+      .getByRole('status')
+      .filter({ hasText: kind === 'CONFIRMED' ? 'Asistencia confirmada ·' : 'Turno cancelado ·' });
+    await expect(toast).toBeVisible({ timeout: 12000 });
+    await toast.getByRole('button', { name: 'Ver turno' }).click();
+    await expect(page).toHaveURL(new RegExp('/appointments/' + item.id + '$'));
+    await expect(
+      page.getByText(kind === 'CONFIRMED' ? 'Asistencia confirmada' : 'El turno está cerrado.', {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(notifications[0]!.readAt).toBeNull();
+    expect(transitions).toEqual([]);
+  });
+}
+
+test('toast próximo ofrece Gestionar turno fuera de agenda y descarta avisos obsoletos', async ({
+  page,
+}) => {
+  const item = reminderFixture(11300, 60);
+  const { notifications, transitions } = await openAgenda(page, false, [item]);
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Clientes', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/customers$/);
+  notifications.push({
+    id: id(11301),
+    appointmentId: item.id,
+    kind: 'APPOINTMENT_UPCOMING',
+    startsAt: second.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  await expect(page.getByRole('button', { name: 'Notificaciones (1 sin leer)' })).toBeVisible({
+    timeout: 12000,
+  });
+  await expect(page.getByRole('status').filter({ hasText: 'Turno próximo ·' })).toHaveCount(0);
+  notifications.push({
+    id: id(11302),
+    appointmentId: item.id,
+    kind: 'APPOINTMENT_UPCOMING',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  await page
+    .getByRole('status')
+    .filter({ hasText: 'Turno próximo ·' })
+    .getByRole('button', { name: 'Gestionar turno' })
+    .click({ timeout: 12000 });
+  await expect(page).toHaveURL(new RegExp('/appointments/' + item.id + '$'));
+  expect(transitions).toEqual([]);
+  expect(notifications.every((item) => !item.readAt)).toBe(true);
+});
+
+test('toast respeta cambios sin guardar y cerrar no marca lectura ni resuelve solicitud', async ({
+  page,
+}) => {
+  const item = reminderFixture(11400, 60);
+  const { notifications, transitions } = await openAgenda(page, false, [item]);
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Servicios', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true }).click();
+  await page.getByLabel('Inicio lunes 1').fill('10:00');
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  notifications.push({
+    id: id(11401),
+    appointmentId: item.id,
+    kind: 'RESCHEDULE_REQUESTED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  const toast = page.getByRole('status').filter({ hasText: 'Nueva solicitud de reprogramación ·' });
+  await expect(toast).toBeVisible({ timeout: 12000 });
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await toast.getByRole('button', { name: 'Revisar solicitud' }).click();
+  await expect(page).toHaveURL(/\/services$/);
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Cerrar notificación' }).click();
+  await page.waitForTimeout(5500);
+  await expect(toast).toBeHidden();
+  expect(notifications[0]!.readAt).toBeNull();
+  expect(transitions).toEqual([]);
+  await page.getByRole('button', { name: 'Notificaciones (1 sin leer)' }).click();
+  await expect(
+    page
+      .getByRole('dialog', { name: 'Notificaciones', exact: true })
+      .getByRole('button', { name: 'Revisar solicitud' }),
+  ).toBeVisible();
+});
+
+test('la misma solicitud reenfoca por CTA pero un evento ajeno no roba foco; toast común conserva cola', async ({
+  page,
+}) => {
+  const item = { ...reminderFixture(11500, 60), rescheduleRequested: true };
+  const other = reminderFixture(11501, 120);
+  const { notifications, transitions } = await openAgenda(page, false, [item, other]);
+  await page.route('**/api/appointments/' + item.id + '/reschedule-request', (route) =>
+    respond(route, { id: id(11502), createdAt: now, message: 'Revisar horario' }),
+  );
+  notifications.push({
+    id: id(11503),
+    appointmentId: item.id,
+    kind: 'RESCHEDULE_REQUESTED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  const toast = page.getByRole('status').filter({ hasText: 'Nueva solicitud de reprogramación ·' });
+  await toast.getByRole('button', { name: 'Revisar solicitud' }).click({ timeout: 12000 });
+  const review = page.getByLabel('Revisión de reprogramación', { exact: true });
+  await expect(review).toBeFocused();
+  const agenda = page
+    .getByRole('navigation', { name: 'Ruta de navegación' })
+    .getByRole('link', { name: 'Agenda', exact: true });
+  await agenda.focus();
+  notifications.push({
+    id: id(11504),
+    appointmentId: other.id,
+    kind: 'CONFIRMED',
+    startsAt: other.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  await expect(page.getByRole('button', { name: 'Notificaciones (2 sin leer)' })).toBeVisible({
+    timeout: 12000,
+  });
+  await expect(agenda).toBeFocused();
+  await page.getByRole('button', { name: 'Notificaciones (2 sin leer)' }).click();
+  const popup = page.getByRole('dialog', { name: 'Notificaciones', exact: true });
+  await popup.getByRole('button', { name: 'Marcar todas como leídas' }).click();
+  await expect(popup.getByText('0 sin leer', { exact: true })).toBeVisible();
+  await expect(popup).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(popup).toBeHidden();
+  const success = page
+    .getByRole('status')
+    .filter({ hasText: 'Notificaciones marcadas como leídas' });
+  await expect(success).toBeVisible();
+  await success.getByRole('button', { name: 'Cerrar notificación' }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Asistencia confirmada ·' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Notificaciones', exact: true }).click();
+  await popup.getByRole('button', { name: 'Revisar solicitud' }).click();
+  await expect(review).toBeFocused();
+  expect(transitions).toEqual([]);
+});
+
+test('un cambio concurrente no permite rechazar una solicitud distinta de la revisada', async ({
+  page,
+}) => {
+  const item = { ...reminderFixture(11600, 60), rescheduleRequested: true };
+  const { notifications, transitions } = await openAgenda(page, false, [item]);
+  let pending = { id: id(11601), createdAt: now, message: 'Solicitud original' };
+  await page.route('**/api/appointments/' + item.id + '/reschedule-request', (route) =>
+    respond(route, pending),
+  );
+  const dismissals: string[] = [];
+  await page.route('**/api/appointments/' + item.id + '/reschedule-request/dismiss', (route) => {
+    if (route.request().method() !== 'OPTIONS') dismissals.push(route.request().postData() ?? '');
+    return respond(route, {}, 204);
+  });
+  await page.goto('/appointments/' + item.id);
+  await page.getByRole('button', { name: 'Rechazar solicitud', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '¿Rechazar la solicitud?' });
+  await expect(dialog.getByRole('button', { name: 'Rechazar solicitud' })).toBeEnabled();
+  pending = { id: id(11602), createdAt: '2099-01-05T12:01:00.000Z', message: 'Nueva solicitud' };
+  notifications.push({
+    id: id(11603),
+    appointmentId: item.id,
+    kind: 'RESCHEDULE_REQUESTED',
+    startsAt: item.startsAt,
+    createdAt: pending.createdAt,
+    readAt: null,
+  });
+  await expect(
+    dialog.getByText('La solicitud cambió. Cerrá este diálogo y revisá su estado actual.'),
+  ).toBeVisible({ timeout: 12000 });
+  await expect(dialog.getByRole('button', { name: 'Rechazar solicitud' })).toBeDisabled();
+  expect(dismissals).toEqual([]);
+  expect(transitions).toEqual([]);
 });
