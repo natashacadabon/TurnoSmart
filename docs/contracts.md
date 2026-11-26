@@ -27,8 +27,9 @@ Fuente de verdad en código: [`packages/shared/src`](../packages/shared/src). Es
 | HTTP | code                               | Cuándo                                                        |
 | ---- | ---------------------------------- | ------------------------------------------------------------- |
 | 401  | `UNAUTHENTICATED`, `TOKEN_INVALID` | Falta token de sesión / sesión inválida o vencida             |
-| 403  | `PROFILE_REQUIRED`                 | Cuenta autenticada sin negocio (debe hacer onboarding)        |
-| 403  | `FORBIDDEN`                        | Rol sin permiso, u origen CORS no permitido                   |
+| 403  | `PROFILE_REQUIRED`                 | Cuenta autenticada sin perfil OWNER ni ADMIN asignado         |
+| 403  | `ACCOUNT_DISABLED`                 | OWNER o ADMIN desactivado por el administrador                |
+| 403  | `FORBIDDEN`                        | Rol sin permiso (p. ej. ADMIN en rutas del negocio) o CORS    |
 | 404  | `NOT_FOUND`                        | Recurso inexistente **o de otro negocio** (no se distingue)   |
 | 404  | `RISK_NOT_AVAILABLE`               | Turno sin score calculado                                     |
 | 409  | `CONFLICT`                         | Conflictos de negocio (reservas: C)                           |
@@ -47,20 +48,22 @@ interface AuthContext {
   email: string | null;
   businessId: string;
   timezone: string;
-  role: 'OWNER' | 'ADMIN' | 'STAFF';
+  role: 'OWNER';
 }
 ```
 
-Matriz de permisos (`PERMISSIONS` en shared): OWNER/ADMIN configuran el negocio; los tres roles gestionan clientes,
-turnos y piden explicaciones. La baja de clientes requiere OWNER o ADMIN.
+Sólo un OWNER activo opera las rutas del negocio. El ADMIN global (`AdminContext`, sin negocio) usa únicamente
+las rutas del panel de la plataforma (`requirePlatformAdmin`). Matriz completa en
+[identidad y seguridad](identity-security.md#matriz-de-permisos).
 
 ## Identidad
 
-- `GET /api/me` → `{ onboarded: false, user }` o `{ onboarded: true, user, profile, business }`.
-- `POST /api/onboarding` `{ businessName, timezone?, fullName? }` → 201 la primera vez; 200 con el mismo negocio si se
-  repite (también ante requests concurrentes). El rol `OWNER` lo asigna el backend. `Profile.email` se toma del usuario de
-  Supabase Auth; una cuenta sin email recibe 422.
-- `PATCH /api/business` `{ name?, timezone? }` → `BusinessDto`. Solo OWNER/ADMIN. Un cambio de zona que deje turnos vigentes fuera de disponibilidad devuelve `409 AVAILABILITY_CONFLICT`.
+- `GET /api/me` (`Cache-Control: no-store`) →
+  - `{ access: 'OWNER', onboarded: true, user, profile, business }`
+  - `{ access: 'ADMIN', onboarded: false, user, admin }`
+  - `{ access: 'NONE', onboarded: false, user, reason: 'NO_PROFILE' | 'DISABLED' }`
+- No hay alta pública de negocios: el ADMIN crea el negocio e invita al OWNER (FINAL-11).
+- `PATCH /api/business` `{ name?, timezone? }` → `BusinessDto`. Solo OWNER. Un cambio de zona que deje turnos vigentes fuera de disponibilidad devuelve `409 AVAILABILITY_CONFLICT`.
 
 ## Clientes
 
@@ -69,7 +72,7 @@ turnos y piden explicaciones. La baja de clientes requiere OWNER o ADMIN.
   El email se guarda sin espacios y en minúsculas. El teléfono acepta dígitos, espacios, guiones, paréntesis y `+` inicial,
   con al menos 6 dígitos (`+54 221 555-1234`); otro texto responde 422 en `phone`.
 - `GET /api/customers/:id`, `PATCH /api/customers/:id` (parcial).
-- `DELETE /api/customers/:id` → 204. Solo OWNER/ADMIN (`customers:delete`). Si el cliente tiene turnos responde
+- `DELETE /api/customers/:id` → 204. Solo OWNER (`customers:delete`). Si el cliente tiene turnos responde
   409 `CUSTOMER_HAS_APPOINTMENTS` y no borra nada: los turnos lo referencian y conservan el historial.
 
 ## Historial y riesgo

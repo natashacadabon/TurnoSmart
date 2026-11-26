@@ -547,6 +547,39 @@ D08 sigue pendiente para accesos directos a Supabase. Sin commit ni push.
 
 ---
 
+## 2026-11-26 - Roles ADMIN global y OWNER, acceso por invitación y endurecimiento (Yae)
+
+**Problema abordado**
+
+El equipo redefinió los roles: un ADMIN global administra negocios y propietarios, y el OWNER opera su negocio. Había que eliminar STAFF y el ADMIN por negocio, cerrar el alta pública, sumar recuperación de contraseña y cerrar FINAL-02, FINAL-05B y FINAL-08.
+
+**Prompt / herramienta utilizada**
+
+Claude Code. Se pidió implementar la parte de Yae del backlog final con el nuevo modelo de roles; el equipo decidió acceso sólo por invitación, uno o más OWNER por negocio, panel ADMIN a cargo de FINAL-11 y desactivar las cuentas STAFF/ADMIN existentes.
+
+**Código / arquitectura propuesta por IA**
+
+- Tabla `platform_admins` separada de `profiles` (en vez de `business_id` nulo), enum `ProfileRole` sólo con OWNER y `active`/`deactivated_at` con CHECK.
+- Migración que convierte ADMIN/STAFF existentes en OWNER desactivados.
+- `GET /api/me` con `access` y middlewares `requireProfile`/`requirePlatformAdmin`.
+- Páginas de recuperación, callback de enlaces y nueva contraseña, con Mailpit local.
+- Revocación total de la Data API para `anon`/`authenticated`, con RLS como segunda barrera.
+- Lista cerrada de factores hacia Gemini, filtro de salida, tope global y circuito.
+- Métricas protegidas por token, SHA en logs y `/health`, y redacción de campos sensibles.
+
+**Validación y corrección humana**
+
+- Se descartó `business_id` nulo porque rompía la FK compuesta de lecturas de notificaciones.
+- Se conservó `admin@turnosmart.test` como OWNER demo para no romper entornos sembrados ni secretos de E2E; el ADMIN demo es `plataforma@turnosmart.test`.
+- Se corrigió el orden del SHA para priorizar el del proveedor, como exigía un test existente.
+- Las suites unitarias e integración se ejecutaron sobre una base descartable para no borrar datos demo.
+
+**Resultado**
+
+Código y pruebas en la rama `feat/final-yae-identidad-seguridad-ia`; detalle en [identidad y seguridad](docs/identity-security.md). Falta la evidencia en entornos publicados listada en ese documento.
+
+---
+
 ## 2026-11-11 - Detalle operativo y reprogramación de turnos
 
 **Problema abordado**

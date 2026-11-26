@@ -205,7 +205,7 @@ coordinar primero esquema y backend; no puede inferirse de un merge ni del CI ve
 
 ## Recorrido de demo
 
-1. Iniciar sesión y completar onboarding.
+1. Iniciar sesión como OWNER (`admin@turnosmart.test` en local). Opcional: entrar como ADMIN (`plataforma@turnosmart.test`) y comprobar que no accede a la agenda.
 2. Crear un servicio y una regla de disponibilidad.
 3. Crear un cliente.
 4. Reservar un turno futuro.

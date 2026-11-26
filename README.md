@@ -8,7 +8,7 @@ La descripción corresponde al código actual del repositorio. La activación y 
 
 | Área                 | Funcionalidad disponible en el código                                                                                                                                                                                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identidad y clientes | Inicio y cierre de sesión con Supabase Auth, onboarding del negocio, roles OWNER/ADMIN/STAFF, configuración de nombre y zona horaria, alta, edición, búsqueda y baja de clientes sin turnos.                                                                      |
+| Identidad y clientes | Inicio y cierre de sesión con Supabase Auth, acceso por invitación, recuperación de contraseña, roles ADMIN global y OWNER por negocio, configuración de nombre y zona horaria, alta, edición, búsqueda y baja de clientes sin turnos.                            |
 | Servicios y horarios | Catálogo con búsqueda, estados y paginación local; disponibilidad semanal visual con edición en modal y consulta de slots colapsable. Cada negocio tiene una agenda y una grilla de comienzos cada 15 minutos desde la apertura de cada franja.                   |
 | Agenda y turnos      | Vistas de día, semana y mes, alta, edición de notas, confirmación, cancelación, reprogramación, cierre, registro de ausencias e historial. La API vuelve a validar el horario dentro de la transacción.                                                           |
 | Riesgo               | Score heurístico persistido y explicación bajo demanda con Gemini cuando se configura su clave.                                                                                                                                                                   |
@@ -51,14 +51,15 @@ npm run prisma:generate --workspace=apps/backend
 npm run prisma:migrate --workspace=apps/backend
 ```
 
-6. Crear y confirmar un usuario desde Supabase Auth para completar el onboarding como OWNER. También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
+6. Los negocios y sus OWNER los crea un ADMIN de la plataforma por invitación (ver [identidad y seguridad](docs/identity-security.md)). También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
 7. En terminales separadas, ejecutar `npm run dev:backend` y `npm run dev:frontend`. Ambos comandos compilan `packages/shared`.
 
 Configurar `GEMINI_API_KEY` para habilitar las explicaciones. La [guía de operación](docs/operations.md#notificaciones-de-turnos) cubre los modos de correo, los enlaces firmados y el cron. Las claves privadas se configuran en el backend o en los almacenes de secretos del entorno.
 
 | Ruta                                                     | Uso                                                                             |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `/login`, `/onboarding`                                  | Acceso y alta inicial del negocio.                                              |
+| `/login`, `/forgot-password`, `/reset-password`          | Acceso, recuperación y nueva contraseña (también primer acceso por invitación). |
+| `/auth/callback`, `/sin-acceso`, `/admin`                | Enlaces de correo, cuentas sin acceso y entrada del ADMIN de la plataforma.     |
 | `/`, `/appointments/[id]`                                | Agenda y detalle de turno.                                                      |
 | `/customers`, `/services`, `/settings`, `/notifications` | Clientes, servicios y disponibilidad, configuración y centro de notificaciones. |
 | `/turno/gestionar`                                       | Página pública que requiere un enlace válido para operar sobre un turno.        |

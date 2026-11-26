@@ -2,16 +2,17 @@
 
 Aplicación Next.js con App Router, React, Material UI y FullCalendar. Usa Supabase Auth para iniciar sesión y consume la API Express con contratos de `@turnosmart/shared`.
 
-| Ruta                    | Funcionalidad                                                                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/login`, `/onboarding` | Inicio de sesión y alta del negocio para una cuenta confirmada.                                                                                |
-| `/`                     | Agenda de día, semana y mes en la zona del negocio, alta de turnos, indicadores diarios y evaluación de riesgo bajo demanda.                   |
-| `/appointments/[id]`    | Detalle, notas, historial, acciones del personal, solicitudes de cambio y explicación con Gemini.                                              |
-| `/customers`            | Búsqueda, alta y edición. La baja requiere OWNER o ADMIN y que el cliente carezca de turnos.                                                   |
-| `/services`             | Servicios, franjas semanales y consulta de slots. STAFF tiene acceso de lectura.                                                               |
-| `/settings`             | Configuración del negocio y de sus notificaciones, con vistas previas de correo. OWNER y ADMIN pueden editar.                                  |
-| `/notifications`        | Historial interno, filtro de avisos sin leer y lecturas por usuario.                                                                           |
-| `/turno/gestionar`      | Página pública que recibe un token en el fragmento de URL. Permite confirmar, cancelar según la política vigente o pedir un cambio de horario. |
+| Ruta                                                              | Funcionalidad                                                                                                                                  |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/login`, `/forgot-password`, `/reset-password`, `/auth/callback` | Acceso por invitación, recuperación de contraseña y enlaces de correo.                                                                         |
+| `/admin`, `/sin-acceso`                                           | Entrada del ADMIN de la plataforma y aviso para cuentas sin acceso.                                                                            |
+| `/`                                                               | Agenda de día, semana y mes en la zona del negocio, alta de turnos, indicadores diarios y evaluación de riesgo bajo demanda.                   |
+| `/appointments/[id]`                                              | Detalle, notas, historial, acciones del personal, solicitudes de cambio y explicación con Gemini.                                              |
+| `/customers`                                                      | Búsqueda, alta y edición. La baja requiere OWNER o ADMIN y que el cliente carezca de turnos.                                                   |
+| `/services`                                                       | Servicios, franjas semanales y consulta de slots.                                                                                              |
+| `/settings`                                                       | Configuración del negocio y de sus notificaciones, con vistas previas de correo. OWNER y ADMIN pueden editar.                                  |
+| `/notifications`                                                  | Historial interno, filtro de avisos sin leer y lecturas por usuario.                                                                           |
+| `/turno/gestionar`                                                | Página pública que recibe un token en el fragmento de URL. Permite confirmar, cancelar según la política vigente o pedir un cambio de horario. |
 
 ## Desarrollo
 

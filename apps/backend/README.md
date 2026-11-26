@@ -4,7 +4,7 @@ API REST Express con TypeScript, Prisma 6.12 y PostgreSQL. `src/app.ts` construy
 
 | Módulo                              | Responsabilidad                                                                           |
 | ----------------------------------- | ----------------------------------------------------------------------------------------- |
-| `identity`, `customers`             | Supabase Auth, onboarding, permisos por rol, configuración del negocio y clientes.        |
+| `identity`, `customers`             | Supabase Auth, roles ADMIN/OWNER, configuración del negocio y clientes.                   |
 | `services`, `availability`, `slots` | Servicios, disponibilidad semanal y horarios libres. Se comparte una agenda por negocio.  |
 | `appointments`, `events`            | Reservas, notas, transiciones, reprogramación, historial y acciones firmadas del cliente. |
 | `ai`                                | Score heurístico de no-show y explicación bajo demanda con Gemini.                        |
