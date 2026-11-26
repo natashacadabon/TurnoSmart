@@ -16,7 +16,7 @@ Next.js y Material UI presentan las pantallas del negocio. FullCalendar dibuja l
 
 ## Identidad y aislamiento
 
-- Supabase Auth valida la sesión con `auth.getUser`. Express busca `Profile` por usuario y aplica los permisos OWNER, ADMIN o STAFF. El onboarding crea negocio y perfil OWNER en una transacción y devuelve el negocio ganador ante solicitudes concurrentes.
+- Supabase Auth valida la sesión con `auth.getUser`. Express resuelve ADMIN como rol global sin `businessId` y OWNER como rol asociado a un único negocio. Solo OWNER atraviesa las rutas operativas; ADMIN queda reservado para la administración de plataforma.
 - `Business` es la raíz del tenant. Los repositorios filtran por su ID tomado del perfil. Las relaciones compuestas impiden referencias entre negocios y la API responde 404 para recursos de otro tenant.
 - PostgreSQL aplica RLS a las tablas de dominio expuestas a la Data API. La conexión de Prisma puede omitir RLS y depende de los filtros del backend. Las migraciones de notificaciones y acciones públicas revocan acceso directo a enlaces, avisos y cola, y revocan la escritura directa de turnos y eventos. Revisar los permisos restantes de la Data API es parte del [backlog](backlog.md).
 

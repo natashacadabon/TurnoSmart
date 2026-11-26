@@ -2,6 +2,7 @@ import { AppointmentStatus, ProfileRole } from '@prisma/client';
 
 export const SEED_TIME_ZONE = 'America/Argentina/Buenos_Aires';
 export const SEED_ADMIN_EMAIL = 'admin@turnosmart.test';
+export const SEED_OWNER_EMAIL = 'owner@turnosmart.test';
 export const seedId = (kind: number, business: number, index = 0) =>
   `d${kind}000000-0000-4000-8000-${String(business * 100 + index).padStart(12, '0')}`;
 
@@ -59,26 +60,26 @@ export function buildSeedData(now = new Date()) {
     name: `Demo TurnoSmart ${b}`,
     timezone: SEED_TIME_ZONE,
   }));
-  const accounts = businesses.flatMap((b, i) => [
+  const accounts = [
     {
-      businessId: b.id,
-      email: i === 0 ? SEED_ADMIN_EMAIL : 'owner2@turnosmart.test',
-      role: ProfileRole.OWNER,
-      fullName: `Owner Demo ${i + 1}`,
-    },
-    {
-      businessId: b.id,
-      email: `manager${i + 1}@turnosmart.test`,
+      businessId: null,
+      email: SEED_ADMIN_EMAIL,
       role: ProfileRole.ADMIN,
-      fullName: `Admin Demo ${i + 1}`,
+      fullName: 'Administrador de plataforma',
     },
     {
-      businessId: b.id,
-      email: `staff${i + 1}@turnosmart.test`,
-      role: ProfileRole.STAFF,
-      fullName: `Staff Demo ${i + 1}`,
+      businessId: businesses[0]!.id,
+      email: SEED_OWNER_EMAIL,
+      role: ProfileRole.OWNER,
+      fullName: 'Owner Demo 1',
     },
-  ]);
+    {
+      businessId: businesses[1]!.id,
+      email: 'owner2@turnosmart.test',
+      role: ProfileRole.OWNER,
+      fullName: 'Owner Demo 2',
+    },
+  ];
   const customers = businesses.flatMap((b, i) =>
     [1, 2, 3, 4].map((n) => ({
       id: seedId(3, i + 1, n),
@@ -217,8 +218,14 @@ export function validateSeedData(data: SeedData) {
     )
       throw new Error('Relacion o duracion de seed invalida.');
   }
-  for (const row of [...data.accounts, ...data.customers, ...data.services, ...data.rules]) {
+  for (const row of [...data.customers, ...data.services, ...data.rules]) {
     if (!businessIds.has(row.businessId)) throw new Error('Registro de seed fuera de su negocio.');
+  }
+  for (const account of data.accounts) {
+    if (account.role === ProfileRole.ADMIN && account.businessId !== null)
+      throw new Error('El ADMIN de seed no puede tener negocio.');
+    if (account.role === ProfileRole.OWNER && !account.businessId)
+      throw new Error('El OWNER de seed debe tener negocio.');
   }
   if (new Set(data.accounts.map((a) => a.email)).size !== data.accounts.length)
     throw new Error('Emails de prueba duplicados.');

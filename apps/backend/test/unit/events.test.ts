@@ -9,7 +9,7 @@ describe('historial de eventos', () => {
     const ctx = buildTestApp();
     const businessId = randomUUID();
     const user = ctx.verifier.addUser();
-    ctx.identity.addMember(user.id, businessId, 'STAFF');
+    ctx.identity.addMember(user.id, businessId, 'OWNER');
     const auth = { Authorization: `Bearer ${user.token}` };
     const appointmentId = ctx.appointments.addAppointment(businessId);
 

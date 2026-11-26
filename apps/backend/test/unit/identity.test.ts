@@ -95,6 +95,27 @@ describe('onboarding', () => {
 });
 
 describe('permisos por rol', () => {
+  it('ADMIN se resuelve como cuenta global sin negocio y no accede a la API operativa', async () => {
+    const { app, verifier, identity } = buildTestApp();
+    const admin = verifier.addUser();
+    identity.addMember(admin.id, randomUUID(), 'ADMIN');
+
+    const me = await request(app).get('/api/me').set('Authorization', `Bearer ${admin.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({
+      onboarded: false,
+      platformAdmin: true,
+      business: null,
+      profile: { role: 'ADMIN' },
+    });
+
+    const operational = await request(app)
+      .get('/api/customers')
+      .set('Authorization', `Bearer ${admin.token}`);
+    expect(operational.status).toBe(403);
+    expect(operational.body.error.code).toBe('FORBIDDEN');
+  });
+
   it('STAFF no puede modificar el negocio; ADMIN sí', async () => {
     const { app, verifier, identity } = buildTestApp();
     const businessId = randomUUID();
@@ -110,11 +131,11 @@ describe('permisos por rol', () => {
     expect(denied.status).toBe(403);
     expect(denied.body.error.code).toBe('FORBIDDEN');
 
-    const ok = await request(app)
+    const deniedAdmin = await request(app)
       .patch('/api/business')
       .set('Authorization', `Bearer ${admin.token}`)
       .send({ name: 'Nuevo nombre' });
-    expect(ok.status).toBe(200);
-    expect(ok.body.name).toBe('Nuevo nombre');
+    expect(deniedAdmin.status).toBe(403);
+    expect(deniedAdmin.body.error.code).toBe('FORBIDDEN');
   });
 });

@@ -248,10 +248,8 @@ describe('seed: destinos y datos', () => {
       const data = buildSeedData(instant);
       expect(() => validateSeedData(data)).not.toThrow();
       expect(data.businesses).toHaveLength(2);
-      expect(data.accounts).toHaveLength(6);
-      expect(new Set(data.accounts.map((a) => a.role))).toEqual(
-        new Set(['OWNER', 'ADMIN', 'STAFF']),
-      );
+      expect(data.accounts).toHaveLength(3);
+      expect(new Set(data.accounts.map((a) => a.role))).toEqual(new Set(['OWNER', 'ADMIN']));
       expect(data.customers).toHaveLength(8);
       expect(data.services).toHaveLength(8);
       expect(data.rules).toHaveLength(20);
@@ -310,15 +308,15 @@ describe('seed: Supabase Auth con dobles, sin red', () => {
     const accounts = buildSeedData(now).accounts;
     const first = await ensureSeedUsers(admin, accounts, password());
     const second = await ensureSeedUsers(admin, accounts, password());
-    expect(users).toHaveLength(6);
-    expect(api.createUser).toHaveBeenCalledTimes(6);
+    expect(users).toHaveLength(3);
+    expect(api.createUser).toHaveBeenCalledTimes(3);
     expect(second).toEqual(first);
     expect(
       api.createUser.mock.calls.every(
         ([call]) => 'email_confirm' in call && call.email_confirm === true,
       ),
     ).toBe(true);
-    expect(first.find((p) => p.email === SEED_ADMIN_EMAIL)?.role).toBe('OWNER');
+    expect(first.find((p) => p.email === SEED_ADMIN_EMAIL)?.role).toBe('ADMIN');
   });
   it('pagina usuarios existentes sin depender de la primera pagina', async () => {
     const { users, admin, api } = fakeAdmin();
@@ -473,7 +471,7 @@ describe('seed: repeticion y aislamiento del runner con dobles', () => {
     expect(second).toEqual(first);
     expect(second).toEqual({
       businesses: 2,
-      profiles: 6,
+      profiles: 3,
       customers: 8,
       services: 8,
       availabilityRules: 20,

@@ -18,6 +18,13 @@ export interface ProfileRecord {
   role: Role;
 }
 
+export interface PlatformAdminRecord {
+  id: string;
+  businessId: null;
+  fullName: string | null;
+  role: 'ADMIN';
+}
+
 export interface ProfileWithBusiness {
   profile: ProfileRecord;
   business: BusinessRecord;
@@ -34,6 +41,7 @@ export interface OnboardingInput {
 
 export interface IdentityRepository {
   findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null>;
+  findPlatformAdmin?(userId: string): Promise<PlatformAdminRecord | null>;
   /**
    * Crea negocio y perfil OWNER en una transacción.
    * Devuelve `created: false` con el negocio existente si la cuenta ya estaba asociada,
@@ -74,12 +82,13 @@ export class PrismaIdentityRepository implements IdentityRepository {
       where: { id: userId },
       include: { business: { select: businessSelect } },
     });
-    if (!profile) return null;
+    if (!profile || profile.role !== 'OWNER' || !profile.businessId || !profile.business)
+      return null;
     const { business, ...rest } = profile;
     return {
       profile: {
         id: rest.id,
-        businessId: rest.businessId,
+        businessId: profile.businessId,
         fullName: rest.fullName,
         role: rest.role,
       },
@@ -87,7 +96,22 @@ export class PrismaIdentityRepository implements IdentityRepository {
     };
   }
 
+  async findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null> {
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: userId, role: 'ADMIN', businessId: null },
+      select: { id: true, fullName: true, role: true },
+    });
+    if (!profile) return null;
+    return { ...profile, businessId: null, role: 'ADMIN' };
+  }
+
   async onboard(input: OnboardingInput): Promise<ProfileWithBusiness & { created: boolean }> {
+    if (await this.findPlatformAdmin(input.userId)) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Las cuentas ADMIN no pueden crear un negocio desde onboarding',
+      );
+    }
     const existing = await this.findProfileWithBusiness(input.userId);
     if (existing) return { ...existing, created: false };
 
@@ -107,7 +131,7 @@ export class PrismaIdentityRepository implements IdentityRepository {
           },
           select: { id: true, businessId: true, fullName: true, role: true },
         });
-        return { business, profile };
+        return { business, profile: { ...profile, businessId: business.id } };
       });
       return { ...result, created: true };
     } catch (err) {

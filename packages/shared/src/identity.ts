@@ -1,24 +1,25 @@
 import { z } from 'zod';
 
 /** Roles existentes en Profile. OWNER sólo lo asigna el backend durante el onboarding. */
+/** ADMIN is global; OWNER is scoped to one business. STAFF is legacy-only. */
 export const ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
 export type Role = (typeof ROLES)[number];
 
 /** Matriz de permisos: OWNER/ADMIN configuran y eliminan clientes; todos dan de alta y editan clientes y turnos. */
 export const PERMISSIONS = {
-  'business:update': ['OWNER', 'ADMIN'],
-  'services:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'services:write': ['OWNER', 'ADMIN'],
-  'availability:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'availability:write': ['OWNER', 'ADMIN'],
-  'slots:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'customers:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'customers:write': ['OWNER', 'ADMIN', 'STAFF'],
+  'business:update': ['OWNER'],
+  'services:read': ['OWNER'],
+  'services:write': ['OWNER'],
+  'availability:read': ['OWNER'],
+  'availability:write': ['OWNER'],
+  'slots:read': ['OWNER'],
+  'customers:read': ['OWNER'],
+  'customers:write': ['OWNER'],
   // Baja definitiva: sólo quienes administran el negocio.
-  'customers:delete': ['OWNER', 'ADMIN'],
-  'appointments:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'appointments:write': ['OWNER', 'ADMIN', 'STAFF'],
-  'risk:explain': ['OWNER', 'ADMIN', 'STAFF'],
+  'customers:delete': ['OWNER'],
+  'appointments:read': ['OWNER'],
+  'appointments:write': ['OWNER'],
+  'risk:explain': ['OWNER'],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -34,6 +35,7 @@ export interface AuthContext {
   businessId: string;
   timezone: string;
   role: Role;
+  platformAdmin: false;
 }
 
 export interface BusinessDto {
@@ -91,11 +93,19 @@ export interface ProfileDto {
 export type MeResponse =
   | {
       onboarded: true;
+      platformAdmin: false;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: BusinessDto;
     }
-  | { onboarded: false; user: { id: string; email: string | null } };
+  | {
+      onboarded: false;
+      platformAdmin: true;
+      user: { id: string; email: string | null };
+      profile: ProfileDto;
+      business: null;
+    }
+  | { onboarded: false; platformAdmin: false; user: { id: string; email: string | null } };
 
 const timezone = z
   .string()

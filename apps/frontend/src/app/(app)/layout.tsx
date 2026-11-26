@@ -23,12 +23,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status === 'signedOut') router.replace('/login');
+    else if (status === 'signedIn' && me?.platformAdmin) router.replace('/admin');
     else if (status === 'signedIn' && me && !me.onboarded) router.replace('/onboarding');
   }, [status, me, router]);
 
   if (status === 'signedIn' && !me && meError) return <AccountError message={meError} />;
 
-  if (status !== 'signedIn' || !me?.onboarded) {
+  if (status !== 'signedIn' || !me?.onboarded || me.platformAdmin) {
     return (
       <div className={styles.loading}>
         <CircularProgress aria-label="Cargando" />

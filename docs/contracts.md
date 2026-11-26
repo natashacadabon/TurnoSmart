@@ -47,12 +47,15 @@ interface AuthContext {
   email: string | null;
   businessId: string;
   timezone: string;
-  role: 'OWNER' | 'ADMIN' | 'STAFF';
+  role: 'OWNER';
+  platformAdmin: false;
 }
 ```
 
-Matriz de permisos (`PERMISSIONS` en shared): OWNER/ADMIN configuran el negocio; los tres roles gestionan clientes,
-turnos y piden explicaciones. La baja de clientes requiere OWNER o ADMIN.
+`ADMIN` se informa en `GET /api/me` como `platformAdmin: true`, con `business: null`; no atraviesa las rutas operativas ni recibe un `AuthContext` de negocio.
+
+Matriz de permisos (`PERMISSIONS` en shared): ADMIN es global y no tiene acceso operativo a un negocio. OWNER
+configura el negocio, gestiona clientes y turnos y pide explicaciones. Todas las rutas de negocio requieren OWNER.
 
 ## Identidad
 
@@ -60,7 +63,7 @@ turnos y piden explicaciones. La baja de clientes requiere OWNER o ADMIN.
 - `POST /api/onboarding` `{ businessName, timezone?, fullName? }` → 201 la primera vez; 200 con el mismo negocio si se
   repite (también ante requests concurrentes). El rol `OWNER` lo asigna el backend. `Profile.email` se toma del usuario de
   Supabase Auth; una cuenta sin email recibe 422.
-- `PATCH /api/business` `{ name?, timezone? }` → `BusinessDto`. Solo OWNER/ADMIN. Un cambio de zona que deje turnos vigentes fuera de disponibilidad devuelve `409 AVAILABILITY_CONFLICT`.
+- `PATCH /api/business` `{ name?, timezone? }` → `BusinessDto`. Solo OWNER. Un cambio de zona que deje turnos vigentes fuera de disponibilidad devuelve `409 AVAILABILITY_CONFLICT`.
 
 ## Clientes
 
@@ -69,7 +72,7 @@ turnos y piden explicaciones. La baja de clientes requiere OWNER o ADMIN.
   El email se guarda sin espacios y en minúsculas. El teléfono acepta dígitos, espacios, guiones, paréntesis y `+` inicial,
   con al menos 6 dígitos (`+54 221 555-1234`); otro texto responde 422 en `phone`.
 - `GET /api/customers/:id`, `PATCH /api/customers/:id` (parcial).
-- `DELETE /api/customers/:id` → 204. Solo OWNER/ADMIN (`customers:delete`). Si el cliente tiene turnos responde
+- `DELETE /api/customers/:id` → 204. Solo OWNER (`customers:delete`). Si el cliente tiene turnos responde
   409 `CUSTOMER_HAS_APPOINTMENTS` y no borra nada: los turnos lo referencian y conservan el historial.
 
 ## Historial y riesgo
@@ -93,7 +96,7 @@ Un turno activo usa `operationalStatus: SCHEDULED`. Su `confirmationStatus` pued
 
 ### Preferencias y acciones del cliente
 
-- `GET /api/business/notification-preferences` devuelve las preferencias del negocio de la sesión. `PATCH` admite un objeto parcial para OWNER y ADMIN. Los booleanos de email son `bookingEmailEnabled`, `confirmationEmailEnabled`, `cancellationEmailEnabled` y `rescheduleEmailEnabled`. Los negocios nuevos reciben correo de reserva y confirmación activados; cancelación y reprogramación comienzan desactivados. Las tres acciones públicas comienzan habilitadas y los mínimos de cancelación/reprogramación son 0 horas. Las preferencias anteriores de correo y recordatorios se conservan al migrar; la confirmación inicial de negocios existentes se copia de su preferencia previa de reserva.
+- `GET /api/business/notification-preferences` devuelve las preferencias del negocio de la sesión. `PATCH` admite un objeto parcial solo para OWNER. Los booleanos de email son `bookingEmailEnabled`, `confirmationEmailEnabled`, `cancellationEmailEnabled` y `rescheduleEmailEnabled`. Los negocios nuevos reciben correo de reserva y confirmación activados; cancelación y reprogramación comienzan desactivados. Las tres acciones públicas comienzan habilitadas y los mínimos de cancelación/reprogramación son 0 horas. Las preferencias anteriores de correo y recordatorios se conservan al migrar; la confirmación inicial de negocios existentes se copia de su preferencia previa de reserva.
 - `remindersEnabled` y `reminderHours` configuran hasta tres anticipaciones distintas entre 2, 6, 12, 24, 48 y 72 horas. En negocios nuevos comienzan habilitados con 48 y 24 horas. Guardar recordatorios habilitados sin ninguna anticipación devuelve `422 VALIDATION_ERROR` en `reminderHours`; con recordatorios deshabilitados se permite conservar la selección o guardar una lista vacía. Los campos históricos `reminder24hEnabled` y `reminder48hEnabled` mantienen compatibilidad y se sincronizan con la configuración de anticipaciones. Cambiar estos campos de recordatorios reconcilia trabajos pendientes de reservas futuras y conserva los envíos procesados. Los demás booleanos de correo se comprueban al reclamar cada envío.
 - `customerConfirmationEnabled`, `customerCancellationEnabled` y `customerRescheduleEnabled` regulan las acciones públicas. `cancellationMinimumHours` y `rescheduleMinimumHours` admiten enteros de 0 a 720. Para un enlace vigente y un turno activo futuro, preview devuelve `allowed: false` si la acción se deshabilita o no cumple su anticipación mínima. Ejecutar confirmación o solicitud deshabilitadas devuelve `403 FORBIDDEN`. Cancelación conserva `409 APPOINTMENT_CANCELLATION_NOT_ALLOWED`. La consulta pública de slots también verifica la política. El personal conserva sus permisos internos.
 - Crear una reserva encola el correo de forma atómica cuando la preferencia está habilitada y el cliente tiene un email válido; el procesamiento se solicita de forma asíncrona después de completar la respuesta HTTP. Los fallos mantienen la reserva y el trabajo para su reintento.

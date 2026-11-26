@@ -24,6 +24,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (status === 'signedOut') router.replace('/login');
+    if (me?.platformAdmin) router.replace('/admin');
     if (me?.onboarded) router.replace('/customers');
   }, [status, me, router]);
 
