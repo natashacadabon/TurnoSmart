@@ -43,3 +43,14 @@ playwright/.cache/
 
 
 .local/
+
+# Database backups and recovery staging (never migration SQL).
+**/backups/
+*.dump
+*.dump.*
+*.pgdump
+*.backup
+*.backup.json
+*.meta.enc
+*.backup-key
+.turnosmart-backup-*/

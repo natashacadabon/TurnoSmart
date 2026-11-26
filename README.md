@@ -4,7 +4,7 @@ TurnoSmart es un proyecto académico de SaaS para negocios que atienden con turn
 
 ## Estado del repositorio
 
-La descripción corresponde al código actual de la rama `feat/confirma-turnos`. La activación y las pruebas en cada entorno publicado se registran por separado en el [backlog](docs/backlog.md).
+La descripción corresponde al código actual del repositorio. La activación y las pruebas en cada entorno publicado se registran por separado en el [backlog](docs/backlog.md).
 
 | Área                 | Funcionalidad disponible en el código                                                                                                                                                                                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
