@@ -1,4 +1,4 @@
-import type { AuthContext } from '@turnosmart/shared';
+import type { AdminContext, AuthContext } from '@turnosmart/shared';
 
 declare global {
   namespace Express {
@@ -6,8 +6,10 @@ declare global {
       requestId: string;
       /** Usuario de Supabase Auth con token válido. */
       user?: { id: string; email: string | null };
-      /** Contexto de negocio resuelto desde Profile. */
+      /** Contexto de negocio de un OWNER activo, resuelto desde Profile. */
       auth?: AuthContext;
+      /** Contexto de un ADMIN global activo, resuelto desde platform_admins. */
+      admin?: AdminContext;
     }
   }
 }

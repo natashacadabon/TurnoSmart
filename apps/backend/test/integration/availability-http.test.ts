@@ -10,28 +10,32 @@ const rule = { dayOfWeek: 1, startTime: '09:00', endTime: '12:00' };
 describe('disponibilidad: HTTP, permisos y aislamiento', () => {
   let ctx: ReturnType<typeof buildTestApp>;
   let owner: { Authorization: string };
-  let admin: { Authorization: string };
-  let staff: { Authorization: string };
+  let coOwner: { Authorization: string };
+  let platformAdmin: { Authorization: string };
+  let disabledOwner: { Authorization: string };
   let other: { Authorization: string };
   beforeEach(() => {
     ctx = buildTestApp();
     const businessId = randomUUID();
-    const member = (role: 'OWNER' | 'ADMIN' | 'STAFF', business = businessId) => {
+    const member = (business = businessId, active = true) => {
       const user = ctx.verifier.addUser();
-      ctx.identity.addMember(user.id, business, role);
+      ctx.identity.addMember(user.id, business, 'OWNER', active);
       return { Authorization: `Bearer ${user.token}` };
     };
-    owner = member('OWNER');
-    admin = member('ADMIN');
-    staff = member('STAFF');
-    other = member('OWNER', randomUUID());
+    owner = member();
+    coOwner = member();
+    disabledOwner = member(businessId, false);
+    other = member(randomUUID());
+    const admin = ctx.verifier.addUser();
+    ctx.identity.addPlatformAdmin(admin.id);
+    platformAdmin = { Authorization: `Bearer ${admin.token}` };
     ctx.identity.businesses.get(businessId)!.timezone = 'America/Argentina/Buenos_Aires';
   });
   const put = (rules: unknown[], auth = owner) =>
     request(ctx.app).put(path).set(auth).send({ rules });
 
   it('lee semana vacia y reemplaza con DTO explicito, zona del negocio y orden estable', async () => {
-    expect((await request(ctx.app).get(path).set(staff)).body).toEqual({
+    expect((await request(ctx.app).get(path).set(coOwner)).body).toEqual({
       data: { timezone: 'America/Argentina/Buenos_Aires', rules: [] },
     });
     const result = await put([
@@ -53,12 +57,12 @@ describe('disponibilidad: HTTP, permisos y aislamiento', () => {
       '09:00',
     ]);
     expect(result.body.data.rules[2].active).toBe(false);
-    expect((await request(ctx.app).get(path).set(staff)).body).toEqual(result.body);
+    expect((await request(ctx.app).get(path).set(coOwner)).body).toEqual(result.body);
     expect(JSON.stringify(result.body)).not.toContain('businessId');
   });
-  it('ADMIN reemplaza, elimina omitidos, conserva IDs/createdAt y admite vaciar semana', async () => {
+  it('otro OWNER del negocio reemplaza, elimina omitidos, conserva IDs/createdAt y admite vaciar semana', async () => {
     const first = await put([rule, { ...rule, dayOfWeek: 2 }]);
-    const second = await put([{ ...rule, active: false }], admin);
+    const second = await put([{ ...rule, active: false }], coOwner);
     expect(second.status).toBe(200);
     expect(second.body.data.rules).toHaveLength(1);
     expect(second.body.data.rules[0]).toMatchObject({
@@ -77,13 +81,35 @@ describe('disponibilidad: HTTP, permisos y aislamiento', () => {
     await put([], other);
     expect((await request(ctx.app).get(path).set(owner)).body).toEqual(first.body);
   });
-  it('STAFF lee pero no escribe ni inyectando rol', async () => {
-    expect((await request(ctx.app).get(path).set(staff)).status).toBe(200);
+  it('el ADMIN de plataforma no lee ni escribe, ni inyectando rol o negocio', async () => {
     const spy = vi.spyOn(ctx.availability, 'replace');
-    expect((await put([], staff)).status).toBe(403);
+    const read = await request(ctx.app).get(path).set(platformAdmin);
+    expect(read.status).toBe(403);
+    expect(read.body.error.code).toBe('FORBIDDEN');
+    const write = await put([], platformAdmin);
+    expect(write.status).toBe(403);
+    expect(write.body.error.code).toBe('FORBIDDEN');
     expect(
-      (await request(ctx.app).put(path).set(staff).send({ rules: [], role: 'OWNER' })).status,
+      (
+        await request(ctx.app)
+          .put(path)
+          .set(platformAdmin)
+          .send({ rules: [], role: 'OWNER', businessId: randomUUID() })
+      ).status,
     ).toBe(403);
+    expect(spy).not.toHaveBeenCalled();
+  });
+  it('un OWNER desactivado no lee ni escribe, ni inyectando rol', async () => {
+    const spy = vi.spyOn(ctx.availability, 'replace');
+    const read = await request(ctx.app).get(path).set(disabledOwner);
+    expect(read.status).toBe(403);
+    expect(read.body.error.code).toBe('ACCOUNT_DISABLED');
+    const write = await request(ctx.app)
+      .put(path)
+      .set(disabledOwner)
+      .send({ rules: [], role: 'OWNER' });
+    expect(write.status).toBe(403);
+    expect(write.body.error.code).toBe('ACCOUNT_DISABLED');
     expect(spy).not.toHaveBeenCalled();
   });
   it('ambas rutas requieren token verificado y perfil', async () => {

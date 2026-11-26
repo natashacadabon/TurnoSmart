@@ -1,24 +1,34 @@
 import { z } from 'zod';
 
-/** Roles existentes en Profile. OWNER sólo lo asigna el backend durante el onboarding. */
-export const ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
+/**
+ * Roles de la plataforma.
+ * - ADMIN: administrador global (tabla platform_admins). No pertenece a ningún negocio y no opera
+ *   clientes, servicios, disponibilidad, agenda, turnos, riesgo ni notificaciones.
+ * - OWNER: administrador operativo de un negocio (tabla profiles). Lo invita un ADMIN.
+ */
+export const ROLES = ['ADMIN', 'OWNER'] as const;
 export type Role = (typeof ROLES)[number];
 
-/** Matriz de permisos: OWNER/ADMIN configuran y eliminan clientes; todos dan de alta y editan clientes y turnos. */
+/**
+ * Matriz de permisos. Las operaciones del negocio son exclusivas de OWNER; la administración de
+ * negocios y propietarios es exclusiva de ADMIN. Ningún permiso se comparte entre ambos roles.
+ */
 export const PERMISSIONS = {
-  'business:update': ['OWNER', 'ADMIN'],
-  'services:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'services:write': ['OWNER', 'ADMIN'],
-  'availability:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'availability:write': ['OWNER', 'ADMIN'],
-  'slots:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'customers:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'customers:write': ['OWNER', 'ADMIN', 'STAFF'],
-  // Baja definitiva: sólo quienes administran el negocio.
-  'customers:delete': ['OWNER', 'ADMIN'],
-  'appointments:read': ['OWNER', 'ADMIN', 'STAFF'],
-  'appointments:write': ['OWNER', 'ADMIN', 'STAFF'],
-  'risk:explain': ['OWNER', 'ADMIN', 'STAFF'],
+  'business:update': ['OWNER'],
+  'services:read': ['OWNER'],
+  'services:write': ['OWNER'],
+  'availability:read': ['OWNER'],
+  'availability:write': ['OWNER'],
+  'slots:read': ['OWNER'],
+  'customers:read': ['OWNER'],
+  'customers:write': ['OWNER'],
+  'customers:delete': ['OWNER'],
+  'appointments:read': ['OWNER'],
+  'appointments:write': ['OWNER'],
+  'risk:explain': ['OWNER'],
+  // Panel de administración de la plataforma (FINAL-11).
+  'platform:businesses': ['ADMIN'],
+  'platform:owners': ['ADMIN'],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -27,13 +37,20 @@ export function can(role: Role, permission: Permission): boolean {
   return (PERMISSIONS[permission] as readonly Role[]).includes(role);
 }
 
-/** Contexto autenticado resuelto por el backend. El negocio nunca se toma del body. */
+/** Contexto de un OWNER activo resuelto por el backend. El negocio nunca se toma del body. */
 export interface AuthContext {
   userId: string;
   email: string | null;
   businessId: string;
   timezone: string;
-  role: Role;
+  role: 'OWNER';
+}
+
+/** Contexto de un ADMIN global activo. No tiene negocio asociado. */
+export interface AdminContext {
+  userId: string;
+  email: string | null;
+  role: 'ADMIN';
 }
 
 export interface BusinessDto {
@@ -84,18 +101,42 @@ export const updateBusinessNotificationPreferencesSchema = businessNotificationP
 export interface ProfileDto {
   id: string;
   fullName: string | null;
-  role: Role;
+  role: 'OWNER';
 }
 
-/** GET /api/me */
+export interface PlatformAdminDto {
+  id: string;
+  fullName: string | null;
+  role: 'ADMIN';
+}
+
+/** Por qué una cuenta autenticada no tiene acceso: sin perfil asignado o desactivada por un ADMIN. */
+export type NoAccessReason = 'NO_PROFILE' | 'DISABLED';
+
+/**
+ * GET /api/me. `onboarded` es true sólo para un OWNER activo con negocio (las pantallas del negocio
+ * dependen de eso); `access` distingue OWNER, ADMIN global y cuentas sin acceso.
+ */
 export type MeResponse =
   | {
+      access: 'OWNER';
       onboarded: true;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: BusinessDto;
     }
-  | { onboarded: false; user: { id: string; email: string | null } };
+  | {
+      access: 'ADMIN';
+      onboarded: false;
+      user: { id: string; email: string | null };
+      admin: PlatformAdminDto;
+    }
+  | {
+      access: 'NONE';
+      onboarded: false;
+      user: { id: string; email: string | null };
+      reason: NoAccessReason;
+    };
 
 const timezone = z
   .string()
@@ -111,14 +152,6 @@ const timezone = z
     },
     { message: 'Zona horaria IANA inválida' },
   );
-
-/** POST /api/onboarding */
-export const onboardingSchema = z.object({
-  businessName: z.string().trim().min(2).max(120),
-  timezone: timezone.default('America/Argentina/Buenos_Aires'),
-  fullName: z.string().trim().min(1).max(120).optional(),
-});
-export type OnboardingRequest = z.input<typeof onboardingSchema>;
 
 /** PATCH /api/business */
 export const updateBusinessSchema = z

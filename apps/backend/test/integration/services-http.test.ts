@@ -8,25 +8,29 @@ const payload = { name: 'Corte', durationMinutes: 30 };
 describe('servicios: integracion HTTP, auth y tenant', () => {
   let ctx: ReturnType<typeof buildTestApp>;
   let owner: { Authorization: string };
-  let admin: { Authorization: string };
-  let staff: { Authorization: string };
+  let coOwner: { Authorization: string };
+  let platformAdmin: { Authorization: string };
+  let disabledOwner: { Authorization: string };
   let other: { Authorization: string };
   beforeEach(() => {
     ctx = buildTestApp();
     const business = randomUUID();
-    const add = (role: 'OWNER' | 'ADMIN' | 'STAFF', businessId = business) => {
+    const add = (businessId = business, active = true) => {
       const user = ctx.verifier.addUser();
-      ctx.identity.addMember(user.id, businessId, role);
+      ctx.identity.addMember(user.id, businessId, 'OWNER', active);
       return { Authorization: `Bearer ${user.token}` };
     };
-    owner = add('OWNER');
-    admin = add('ADMIN');
-    staff = add('STAFF');
-    other = add('OWNER', randomUUID());
+    owner = add();
+    coOwner = add();
+    disabledOwner = add(business, false);
+    other = add(randomUUID());
+    const admin = ctx.verifier.addUser();
+    ctx.identity.addPlatformAdmin(admin.id);
+    platformAdmin = { Authorization: `Bearer ${admin.token}` };
   });
   const create = async () => request(ctx.app).post('/api/services').set(owner).send(payload);
 
-  it('crea con defaults, fechas UTC y DTO sin tenant; STAFF puede leer', async () => {
+  it('crea con defaults, fechas UTC y DTO sin tenant; otro OWNER del negocio puede leer', async () => {
     const res = await create();
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({
@@ -38,17 +42,17 @@ describe('servicios: integracion HTTP, auth y tenant', () => {
       createdAt: expect.stringMatching(/\.\d{3}Z$/),
       updatedAt: expect.any(String),
     });
-    const list = await request(ctx.app).get('/api/services').set(staff);
+    const list = await request(ctx.app).get('/api/services').set(coOwner);
     expect(list.status).toBe(200);
     expect(list.body).toEqual({
       data: [res.body.data],
       meta: { active: 'true', limit: 50, offset: 0, total: 1 },
     });
   });
-  it('ADMIN edita; PATCH conserva omitidos, admite null/0, desactiva y reactiva sin borrar', async () => {
+  it('otro OWNER edita; PATCH conserva omitidos, admite null/0, desactiva y reactiva sin borrar', async () => {
     const created = await create();
     const id = created.body.data.id;
-    const patch = await request(ctx.app).patch(`/api/services/${id}`).set(admin).send({
+    const patch = await request(ctx.app).patch(`/api/services/${id}`).set(coOwner).send({
       name: ' Corte nuevo ',
       description: ' ',
       priceCents: 0,
@@ -193,24 +197,45 @@ describe('servicios: integracion HTTP, auth y tenant', () => {
     ).toBe(422);
     expect((await request(ctx.app).post('/api/services').set(owner).send({})).status).toBe(422);
   });
-  it('STAFF no escribe aunque intente inyectar rol', async () => {
+  it('el ADMIN de plataforma no lee ni escribe aunque intente inyectar rol', async () => {
     const res = await create();
-    expect(
-      (
-        await request(ctx.app)
-          .post('/api/services')
-          .set(staff)
-          .send({ ...payload, role: 'OWNER' })
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await request(ctx.app)
-          .patch(`/api/services/${res.body.data.id}`)
-          .set(staff)
-          .send({ active: false })
-      ).status,
-    ).toBe(403);
+    const calls = [
+      request(ctx.app).get('/api/services').set(platformAdmin),
+      request(ctx.app)
+        .post('/api/services')
+        .set(platformAdmin)
+        .send({ ...payload, role: 'OWNER' }),
+      request(ctx.app)
+        .patch(`/api/services/${res.body.data.id}`)
+        .set(platformAdmin)
+        .send({ active: false }),
+    ];
+    for (const denied of await Promise.all(calls)) {
+      expect(denied.status).toBe(403);
+      expect(denied.body.error.code).toBe('FORBIDDEN');
+    }
+    expect(ctx.services.rows).toHaveLength(1);
+    expect(ctx.services.rows[0]!.active).toBe(true);
+  });
+  it('un OWNER desactivado no lee ni escribe aunque intente inyectar rol', async () => {
+    const res = await create();
+    const calls = [
+      request(ctx.app).get('/api/services').set(disabledOwner),
+      request(ctx.app)
+        .post('/api/services')
+        .set(disabledOwner)
+        .send({ ...payload, role: 'OWNER' }),
+      request(ctx.app)
+        .patch(`/api/services/${res.body.data.id}`)
+        .set(disabledOwner)
+        .send({ active: false }),
+    ];
+    for (const denied of await Promise.all(calls)) {
+      expect(denied.status).toBe(403);
+      expect(denied.body.error.code).toBe('ACCOUNT_DISABLED');
+    }
+    expect(ctx.services.rows).toHaveLength(1);
+    expect(ctx.services.rows[0]!.active).toBe(true);
   });
   it('requiere token verificado y perfil A; JSON invalido mantiene contrato A', async () => {
     expect((await request(ctx.app).get('/api/services')).status).toBe(401);

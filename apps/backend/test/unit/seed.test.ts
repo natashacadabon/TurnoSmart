@@ -8,6 +8,8 @@ import {
   validateSeedData,
   assertNoActiveOverlaps,
   SEED_ADMIN_EMAIL,
+  SEED_OWNER_EMAIL,
+  SEED_PLATFORM_ADMIN_EMAIL,
 } from '../../prisma/seed-data.js';
 import { readSeedConfig, ensureSeedUsers, verifyAdminLogin } from '../../prisma/seed-auth.js';
 import { seedDomain } from '../../prisma/seed-runner.js';
@@ -249,9 +251,27 @@ describe('seed: destinos y datos', () => {
       expect(() => validateSeedData(data)).not.toThrow();
       expect(data.businesses).toHaveLength(2);
       expect(data.accounts).toHaveLength(6);
-      expect(new Set(data.accounts.map((a) => a.role))).toEqual(
-        new Set(['OWNER', 'ADMIN', 'STAFF']),
-      );
+      expect(new Set(data.accounts.map((a) => a.role))).toEqual(new Set(['OWNER']));
+      // Por negocio: un OWNER activo y dos OWNER desactivados (antiguos ADMIN/STAFF de negocio).
+      for (const business of data.businesses) {
+        const members = data.accounts.filter((a) => a.businessId === business.id);
+        expect(members.filter((a) => a.active)).toHaveLength(1);
+        expect(members.filter((a) => !a.active)).toHaveLength(2);
+      }
+      for (const a of data.accounts) {
+        // Igual que la restriccion de la base: active si y solo si deactivatedAt es null.
+        expect(a.active).toBe(a.deactivatedAt === null);
+      }
+      expect(data.accounts.find((a) => a.email === SEED_OWNER_EMAIL)).toMatchObject({
+        role: 'OWNER',
+        active: true,
+        businessId: data.businesses[0]!.id,
+      });
+      expect(SEED_OWNER_EMAIL).toBe(SEED_ADMIN_EMAIL);
+      expect(data.platformAdmins).toEqual([
+        { email: SEED_PLATFORM_ADMIN_EMAIL, fullName: expect.any(String) },
+      ]);
+      expect(data.accounts.some((a) => a.email === SEED_PLATFORM_ADMIN_EMAIL)).toBe(false);
       expect(data.customers).toHaveLength(8);
       expect(data.services).toHaveLength(8);
       expect(data.rules).toHaveLength(20);
@@ -285,18 +305,28 @@ describe('seed: destinos y datos', () => {
     first.customerId = data.customers[4]!.id;
     expect(() => validateSeedData(data)).toThrow(/Relacion/);
   });
+  it('rechaza un email repetido entre OWNER y ADMIN de plataforma', () => {
+    const data = buildSeedData(now);
+    data.platformAdmins = [{ ...data.platformAdmins[0]!, email: SEED_OWNER_EMAIL }];
+    expect(() => validateSeedData(data)).toThrow(/duplicados/);
+  });
 });
 
 function fakeAdmin() {
-  type User = { id: string; email: string; email_confirmed_at: string };
+  type User = {
+    id: string;
+    email: string;
+    email_confirmed_at: string;
+    password?: string | undefined;
+  };
   const users: User[] = [];
   const api = {
     listUsers: vi.fn(async ({ page, perPage }: { page: number; perPage: number }) => ({
       data: { users: users.slice((page - 1) * perPage, page * perPage) },
       error: null,
     })),
-    createUser: vi.fn(async ({ email }: { email: string }) => {
-      const user = { id: randomUUID(), email, email_confirmed_at: now.toISOString() };
+    createUser: vi.fn(async ({ email, password }: { email: string; password?: string }) => {
+      const user = { id: randomUUID(), email, password, email_confirmed_at: now.toISOString() };
       users.push(user);
       return { data: { user }, error: null };
     }),
@@ -319,6 +349,27 @@ describe('seed: Supabase Auth con dobles, sin red', () => {
       ),
     ).toBe(true);
     expect(first.find((p) => p.email === SEED_ADMIN_EMAIL)?.role).toBe('OWNER');
+  });
+  it('crea el ADMIN de plataforma con el mismo helper generico y conserva sus campos', async () => {
+    const { users, api, admin } = fakeAdmin();
+    const data = buildSeedData(now);
+    const seedPassword = password();
+    const owners = await ensureSeedUsers(admin, data.accounts, seedPassword);
+    const platform = await ensureSeedUsers(admin, data.platformAdmins, seedPassword);
+    expect(platform).toEqual([
+      {
+        id: expect.any(String),
+        email: SEED_PLATFORM_ADMIN_EMAIL,
+        fullName: data.platformAdmins[0]!.fullName,
+      },
+    ]);
+    expect(owners.some((o) => o.id === platform[0]!.id)).toBe(false);
+    expect(api.createUser).toHaveBeenCalledTimes(7);
+    // Solo el OWNER demo y el ADMIN de plataforma reciben la password conocida del seed.
+    const known = users.filter((u) => u.password === seedPassword).map((u) => u.email);
+    expect(known.sort()).toEqual([SEED_OWNER_EMAIL, SEED_PLATFORM_ADMIN_EMAIL].sort());
+    expect(await ensureSeedUsers(admin, data.platformAdmins, password())).toEqual(platform);
+    expect(api.createUser).toHaveBeenCalledTimes(7);
   });
   it('pagina usuarios existentes sin depender de la primera pagina', async () => {
     const { users, admin, api } = fakeAdmin();
@@ -379,6 +430,7 @@ function memoryPrisma() {
   const names = [
     'business',
     'profile',
+    'platformAdmin',
     'customer',
     'service',
     'availabilityRule',
@@ -464,16 +516,19 @@ describe('seed: repeticion y aislamiento del runner con dobles', () => {
     const profiles = data.accounts.map((a) => ({ ...a, id: randomUUID() }));
     const untouched = { id: randomUUID(), name: 'Dato existente' };
     rows().business!.set(untouched.id, untouched);
-    const first = await seedDomain(prisma, data, profiles);
+    const platformAdmins = data.platformAdmins.map((a) => ({ ...a, id: randomUUID() }));
+    const first = await seedDomain(prisma, data, profiles, platformAdmins);
     const second = await seedDomain(
       prisma,
       buildSeedData(new Date(now.getTime() + 7 * 86400000)),
       profiles,
+      platformAdmins,
     );
     expect(second).toEqual(first);
     expect(second).toEqual({
       businesses: 2,
       profiles: 6,
+      platformAdmins: 1,
       customers: 8,
       services: 8,
       availabilityRules: 20,
@@ -484,6 +539,12 @@ describe('seed: repeticion y aislamiento del runner con dobles', () => {
     });
     expect(rows().business!.get(untouched.id)).toEqual(untouched);
     expect(rows().business!.size).toBe(3);
+    expect(rows().platformAdmin!.size).toBe(1);
+    expect([...rows().profile!.values()].filter((p) => p.active)).toHaveLength(2);
+    for (const p of rows().profile!.values()) {
+      expect(p.role).toBe('OWNER');
+      expect(p.active).toBe(p.deactivatedAt === null);
+    }
     for (const a of rows().appointment!.values()) {
       expect(rows().service!.get(a.serviceId as string)?.businessId).toBe(a.businessId);
       expect(rows().customer!.get(a.customerId as string)?.businessId).toBe(a.businessId);
@@ -504,5 +565,38 @@ describe('seed: repeticion y aislamiento del runner con dobles', () => {
     await expect(seedDomain(prisma, data, profiles)).rejects.toThrow(/superpuestos/);
     expect(rows().business!.size).toBe(0);
     expect(rows().appointment!.size).toBe(1);
+  });
+  it('rechaza una cuenta que sea ADMIN de plataforma y OWNER a la vez, sin escribir nada', async () => {
+    const data = buildSeedData(now);
+    const profiles = data.accounts.map((a) => ({ ...a, id: randomUUID() }));
+    const admin = { ...data.platformAdmins[0]!, id: profiles[0]!.id };
+    // Se cancela en la etapa de perfiles, antes de crear negocios, perfiles o ADMIN.
+    const conflict = { diagnostic: { stage: 'profiles', type: 'SeedError' } };
+
+    // El mismo ID en ambas listas del seed.
+    let db = memoryPrisma();
+    await expect(seedDomain(db.prisma, data, profiles, [admin])).rejects.toMatchObject(conflict);
+    expect(db.rows().platformAdmin!.size).toBe(0);
+    expect(db.rows().business!.size).toBe(0);
+
+    // El ADMIN ya tiene un perfil de negocio en la base.
+    db = memoryPrisma();
+    const adminId = randomUUID();
+    db.rows().profile!.set(adminId, { id: adminId, businessId: randomUUID(), role: 'OWNER' });
+    await expect(
+      seedDomain(db.prisma, data, profiles, [{ ...admin, id: adminId }]),
+    ).rejects.toMatchObject(conflict);
+    expect(db.rows().platformAdmin!.size).toBe(0);
+    expect(db.rows().business!.size).toBe(0);
+
+    // Un OWNER del seed ya es ADMIN de plataforma en la base.
+    db = memoryPrisma();
+    db.rows().platformAdmin!.set(profiles[1]!.id, { id: profiles[1]!.id, active: true });
+    await expect(
+      seedDomain(db.prisma, data, profiles, [{ ...admin, id: randomUUID() }]),
+    ).rejects.toMatchObject(conflict);
+    expect(db.rows().platformAdmin!.size).toBe(1);
+    expect(db.rows().business!.size).toBe(0);
+    expect(db.rows().profile!.size).toBe(0);
   });
 });

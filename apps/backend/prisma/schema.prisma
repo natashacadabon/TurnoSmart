@@ -8,10 +8,9 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// Los perfiles de negocio sólo pueden ser OWNER. El ADMIN global vive en platform_admins.
 enum ProfileRole {
   OWNER
-  ADMIN
-  STAFF
 }
 
 enum AppointmentStatus {
@@ -119,7 +118,10 @@ model Profile {
   businessId        String             @map("business_id") @db.Uuid
   email             String
   fullName          String?            @map("full_name")
-  role              ProfileRole        @default(STAFF)
+  role              ProfileRole        @default(OWNER)
+  // Un ADMIN puede desactivar un OWNER sin borrar su historial; sin acceso mientras esté inactivo.
+  active            Boolean            @default(true)
+  deactivatedAt     DateTime?          @map("deactivated_at") @db.Timestamptz(3)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
   business          Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -129,6 +131,19 @@ model Profile {
   @@unique([businessId, email])
   @@index([businessId])
   @@map("profiles")
+}
+
+/// Administrador global de la plataforma. Mismo UUID que auth.users.id; no pertenece a ningún negocio.
+model PlatformAdmin {
+  id            String    @id @db.Uuid
+  email         String    @unique
+  fullName      String?   @map("full_name")
+  active        Boolean   @default(true)
+  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("platform_admins")
 }
 
 model Customer {

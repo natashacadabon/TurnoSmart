@@ -16,12 +16,7 @@ async function login(page: Page) {
   await page.getByRole('textbox', { name: 'Contraseña', exact: true }).fill(password!);
   await page.getByRole('button', { name: 'Ingresar' }).click();
 
-  // Una cuenta nueva pasa por el onboarding una única vez.
-  await page.waitForURL(/\/(customers|onboarding)/);
-  if (page.url().includes('/onboarding')) {
-    await page.getByLabel('Nombre del negocio').fill('Negocio E2E');
-    await page.getByRole('button', { name: 'Crear negocio' }).click();
-  }
+  // La cuenta de prueba es un OWNER activo invitado por el ADMIN: entra directo a su negocio.
   await expect(page).toHaveURL(/\/customers/);
 }
 

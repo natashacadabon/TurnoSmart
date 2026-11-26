@@ -3,9 +3,15 @@ import { assertNoActiveOverlaps, seedId, validateSeedData, type SeedData } from 
 import { SeedError, seedFailure, type SeedStage } from './seed-diagnostics.js';
 
 export type SeedProfile = SeedData['accounts'][number] & { id: string };
+export type SeedPlatformAdmin = SeedData['platformAdmins'][number] & { id: string };
 
 /** Solo escribe registros reservados de este seed. Auth se crea fuera de esta transaccion. */
-export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles: SeedProfile[]) {
+export async function seedDomain(
+  prisma: PrismaClient,
+  data: SeedData,
+  profiles: SeedProfile[],
+  platformAdmins: SeedPlatformAdmin[] = [],
+) {
   let stage: SeedStage = 'fixtures';
   try {
     validateSeedData(data);
@@ -31,6 +37,22 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
               'Un usuario existente tiene otro perfil/negocio/rol; seed cancelado.',
             );
           }
+        }
+        // Un ADMIN global nunca es OWNER de un negocio, ni al revés.
+        for (const admin of platformAdmins) {
+          if (profiles.some((p) => p.id === admin.id))
+            throw new SeedError(
+              'Una cuenta no puede ser ADMIN de plataforma y OWNER; seed cancelado.',
+            );
+          if (await tx.profile.findUnique({ where: { id: admin.id } }))
+            throw new SeedError(
+              'El ADMIN de plataforma ya tiene un perfil de negocio; seed cancelado.',
+            );
+          await tx.platformAdmin.upsert({ where: { id: admin.id }, create: admin, update: {} });
+        }
+        for (const profile of profiles) {
+          if (await tx.platformAdmin.findUnique({ where: { id: profile.id } }))
+            throw new SeedError('Un OWNER del seed ya es ADMIN de plataforma; seed cancelado.');
         }
         stage = 'businesses';
         const newBusinesses = new Set<string>();
@@ -201,6 +223,7 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
         const counts = {
           businesses: await tx.business.count({ where: ids(data.businesses) }),
           profiles: await tx.profile.count({ where: ids(profiles) }),
+          platformAdmins: await tx.platformAdmin.count({ where: ids(platformAdmins) }),
           customers: await tx.customer.count({ where: ids(data.customers) }),
           services: await tx.service.count({ where: ids(data.services) }),
           availabilityRules: await tx.availabilityRule.count({ where: ids(data.rules) }),

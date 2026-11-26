@@ -27,7 +27,7 @@ function setup(llm: FakeLlm | null, opts: { limit?: number; timeoutMs?: number }
   });
   const businessId = randomUUID();
   const user = ctx.verifier.addUser();
-  ctx.identity.addMember(user.id, businessId, 'STAFF');
+  ctx.identity.addMember(user.id, businessId);
   const appointmentId = ctx.appointments.addAppointment(businessId);
   ctx.appointments.risks.set(appointmentId, {
     appointmentId,

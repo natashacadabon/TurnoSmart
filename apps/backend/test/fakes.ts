@@ -2,7 +2,6 @@ import { InMemoryServices } from './services-fakes.js';
 import { InMemoryAvailability } from './availability-fakes.js';
 import { InMemorySlots } from './slots-fakes.js';
 import { randomUUID } from 'node:crypto';
-import type { Role } from '@turnosmart/shared';
 import { createApp, type AppDeps } from '../src/app.js';
 import type { TokenVerifier, VerifiedUser } from '../src/middleware/auth.js';
 import type { LlmClient, LlmRequest } from '../src/modules/ai/llm.js';
@@ -22,7 +21,7 @@ import { InMemoryAppointmentRepository } from './appointments-fakes.js';
 import type {
   BusinessRecord,
   IdentityRepository,
-  OnboardingInput,
+  PlatformAdminRecord,
   ProfileRecord,
   ProfileWithBusiness,
 } from '../src/modules/identity/repository.js';
@@ -44,6 +43,7 @@ export class FakeVerifier implements TokenVerifier {
 export class InMemoryIdentity implements IdentityRepository {
   readonly businesses = new Map<string, BusinessRecord>();
   readonly profiles = new Map<string, ProfileRecord>();
+  readonly admins = new Map<string, PlatformAdminRecord>();
   private readonly preferences = {
     bookingEmailEnabled: true,
     confirmationEmailEnabled: true,
@@ -60,7 +60,8 @@ export class InMemoryIdentity implements IdentityRepository {
     rescheduleMinimumHours: 0,
   };
 
-  addMember(userId: string, businessId: string, role: Role) {
+  /** Perfil OWNER de un negocio. `active: false` simula un OWNER desactivado por un ADMIN. */
+  addMember(userId: string, businessId: string, role: 'OWNER' = 'OWNER', active = true) {
     if (!this.businesses.has(businessId)) {
       this.businesses.set(businessId, {
         ...this.preferences,
@@ -70,7 +71,12 @@ export class InMemoryIdentity implements IdentityRepository {
         createdAt: new Date(),
       });
     }
-    this.profiles.set(userId, { id: userId, businessId, fullName: null, role });
+    this.profiles.set(userId, { id: userId, businessId, fullName: null, role, active });
+  }
+
+  /** ADMIN global de la plataforma, sin negocio. */
+  addPlatformAdmin(userId: string, active = true) {
+    this.admins.set(userId, { id: userId, fullName: 'Admin', active });
   }
 
   async findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null> {
@@ -79,25 +85,8 @@ export class InMemoryIdentity implements IdentityRepository {
     return { profile, business: this.businesses.get(profile.businessId)! };
   }
 
-  async onboard(input: OnboardingInput) {
-    const existing = await this.findProfileWithBusiness(input.userId);
-    if (existing) return { ...existing, created: false };
-    const business = {
-      ...this.preferences,
-      id: randomUUID(),
-      name: input.businessName,
-      timezone: input.timezone,
-      createdAt: new Date(),
-    };
-    this.businesses.set(business.id, business);
-    const profile: ProfileRecord = {
-      id: input.userId,
-      businessId: business.id,
-      fullName: input.fullName,
-      role: 'OWNER',
-    };
-    this.profiles.set(profile.id, profile);
-    return { profile, business, created: true };
+  async findPlatformAdmin(userId: string) {
+    return this.admins.get(userId) ?? null;
   }
 
   async updateBusiness(

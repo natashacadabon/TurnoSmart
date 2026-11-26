@@ -1,7 +1,14 @@
 import { AppointmentStatus, ProfileRole } from '@prisma/client';
 
 export const SEED_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+/**
+ * OWNER activo del negocio demo 1. Conserva el email histórico para no romper entornos ya
+ * sembrados, secretos de E2E ni la documentación de acceso.
+ */
 export const SEED_ADMIN_EMAIL = 'admin@turnosmart.test';
+export const SEED_OWNER_EMAIL = SEED_ADMIN_EMAIL;
+/** ADMIN global de la plataforma (tabla platform_admins). Usa la misma contraseña del seed. */
+export const SEED_PLATFORM_ADMIN_EMAIL = 'plataforma@turnosmart.test';
 export const seedId = (kind: number, business: number, index = 0) =>
   `d${kind}000000-0000-4000-8000-${String(business * 100 + index).padStart(12, '0')}`;
 
@@ -59,26 +66,36 @@ export function buildSeedData(now = new Date()) {
     name: `Demo TurnoSmart ${b}`,
     timezone: SEED_TIME_ZONE,
   }));
+  // Los antiguos ADMIN/STAFF de negocio quedan como OWNER desactivados, igual que en la migración
+  // 20261126000200: sirven para demostrar el bloqueo de cuentas desactivadas.
+  const deactivatedAt = new Date(Date.UTC(2026, 10, 26));
   const accounts = businesses.flatMap((b, i) => [
     {
       businessId: b.id,
-      email: i === 0 ? SEED_ADMIN_EMAIL : 'owner2@turnosmart.test',
+      email: i === 0 ? SEED_OWNER_EMAIL : 'owner2@turnosmart.test',
       role: ProfileRole.OWNER,
       fullName: `Owner Demo ${i + 1}`,
+      active: true,
+      deactivatedAt: null,
     },
     {
       businessId: b.id,
       email: `manager${i + 1}@turnosmart.test`,
-      role: ProfileRole.ADMIN,
-      fullName: `Admin Demo ${i + 1}`,
+      role: ProfileRole.OWNER,
+      fullName: `Owner desactivado ${i + 1}`,
+      active: false,
+      deactivatedAt,
     },
     {
       businessId: b.id,
       email: `staff${i + 1}@turnosmart.test`,
-      role: ProfileRole.STAFF,
-      fullName: `Staff Demo ${i + 1}`,
+      role: ProfileRole.OWNER,
+      fullName: `Owner desactivado ${i + 1}b`,
+      active: false,
+      deactivatedAt,
     },
   ]);
+  const platformAdmins = [{ email: SEED_PLATFORM_ADMIN_EMAIL, fullName: 'Admin Plataforma Demo' }];
   const customers = businesses.flatMap((b, i) =>
     [1, 2, 3, 4].map((n) => ({
       id: seedId(3, i + 1, n),
@@ -169,7 +186,7 @@ export function buildSeedData(now = new Date()) {
       };
     }),
   );
-  return { businesses, accounts, customers, services, rules, appointments };
+  return { businesses, accounts, platformAdmins, customers, services, rules, appointments };
 }
 export type SeedData = ReturnType<typeof buildSeedData>;
 
@@ -220,8 +237,8 @@ export function validateSeedData(data: SeedData) {
   for (const row of [...data.accounts, ...data.customers, ...data.services, ...data.rules]) {
     if (!businessIds.has(row.businessId)) throw new Error('Registro de seed fuera de su negocio.');
   }
-  if (new Set(data.accounts.map((a) => a.email)).size !== data.accounts.length)
-    throw new Error('Emails de prueba duplicados.');
+  const emails = [...data.accounts, ...data.platformAdmins].map((a) => a.email);
+  if (new Set(emails).size !== emails.length) throw new Error('Emails de prueba duplicados.');
   for (const rule of data.rules) {
     if (rule.dayOfWeek < 0 || rule.dayOfWeek > 6 || rule.startTime >= rule.endTime)
       throw new Error('Regla semanal invalida.');

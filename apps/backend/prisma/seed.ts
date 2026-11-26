@@ -2,7 +2,12 @@ import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'node:url';
-import { buildSeedData, SEED_ADMIN_EMAIL, validateSeedData } from './seed-data.js';
+import {
+  buildSeedData,
+  SEED_ADMIN_EMAIL,
+  SEED_PLATFORM_ADMIN_EMAIL,
+  validateSeedData,
+} from './seed-data.js';
 import { ensureSeedUsers, readSeedConfig, SeedError, verifyAdminLogin } from './seed-auth.js';
 import { seedDomain } from './seed-runner.js';
 import { checkSeedSchema } from './seed-checks.js';
@@ -59,14 +64,24 @@ async function main() {
         fixtures.accounts.filter((a) => a.email !== SEED_ADMIN_EMAIL),
         env.password,
       );
-      const counts = await seedDomain(prisma, fixtures, [...owner, ...others]);
+      const platformAdmins = await ensureSeedUsers(
+        adminClient.auth.admin,
+        fixtures.platformAdmins,
+        env.password,
+      );
+      const counts = await seedDomain(prisma, fixtures, [...owner, ...others], platformAdmins);
       await seedStep('profiles', async () => {
         const profile = await prisma.profile.findUnique({ where: { id: owner[0]!.id } });
-        if (profile?.role !== 'OWNER' || profile.businessId !== fixtures.businesses[0]!.id)
-          throw new SeedError('No se pudo verificar el perfil OWNER del administrador.');
+        if (
+          profile?.role !== 'OWNER' ||
+          !profile.active ||
+          profile.businessId !== fixtures.businesses[0]!.id
+        )
+          throw new SeedError('No se pudo verificar el perfil OWNER del negocio demo.');
       });
       console.info('Seed completado. Login Auth y perfil OWNER verificados.');
-      console.info(`Administrador: ${SEED_ADMIN_EMAIL}`);
+      console.info(`OWNER del negocio demo: ${SEED_ADMIN_EMAIL}`);
+      console.info(`ADMIN de la plataforma: ${SEED_PLATFORM_ADMIN_EMAIL}`);
       console.info(JSON.stringify(counts));
     },
     () => prisma.$disconnect(),

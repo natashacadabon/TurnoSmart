@@ -18,9 +18,11 @@ if (!url || !['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname)
 
 const prisma = new PrismaClient({ datasourceUrl: url });
 const businesses: string[] = [];
+const platformAdmins: string[] = [];
 afterAll(async () => {
   try {
     await prisma.business.deleteMany({ where: { id: { in: businesses } } });
+    await prisma.platformAdmin.deleteMany({ where: { id: { in: platformAdmins } } });
   } finally {
     await prisma.$disconnect();
   }
@@ -59,27 +61,44 @@ async function fixture() {
       endsAt: new Date('2099-01-05T11:00:00Z'),
     },
   });
-  async function member(role: 'OWNER' | 'ADMIN' | 'STAFF', tenant = businessId) {
+  async function member(tenant = businessId, active = true) {
     const user = verifier.addUser();
     await prisma.profile.create({
-      data: { id: user.id, businessId: tenant, email: `${user.id}@example.com`, role },
+      data: {
+        id: user.id,
+        businessId: tenant,
+        email: `${user.id}@example.com`,
+        role: 'OWNER',
+        active,
+        deactivatedAt: active ? null : new Date(),
+      },
     });
     return { Authorization: `Bearer ${user.token}` };
   }
-  const staff = await member('STAFF');
-  const admin = await member('ADMIN');
+  async function platformAdmin() {
+    const user = verifier.addUser();
+    await prisma.platformAdmin.create({
+      data: { id: user.id, email: `${user.id}@admin.example.com` },
+    });
+    platformAdmins.push(user.id);
+    return { Authorization: `Bearer ${user.token}` };
+  }
+  // Dos OWNER activos del mismo negocio: ambos operan turnos y preferencias.
+  const owner = await member();
+  const coOwner = await member();
   const path = `/api/appointments/${row.id}`;
   const publicPath = '/api/public/appointment-actions';
   async function issue(action: 'CONFIRM' | 'CANCEL' | 'REQUEST_RESCHEDULE') {
-    const response = await api.post(`${path}/action-links`).set(staff).send({ action });
+    const response = await api.post(`${path}/action-links`).set(owner).send({ action });
     expect(response.status).toBe(200);
     return response.body.token as string;
   }
   return {
     api,
-    staff,
-    admin,
+    owner,
+    coOwner,
     member,
+    platformAdmin,
     row,
     customer,
     path,
@@ -96,10 +115,12 @@ async function fixture() {
 }
 
 it('guarda preferencias por negocio y aplica roles y límites de configuración', async () => {
-  const { api, staff, admin, member } = await fixture();
+  const { api, owner, coOwner, member, platformAdmin } = await fixture();
   const other = await prisma.business.create({ data: { name: 'Otro' } });
   businesses.push(other.id);
-  const otherOwner = await member('OWNER', other.id);
+  const otherOwner = await member(other.id);
+  const admin = await platformAdmin();
+  const disabledOwner = await member(undefined, false);
   const path = '/api/business/notification-preferences';
   const preferences = {
     bookingEmailEnabled: true,
@@ -116,14 +137,26 @@ it('guarda preferencias por negocio y aplica roles y límites de configuración'
     cancellationMinimumHours: 12,
     rescheduleMinimumHours: 6,
   };
-  expect((await api.patch(path).set(staff).send(preferences)).status).toBe(403);
-  expect((await api.patch(path).set(admin).send({ cancellationMinimumHours: -1 })).status).toBe(
+  // El ADMIN de plataforma y un OWNER desactivado no leen ni configuran, ni inyectando rol.
+  for (const [auth, code] of [
+    [admin, 'FORBIDDEN'],
+    [disabledOwner, 'ACCOUNT_DISABLED'],
+  ] as const) {
+    const denied = await api
+      .patch(path)
+      .set(auth)
+      .send({ ...preferences, role: 'OWNER' });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe(code);
+    expect((await api.get(path).set(auth)).status).toBe(403);
+  }
+  expect((await api.patch(path).set(coOwner).send({ cancellationMinimumHours: -1 })).status).toBe(
     422,
   );
-  expect((await api.patch(path).set(admin).send({ businessId: other.id })).status).toBe(422);
+  expect((await api.patch(path).set(coOwner).send({ businessId: other.id })).status).toBe(422);
   const saved = { ...preferences, reminder24hEnabled: false, reminder48hEnabled: false };
-  expect((await api.patch(path).set(admin).send(preferences)).body).toEqual(saved);
-  expect((await api.get(path).set(staff)).body).toEqual(saved);
+  expect((await api.patch(path).set(coOwner).send(preferences)).body).toEqual(saved);
+  expect((await api.get(path).set(owner)).body).toEqual(saved);
   expect((await api.get(path).set(otherOwner)).body).toMatchObject({
     bookingEmailEnabled: true,
     remindersEnabled: true,
@@ -138,14 +171,14 @@ it('guarda preferencias por negocio y aplica roles y límites de configuración'
     { rescheduleMinimumHours: -1 },
     { rescheduleMinimumHours: 721 },
   ])
-    expect((await api.patch(path).set(admin).send(body)).status).toBe(422);
-  expect((await api.get(path).set(staff)).body).toEqual(saved);
+    expect((await api.patch(path).set(coOwner).send(body)).status).toBe(422);
+  expect((await api.get(path).set(owner)).body).toEqual(saved);
 });
 
 it('reconcilia anticipaciones, conserva enviados y cancela los pendientes al deshabilitar', async () => {
   const f = await fixture();
   const path = '/api/business/notification-preferences';
-  const update = (body: object) => f.api.patch(path).set(f.admin).send(body);
+  const update = (body: object) => f.api.patch(path).set(f.coOwner).send(body);
   expect((await update({ remindersEnabled: true, reminderHours: [72, 12, 2] })).status).toBe(200);
   const jobs = await prisma.reminder.findMany({
     where: { appointmentId: f.row.id },
@@ -191,11 +224,11 @@ it('emite enlaces con alcance, verifica firma y registra una sola confirmación 
   const f = await fixture();
   const other = await prisma.business.create({ data: { name: 'Otro' } });
   businesses.push(other.id);
-  const otherStaff = await f.member('STAFF', other.id);
+  const otherOwner = await f.member(other.id);
   expect(
-    (await f.api.post(`${f.path}/action-links`).set(otherStaff).send({ action: 'CONFIRM' })).status,
+    (await f.api.post(`${f.path}/action-links`).set(otherOwner).send({ action: 'CONFIRM' })).status,
   ).toBe(404);
-  expect((await f.api.get(`${f.path}/reschedule-request`).set(otherStaff)).status).toBe(404);
+  expect((await f.api.get(`${f.path}/reschedule-request`).set(otherOwner)).status).toBe(404);
   const token = await f.issue('CONFIRM');
   expect(await f.issue('CONFIRM')).toBe(token);
   const badToken = token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A');
@@ -222,13 +255,13 @@ it('emite enlaces con alcance, verifica firma y registra una sola confirmación 
   });
   expect(stored.events.map((event) => event.type)).toEqual(['CONFIRMED']);
   expect(
-    (await f.api.get('/api/appointments?status=CONFIRMED').set(f.staff)).body.items[0],
+    (await f.api.get('/api/appointments?status=CONFIRMED').set(f.owner)).body.items[0],
   ).toMatchObject({
     status: 'CONFIRMED',
     operationalStatus: 'SCHEDULED',
     confirmationStatus: 'CONFIRMED',
   });
-  expect((await f.api.get('/api/appointments?status=SCHEDULED').set(f.staff)).body.total).toBe(0);
+  expect((await f.api.get('/api/appointments?status=SCHEDULED').set(f.owner)).body.total).toBe(0);
 });
 
 it('exige confirmación explícita y vuelve a evaluar la política de cancelación', async () => {
@@ -238,15 +271,15 @@ it('exige confirmación explícita y vuelve a evaluar la política de cancelaci�
   const preview = () => f.api.post(`${f.publicPath}/preview`).send({ token });
   expect((await f.api.post(f.publicPath).send({ token })).status).toBe(422);
   expect((await preview()).body.allowed).toBe(true);
-  await f.api.patch(preferences).set(f.admin).send({ cancellationMinimumHours: 25 });
+  await f.api.patch(preferences).set(f.coOwner).send({ cancellationMinimumHours: 25 });
   expect((await f.execute(token)).body.error.code).toBe('APPOINTMENT_CANCELLATION_NOT_ALLOWED');
   await f.api
     .patch(preferences)
-    .set(f.admin)
+    .set(f.coOwner)
     .send({ cancellationMinimumHours: 24, customerCancellationEnabled: false });
   expect((await f.execute(token)).status).toBe(409);
   expect((await f.current()).status).toBe('SCHEDULED');
-  await f.api.patch(preferences).set(f.admin).send({ customerCancellationEnabled: true });
+  await f.api.patch(preferences).set(f.coOwner).send({ customerCancellationEnabled: true });
   expect((await f.execute(token)).status).toBe(204);
   expect((await f.execute(token)).status).toBe(204);
   expect((await preview()).status).toBe(404);
@@ -277,7 +310,7 @@ it('rechaza acciones deshabilitadas incluso con enlaces emitidos y respeta el pl
   const preferences = '/api/business/notification-preferences';
   expect(
     (
-      await f.api.patch(preferences).set(f.admin).send({
+      await f.api.patch(preferences).set(f.coOwner).send({
         customerConfirmationEnabled: false,
         customerCancellationEnabled: false,
         customerRescheduleEnabled: false,
@@ -298,12 +331,12 @@ it('rechaza acciones deshabilitadas incluso con enlaces emitidos y respeta el pl
   ).toBe(403);
   expect((await f.current()).events).toHaveLength(0);
   expect((await f.current()).startsAt).toEqual(f.row.startsAt);
-  await f.api.patch(preferences).set(f.admin).send({
+  await f.api.patch(preferences).set(f.coOwner).send({
     customerRescheduleEnabled: true,
     rescheduleMinimumHours: 25,
   });
   expect((await f.execute(reschedule)).status).toBe(403);
-  await f.api.patch(preferences).set(f.admin).send({ rescheduleMinimumHours: 24 });
+  await f.api.patch(preferences).set(f.coOwner).send({ rescheduleMinimumHours: 24 });
   expect((await f.execute(reschedule)).status).toBe(204);
   expect((await f.current()).startsAt).toEqual(f.row.startsAt);
   expect((await f.current()).events.map((event) => event.type)).toEqual(['RESCHEDULE_REQUESTED']);
@@ -311,11 +344,11 @@ it('rechaza acciones deshabilitadas incluso con enlaces emitidos y respeta el pl
 
 it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', async () => {
   const f = await fixture();
-  const pending = () => f.api.get(`${f.path}/reschedule-request`).set(f.staff);
+  const pending = () => f.api.get(`${f.path}/reschedule-request`).set(f.owner);
   const dismiss = (requestId: string) =>
-    f.api.post(`${f.path}/reschedule-request/dismiss`).set(f.staff).send({ requestId });
+    f.api.post(`${f.path}/reschedule-request/dismiss`).set(f.owner).send({ requestId });
   const approve = (requestId: string, startsAt: string) =>
-    f.api.post(`${f.path}/reschedule-request/approve`).set(f.staff).send({ requestId, startsAt });
+    f.api.post(`${f.path}/reschedule-request/approve`).set(f.owner).send({ requestId, startsAt });
   const first = await f.issue('REQUEST_RESCHEDULE');
   expect(
     (await Promise.all([f.execute(first, 'Por la tarde'), f.execute(first, 'Por la tarde')])).map(
@@ -325,8 +358,8 @@ it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', a
   const firstId = (await pending()).body.id as string;
   expect((await pending()).body.message).toBe('Por la tarde');
   const feed = '/api/notifications';
-  expect((await f.api.get(feed).set(f.staff)).body.unreadCount).toBe(0);
-  const notices = await f.api.get(feed + '?includeRequests=true').set(f.staff);
+  expect((await f.api.get(feed).set(f.owner)).body.unreadCount).toBe(0);
+  const notices = await f.api.get(feed + '?includeRequests=true').set(f.owner);
   expect(notices.body).toMatchObject({
     items: [{ kind: 'RESCHEDULE_REQUESTED', appointmentId: f.row.id }],
     unreadCount: 1,
@@ -335,7 +368,7 @@ it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', a
     (
       await f.api
         .patch(`${feed}/${notices.body.items[0].id}/read?includeRequests=true`)
-        .set(f.staff)
+        .set(f.owner)
     ).body.unreadCount,
   ).toBe(0);
   expect((await f.current()).startsAt).toEqual(f.row.startsAt);
@@ -346,7 +379,7 @@ it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', a
   expect((await pending()).body).toBeNull();
   const move = await f.api
     .post(`${f.path}/reschedule`)
-    .set(f.staff)
+    .set(f.owner)
     .send({ startsAt: '2099-01-05T12:00:00Z' });
   expect(move.status).toBe(200);
   expect((await f.execute(first)).status).toBe(404);
@@ -371,7 +404,7 @@ it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', a
   expect((await propose('2099-01-05T14:00:00Z')).status).toBe(204);
   expect((await pending()).body.requestedStartsAt).toBe('2099-01-05T14:00:00.000Z');
   expect(
-    (await f.api.get('/api/appointments').set(f.staff)).body.items[0].rescheduleRequested,
+    (await f.api.get('/api/appointments').set(f.owner)).body.items[0].rescheduleRequested,
   ).toBe(true);
   const secondId = (await pending()).body.id as string;
   expect((await approve(secondId, '2099-01-05T12:00:00Z')).status).toBe(409);
@@ -384,7 +417,7 @@ it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', a
   expect(results.map((res) => res.status)).toEqual([200, 200]);
   expect((await pending()).body).toBeNull();
   expect(
-    (await f.api.get('/api/appointments').set(f.staff)).body.items[0].rescheduleRequested,
+    (await f.api.get('/api/appointments').set(f.owner)).body.items[0].rescheduleRequested,
   ).toBe(false);
   const current = await f.current();
   expect(current.startsAt.toISOString()).toBe('2099-01-05T14:00:00.000Z');
@@ -394,7 +427,7 @@ it('conserva la reserva, descarta y aprueba por ID bajo el bloqueo de agenda', a
     current.events.filter((event) => event.type === 'RESCHEDULE_REQUEST_DISMISSED'),
   ).toHaveLength(1);
   expect(current.events.filter((event) => event.type === 'RESCHEDULED')).toHaveLength(2);
-  const history = await f.api.get(`${f.path}/events?includeRequests=true`).set(f.staff);
+  const history = await f.api.get(`${f.path}/events?includeRequests=true`).set(f.owner);
   expect(history.body).toHaveLength(5);
-  expect((await f.api.get(`${f.path}/events`).set(f.staff)).body).toHaveLength(2);
+  expect((await f.api.get(`${f.path}/events`).set(f.owner)).body).toHaveLength(2);
 });

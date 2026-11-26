@@ -109,6 +109,7 @@ async function fixtures(page: Page, role: Role = 'OWNER', overlapping = false) {
       if (method === 'OPTIONS') return respond(route, {});
       if (url.pathname === '/api/me') {
         return respond(route, {
+          access: 'OWNER',
           onboarded: true,
           user: { id: fixtureId, email },
           profile: { id: fixtureId, role, fullName: 'Persona E2E' },
@@ -440,14 +441,10 @@ test('habilita un día y confirma el reemplazo de franjas al copiar en mobile', 
     },
   });
 });
-test('Staff consulta horarios en la zona del negocio y ve el error del servidor', async ({
-  page,
-}) => {
-  const { rejectSlots, writes } = await fixtures(page, 'STAFF');
+test('consulta horarios en la zona del negocio y ve el error del servidor', async ({ page }) => {
+  const { rejectSlots, writes } = await fixtures(page);
   await login(page);
   await expect(page.getByRole('row', { name: /Consulta inicial/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Nuevo servicio' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Consultar horarios', exact: true }).click();
   await page.getByRole('combobox', { name: 'Servicio', exact: true }).click();
@@ -471,7 +468,7 @@ test('Staff consulta horarios en la zona del negocio y ve el error del servidor'
 test('horarios: rangos reales, selección accesible, loading, vacío y reintento responsive', async ({
   page,
 }, testInfo) => {
-  const { writes, resolveSlots, rejectSlots, holdSlots } = await fixtures(page, 'STAFF');
+  const { writes, resolveSlots, rejectSlots, holdSlots } = await fixtures(page);
   const available = [
     { startsAt: '2027-03-01T12:00:00.000Z', endsAt: '2027-03-01T12:30:00.000Z' },
     { startsAt: '2027-03-01T17:00:00.000Z', endsAt: '2027-03-01T18:00:00.000Z' },

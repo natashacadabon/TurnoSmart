@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { scheduleAppointmentReminders } from '../notifications/reminder-schedule.js';
 import { appointmentFits, localTime } from '../availability/repository.js';
-import type { BusinessNotificationPreferences, Role } from '@turnosmart/shared';
+import type { BusinessNotificationPreferences } from '@turnosmart/shared';
 
 export interface BusinessRecord extends BusinessNotificationPreferences {
   id: string;
@@ -15,7 +15,8 @@ export interface ProfileRecord {
   id: string;
   businessId: string;
   fullName: string | null;
-  role: Role;
+  role: 'OWNER';
+  active: boolean;
 }
 
 export interface ProfileWithBusiness {
@@ -23,23 +24,25 @@ export interface ProfileWithBusiness {
   business: BusinessRecord;
 }
 
-export interface OnboardingInput {
-  userId: string;
-  /** Email de Supabase Auth; Profile.email es obligatorio en el schema. */
-  email: string;
-  businessName: string;
-  timezone: string;
+export interface PlatformAdminRecord {
+  id: string;
   fullName: string | null;
+  active: boolean;
 }
 
+/**
+ * Acceso resuelto para un usuario de Auth. Un ADMIN global tiene prioridad: no puede operar
+ * un negocio aunque, por error de datos, también tuviera un perfil OWNER.
+ */
+export type AccountAccess =
+  | { kind: 'ADMIN'; admin: PlatformAdminRecord }
+  | { kind: 'OWNER'; found: ProfileWithBusiness }
+  | { kind: 'NONE'; reason: 'NO_PROFILE' | 'DISABLED' };
+
 export interface IdentityRepository {
+  /** Perfil OWNER con su negocio, activo o no. */
   findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null>;
-  /**
-   * Crea negocio y perfil OWNER en una transacción.
-   * Devuelve `created: false` con el negocio existente si la cuenta ya estaba asociada,
-   * incluso si dos requests compiten (Profile.id = userId es la clave).
-   */
-  onboard(input: OnboardingInput): Promise<ProfileWithBusiness & { created: boolean }>;
+  findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null>;
   updateBusiness(
     businessId: string,
     data: Partial<Pick<BusinessRecord, 'name' | 'timezone'> & BusinessNotificationPreferences>,
@@ -66,6 +69,21 @@ const businessSelect = {
   rescheduleMinimumHours: true,
 } as const;
 
+/** Resuelve el acceso de una cuenta de Auth. Un ADMIN desactivado no cae a su perfil OWNER. */
+export async function resolveAccess(
+  identity: IdentityRepository,
+  userId: string,
+): Promise<AccountAccess> {
+  const [admin, found] = await Promise.all([
+    identity.findPlatformAdmin(userId),
+    identity.findProfileWithBusiness(userId),
+  ]);
+  if (admin) return admin.active ? { kind: 'ADMIN', admin } : { kind: 'NONE', reason: 'DISABLED' };
+  if (!found) return { kind: 'NONE', reason: 'NO_PROFILE' };
+  if (!found.profile.active) return { kind: 'NONE', reason: 'DISABLED' };
+  return { kind: 'OWNER', found };
+}
+
 export class PrismaIdentityRepository implements IdentityRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -82,42 +100,17 @@ export class PrismaIdentityRepository implements IdentityRepository {
         businessId: rest.businessId,
         fullName: rest.fullName,
         role: rest.role,
+        active: rest.active,
       },
       business,
     };
   }
 
-  async onboard(input: OnboardingInput): Promise<ProfileWithBusiness & { created: boolean }> {
-    const existing = await this.findProfileWithBusiness(input.userId);
-    if (existing) return { ...existing, created: false };
-
-    try {
-      const result = await this.prisma.$transaction(async (tx) => {
-        const business = await tx.business.create({
-          data: { name: input.businessName, timezone: input.timezone },
-          select: businessSelect,
-        });
-        const profile = await tx.profile.create({
-          data: {
-            id: input.userId,
-            businessId: business.id,
-            email: input.email,
-            fullName: input.fullName,
-            role: 'OWNER',
-          },
-          select: { id: true, businessId: true, fullName: true, role: true },
-        });
-        return { business, profile };
-      });
-      return { ...result, created: true };
-    } catch (err) {
-      // Onboarding concurrente: otra transacción creó el perfil; ésta hizo rollback de su negocio.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        const winner = await this.findProfileWithBusiness(input.userId);
-        if (winner) return { ...winner, created: false };
-      }
-      throw err;
-    }
+  findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null> {
+    return this.prisma.platformAdmin.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, active: true },
+    });
   }
 
   updateBusiness(
