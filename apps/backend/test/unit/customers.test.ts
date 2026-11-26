@@ -12,7 +12,7 @@ describe('clientes', () => {
     ctx = buildTestApp();
     const a = ctx.verifier.addUser();
     const b = ctx.verifier.addUser();
-    ctx.identity.addMember(a.id, randomUUID(), 'STAFF');
+    ctx.identity.addMember(a.id, randomUUID(), 'OWNER');
     ctx.identity.addMember(b.id, randomUUID(), 'OWNER');
     authA = { Authorization: `Bearer ${a.token}` };
     authB = { Authorization: `Bearer ${b.token}` };
@@ -143,7 +143,7 @@ describe('clientes', () => {
 describe('baja de clientes', () => {
   let ctx: ReturnType<typeof buildTestApp>;
   let owner: { Authorization: string };
-  let staff: { Authorization: string };
+  let admin: { Authorization: string };
   let otherOwner: { Authorization: string };
 
   beforeEach(() => {
@@ -153,10 +153,10 @@ describe('baja de clientes', () => {
     const s = ctx.verifier.addUser();
     const x = ctx.verifier.addUser();
     ctx.identity.addMember(o.id, businessId, 'OWNER');
-    ctx.identity.addMember(s.id, businessId, 'STAFF');
+    ctx.identity.addMember(s.id, businessId, 'ADMIN');
     ctx.identity.addMember(x.id, randomUUID(), 'OWNER');
     owner = { Authorization: `Bearer ${o.token}` };
-    staff = { Authorization: `Bearer ${s.token}` };
+    admin = { Authorization: `Bearer ${s.token}` };
     otherOwner = { Authorization: `Bearer ${x.token}` };
   });
 
@@ -173,7 +173,7 @@ describe('baja de clientes', () => {
 
   it('STAFF no puede eliminar (403) y el cliente sigue existiendo', async () => {
     const id = await create('Protegido');
-    const res = await request(ctx.app).delete(`/api/customers/${id}`).set(staff);
+    const res = await request(ctx.app).delete(`/api/customers/${id}`).set(admin);
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
     expect(ctx.customers.rows).toHaveLength(1);

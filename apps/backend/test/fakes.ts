@@ -44,6 +44,7 @@ export class FakeVerifier implements TokenVerifier {
 export class InMemoryIdentity implements IdentityRepository {
   readonly businesses = new Map<string, BusinessRecord>();
   readonly profiles = new Map<string, ProfileRecord>();
+  readonly platformAdmins = new Map<string, { id: string; fullName: string | null }>();
   private readonly preferences = {
     bookingEmailEnabled: true,
     confirmationEmailEnabled: true,
@@ -61,6 +62,10 @@ export class InMemoryIdentity implements IdentityRepository {
   };
 
   addMember(userId: string, businessId: string, role: Role) {
+    if (role === 'ADMIN') {
+      this.platformAdmins.set(userId, { id: userId, fullName: null });
+      return;
+    }
     if (!this.businesses.has(businessId)) {
       this.businesses.set(businessId, {
         ...this.preferences,
@@ -77,6 +82,11 @@ export class InMemoryIdentity implements IdentityRepository {
     const profile = this.profiles.get(userId);
     if (!profile) return null;
     return { profile, business: this.businesses.get(profile.businessId)! };
+  }
+
+  async findPlatformAdmin(userId: string) {
+    const admin = this.platformAdmins.get(userId);
+    return admin ? { ...admin, businessId: null as null, role: 'ADMIN' as const } : null;
   }
 
   async onboard(input: OnboardingInput) {

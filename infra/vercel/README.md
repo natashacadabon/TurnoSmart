@@ -193,20 +193,6 @@ no requiere cambiar la rama predeterminada a `main`.
    Configurar `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` como variables GitHub
    del proyecto existente, iguales para ambos scopes. Los valores
    `NEXT_PUBLIC_*` se mantienen en Vercel, no se duplican en GitHub.
-   `VERCEL_ORG_ID` debe ser el ID `team_...` del equipo `natcads-projects`,
-   no el slug ni un usuario personal. `promote` fija `--scope` con ese ID para
-   no depender del scope personal predeterminado de la CLI. `pull` y `deploy`
-   conservan la resolucion del proyecto mediante `VERCEL_ORG_ID` y
-   `VERCEL_PROJECT_ID`; aliases y cleanup ya envian `teamId` por API.
-   Upload y promocion usan el mismo secret
-   `VERCEL_TOKEN` del mismo job/environment. No se necesita una variable de scope
-   adicional ni ampliar permisos del token. Confirmar que el token vigente tenga
-   acceso al equipo/proyecto y autorizacion para promover Production.
-   CLI 65.9.0 admite `--scope` con ID o slug, pero tambien consulta `/v2/user`:
-   si persiste `User not found (404)`, comprobar la identidad/validez del token
-   con Vercel; fijar el scope no repara una identidad revocada o incompatible.
-   Ver [opciones globales](https://vercel.com/docs/cli/global-options) y el
-   [antecedente de promote con tokens de equipo](https://github.com/vercel/vercel/issues/11712).
 3. Proteger `dev` y `main` y requerir `Quality Checks`. Los PR, incluidos
    borradores, forks y Dependabot, verifican el merge con el build ficticio.
    Solo las PR internas elegibles publican. `Frontend preview` arranca al
