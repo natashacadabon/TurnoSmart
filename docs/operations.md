@@ -63,7 +63,7 @@ CI y Vercel CLI 65.9.0 conservan sus workflows: Node 22 satisface sus engines y 
 
 ### Alcance y requisitos
 
-[backup-db.ps1](../scripts/backup-db.ps1) y [restore-db.ps1](../scripts/restore-db.ps1) son entradas PowerShell **7.4 o posterior** para el motor compartido [database-backup.mjs](../scripts/database-backup.mjs), que requiere **Node 22**. No agregan paquetes npm, proveedores ni servicios pagos.
+[backup-db.ps1](../scripts/backup-db.ps1) y [restore-db.ps1](../scripts/restore-db.ps1) son entradas PowerShell **7.4 o posterior** para el motor compartido [database-backup.mjs](../scripts/database-backup.mjs). **Node 22.x es la única versión oficialmente soportada**, de acuerdo con `engines`, `.nvmrc` y CI; el CLI rechaza otras versiones, incluida Node 24. No agregan paquetes npm, proveedores ni servicios pagos.
 
 El backup es un `pg_dump --format=custom --no-tablespaces` de **una base PostgreSQL completa accesible al usuario**. Conserva datos, esquemas, objetos, propietarios, ACL, RLS y `_prisma_migrations`. Se registra un inventario cifrado de roles, membresías, permisos de la base y extensiones. No se exportan contraseñas de roles ni tablespaces. En recuperación se recrean los roles como **NOLOGIN/NOSUPERUSER**, manteniendo herencia, BYPASSRLS y membresías; el administrador interno `postgres` del contenedor no se reemplaza. Las credenciales de aplicación y los privilegios globales que se normalizan requieren un procedimiento separado antes de cualquier cutover.
 
@@ -158,9 +158,16 @@ Una recuperación integral requiere un destino Supabase compatible, backups sepa
 Pruebas reproducibles, sin destinos remotos ni bases existentes:
 
 ```powershell
-npm run test:backup             # Incluido también en npm test.
-npm run test:backup:integration # Docker local; sólo recursos sintéticos recién creados.
+npm run test:backup             # Node 22 + Git; incluido en npm test, sin requerir pwsh.
+npm run test:backup:powershell  # Node 22 + Git + pwsh 7.4+ en PATH; obligatorio por separado.
+npm run test:backup:integration # Además Docker local; sólo recursos sintéticos recién creados.
 ```
+
+Las pruebas portables Node verifican contratos, cifrado de metadata, rutas, limpieza y endpoints sin invocar PowerShell ni conectarse a Docker. Las pruebas de wrappers y operaciones protegidas conservan los dobles `.ps1` y, en Windows, ejercitan la protección ACL real. La falta de `pwsh` hace fallar explícitamente el comando específico; no omite pruebas. El uso operativo del backup en Windows sigue requiriendo PowerShell para proteger las claves y temporales.
+
+CI ejecuta ambos comandos en Windows, Linux y macOS con Node 22. El job `quality` depende de toda la matriz PowerShell y falla también si ésta falla o se cancela; no se puede aprobar el candidato sólo con `npm test`. Mantener **Quality Checks** como control requerido en la protección de la rama; los scripts no configuran esa protección remota.
+
+La expresión de endpoints locales admite `npipe:////./pipe/docker_engine`, `npipe:////./pipe/dockerDesktopLinuxEngine` y sockets absolutos `unix:///…`. Rechaza TCP (también loopback), SSH y named pipes de servidores remotos. Los tests comprueban tanto la selección por contexto como `DOCKER_HOST` y su precedencia; no se ha ampliado la lista de destinos permitidos.
 
 El ensayo aplica las nueve migraciones SQL originales a una base nueva y genera un historial sintético `_prisma_migrations` con sus checksums. Compara registros/hashes, propietarios, concesiones efectivas, RLS, migraciones y referencias después de recuperar. Esto acredita recuperación PostgreSQL del fixture; no una recuperación de Supabase Auth ni una ejecución de Prisma Migrate contra producción. Los tiempos observados se registran en la salida del ensayo y dependen del tamaño real de datos/infraestructura; no son un SLA.
 

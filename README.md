@@ -29,7 +29,7 @@ La instalación limpia de migraciones y las suites locales ya se verificaron; lo
 
 ## Desarrollo local con Docker
 
-Requiere Node.js 22, npm y Docker Desktop con contenedores Linux. Ejecutar desde la raíz Git:
+Requiere Node.js 22.x (única versión soportada), npm y Docker Desktop con contenedores Linux. `npm test` no requiere PowerShell; las pruebas obligatorias de wrappers se ejecutan por separado con `npm run test:backup:powershell` y requieren `pwsh` 7.4+ en PATH. Ver [validación de backups](docs/operations.md#backup). Ejecutar desde la raíz Git:
 
 ```sh
 npm ci

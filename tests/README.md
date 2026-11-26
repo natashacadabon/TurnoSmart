@@ -2,12 +2,13 @@
 
 Ejecutar los comandos desde la raíz con Node.js 22 y las dependencias instaladas.
 
-| Suite                     | Alcance                                                                                                                                                 | Comando                                         |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Unitarias                 | Instalación de hooks, scripts Docker y backend con dobles. Cubre identidad, clientes, servicios, disponibilidad, slots, reservas, riesgo, email y seed. | `npm test`                                      |
-| Configuración de frontend | Validación de variables públicas, selección de despliegue y limpieza de previews.                                                                       | `npm run test:config --workspace=apps/frontend` |
-| Integración               | API, concurrencia, rollback, aislamiento, slots, acciones públicas y cola de correo contra PostgreSQL.                                                  | `npm run test:integration`                      |
-| Navegador                 | Login, clientes, servicios, agenda, detalle, avisos, preferencias y acciones públicas. Combina escenarios reales y simulaciones de Auth o API.          | `npm run test:e2e --workspace=apps/frontend`    |
+| Suite                     | Alcance                                                                                                                                        | Comando                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Unitarias                 | Instalación de hooks, seguridad portable de backups, scripts Docker y backend con dobles. No requiere PowerShell.                              | `npm test`                                      |
+| Wrappers PowerShell       | Wrappers, ACL de Windows y operaciones de backup con dobles `.ps1`. Obligatorio por separado, con Node 22 y `pwsh` 7.4+ en PATH.               | `npm run test:backup:powershell`                |
+| Configuración de frontend | Validación de variables públicas, selección de despliegue y limpieza de previews.                                                              | `npm run test:config --workspace=apps/frontend` |
+| Integración               | API, concurrencia, rollback, aislamiento, slots, acciones públicas y cola de correo contra PostgreSQL.                                         | `npm run test:integration`                      |
+| Navegador                 | Login, clientes, servicios, agenda, detalle, avisos, preferencias y acciones públicas. Combina escenarios reales y simulaciones de Auth o API. | `npm run test:e2e --workspace=apps/frontend`    |
 
 ## Integración con PostgreSQL
 
@@ -51,7 +52,7 @@ Estos resultados no equivalen a recepción real de emails, renderizado dentro de
 
 ## P0-06 · Backups PostgreSQL (26 de noviembre de 2026)
 
-Con Windows, PowerShell 7.6.9, Node 22.23.4 y npm 10.9.9:
+Registro del ensayo inicial, anterior a la separación H01 de suites. Se ejecutó con Windows, PowerShell 7.6.9, Node 22.23.4 y npm 10.9.9:
 
 ```powershell
 npm run test:backup
@@ -66,3 +67,24 @@ npm run test:backup:integration
 - `npm test` también aprobó las 216 unitarias existentes del backend, 14 de instalación y 4 de scripts Docker. Typecheck y las 52 pruebas de configuración del frontend fueron aprobadas. El formato global conserva 77 advertencias preexistentes; los archivos de este cambio cumplen Prettier y los tres scripts PowerShell pasan su parser.
 
 En Windows la prueba de interrupción emite el evento cooperativo SIGTERM dentro del proceso Node; no prueba que `TerminateProcess`/`taskkill /F` ejecute limpieza. Las terminaciones forzadas y la recuperación de Supabase Auth/Storage/secretos/extensiones reales quedan fuera de esta evidencia. Ver el [runbook](../docs/operations.md#backup). El aviso histórico de Next.js consignado en la validación anterior fue corregido y comprobado separadamente en [P0-05](../docs/operations.md#seguridad-de-nextjs-p0-05).
+
+## Revisión H01–H03 de backup/restore (26 de noviembre de 2026)
+
+Node **22.23.4**, npm **10.9.9**, Windows y PowerShell **7.6.9**. Node 22.x sigue siendo la única versión soportada; el registro anterior con Node 24 es histórico y no amplía soporte.
+
+- **H01 confirmado:** las pruebas originales ejecutaban dobles `.ps1` en todos los sistemas y protección ACL mediante PowerShell en Windows. Se separaron sin retirar los casos originales: `npm run test:backup` verifica la parte portable y `npm run test:backup:powershell` conserva wrappers y operaciones protegidas. Los fixtures resuelven físicamente el directorio temporal para evitar alias del sistema como `/var` en macOS.
+- **H02 no reproducido:** la regex original acepta ambos pipes locales de Docker y sockets Unix, y rechaza TCP, SSH y named pipes de servidores remotos. Se conserva intacta y se agregan pruebas positivas/negativas, selección de `DOCKER_HOST` y precedencia de contexto, sin conectar a daemons remotos.
+- **H03 ya alineado en código:** `engines`, `.nvmrc`, CLI y workflows usan Node 22. Se aclara el soporte en documentación y se prueba el rechazo del CLI ante versiones sintéticas 20/24, ejecutando el test con Node 22. No es una certificación de ejecución en Node 24.
+
+Resultados de esta revisión:
+
+- `npm ci`: aprobado, 663 paquetes instalados y auditoría de instalación sin vulnerabilidades. El primer intento falló por un archivo SWC bloqueado por Next dev; se detuvo ese servidor local para repetir la instalación y se volvió a levantar en el puerto 3001.
+- `npm test`: **243 pruebas aprobadas** (14 hooks, 9 backups Node, 4 scripts Docker y 216 backend) con `pwsh` fuera del PATH. Los diez casos PowerShell se contabilizan por separado; no se eliminaron para reducir el total de este comando.
+- `npm run test:backup:powershell`: **10 aprobadas**, sin omisiones, incluida sintaxis de los tres `.ps1`, generación de clave desde el wrapper y rechazo de sobrescritura.
+- Prueba adicional sin `pwsh`: el comando de wrappers falla explícitamente con el prerrequisito requerido; no informa éxito ni omite casos silenciosamente.
+- `npm run typecheck` y generación local de Prisma: aprobados. `npm run test:config --workspace=apps/frontend`: **53 aprobadas**, incluido el contrato del nuevo gate de CI. La primera ejecución de configuración detectó dos expectativas del antiguo job único; se actualizaron para exigir los dos controles y se repitió con éxito.
+- `npm run lint`: aprobado sobre el código final. `npm run format:check`: falla por **100 archivos preexistentes fuera de este cambio**, frente a los 77 del registro anterior; no se flexibilizó el gate ni se reformatearon archivos ajenos. Los archivos modificados cumplen Prettier.
+- `npm run test:backup:integration`: **8 aprobadas** en contenedores PostgreSQL 16 nuevos, con datos sintéticos, sin destinos remotos ni restauración sobre bases existentes. En esta repetición: backup **10,011 s**, recuperación total PowerShell **22,781 s** y motor verificado **17,331 s**. Son tiempos observados bajo carga local, no un SLA/RTO de producción.
+- Workflows: YAML y selección de Node 22 verificados; prerrequisitos PowerShell ejecutados localmente. El comando del gate aprueba `success` y rechaza `failure`, `cancelled` y `skipped`. CI exige matriz Windows/Linux/macOS y condiciona `Quality Checks` al éxito completo. No se ejecutó GitHub Actions remoto ni se acreditan ejecuciones locales en Linux/macOS.
+
+Los resultados del ensayo PostgreSQL previo y sus tiempos permanecen arriba como evidencia histórica; no se reinterpretan como resultados de producción o recuperación integral de Supabase. El gate global de formato continúa pendiente para aprobar el candidato final.
