@@ -36,9 +36,27 @@ services:
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      # Invitaciones y recuperación: sólo se aceptan redirects al frontend local.
+      GOTRUE_URI_ALLOW_LIST: http://localhost:${TS_FRONTEND_PORT:-3000}/**
+      GOTRUE_MAILER_AUTOCONFIRM: 'false'
+      GOTRUE_MAILER_OTP_EXP: 3600
+      # Los enlaces de los correos pasan por el gateway, que sólo expone /auth/v1.
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      GOTRUE_PASSWORD_MIN_LENGTH: 10
+      # Correos locales capturados por Mailpit (http://localhost:54327); nunca salen de la máquina.
+      GOTRUE_SMTP_HOST: mailpit
+      GOTRUE_SMTP_PORT: 1025
+      # Sin usuario: GoTrue no envía credenciales por SMTP sin TLS y Mailpit acepta sin autenticación.
+      GOTRUE_SMTP_ADMIN_EMAIL: no-reply@turnosmart.test
+      GOTRUE_SMTP_SENDER_NAME: TurnoSmart Local
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test: [CMD, wget, -q, --spider, 'http://127.0.0.1:9999/health']
       interval: 10s
@@ -65,6 +83,13 @@ services:
       start_interval: 2s
       timeout: 3s
       retries: 30
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    environment:
+      MP_MAX_MESSAGES: 200
+    ports:
+      - '127.0.0.1:${TS_MAIL_PORT:-54327}:8025'
 
 volumes:
   postgres_data:

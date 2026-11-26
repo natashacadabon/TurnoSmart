@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ApiError, api, errorMessage } from '@/lib/api';
+import { authCallbackUrl, authErrorMessage } from '@/lib/auth-flow.mjs';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 
 type Status = 'loading' | 'signedOut' | 'signedIn';
@@ -25,6 +26,13 @@ interface AuthValue {
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   refreshMe(): Promise<MeResponse | null>;
+  /** Envía el correo de recuperación. No revela si la cuenta existe. */
+  requestPasswordReset(email: string): Promise<void>;
+  /**
+   * Define la contraseña de la sesión abierta por un enlace de invitación o recuperación y
+   * devuelve la cuenta resuelta (null si la API no respondió).
+   */
+  updatePassword(password: string): Promise<MeResponse | null>;
 }
 
 type MeResult =
@@ -112,14 +120,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
-      if (error)
-        throw new Error(
-          error.message === 'Invalid login credentials'
-            ? 'Email o contraseña incorrectos'
-            : error.message,
-        );
+      if (error) throw new Error(authErrorMessage(error));
       setSession(data.session);
-      // La cuenta se resuelve antes de marcar la sesión, para redirigir directo a onboarding o clientes.
+      // La cuenta se resuelve antes de marcar la sesión, para redirigir directo a su pantalla.
       const result = await loadMe();
       if (result.kind === 'unauthorized') {
         throw new Error('El servidor rechazó la sesión. Intentá de nuevo.');
@@ -137,9 +140,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
+  const requestPasswordReset = useCallback(async (email: string) => {
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
+      redirectTo: authCallbackUrl(window.location.origin, 'recovery'),
+    });
+    // Una cuenta inexistente no es un error visible: sólo se informan límites y fallas del servicio.
+    if (error && (error.status === 429 || (error.status ?? 500) >= 500))
+      throw new Error(authErrorMessage(error));
+  }, []);
+
+  const updatePassword = useCallback(
+    async (password: string) => {
+      const { error } = await getSupabase().auth.updateUser({ password });
+      if (error) throw new Error(authErrorMessage(error));
+      const result = await loadMe();
+      if (result.kind === 'unauthorized') throw new Error(authErrorMessage(null));
+      setStatus('signedIn');
+      return result.kind === 'ok' ? result.me : null;
+    },
+    [loadMe],
+  );
+
   const value = useMemo(
-    () => ({ status, session, me, meError, signIn, signOut, refreshMe }),
-    [status, session, me, meError, signIn, signOut, refreshMe],
+    () => ({
+      status,
+      session,
+      me,
+      meError,
+      signIn,
+      signOut,
+      refreshMe,
+      requestPasswordReset,
+      updatePassword,
+    }),
+    [
+      status,
+      session,
+      me,
+      meError,
+      signIn,
+      signOut,
+      refreshMe,
+      requestPasswordReset,
+      updatePassword,
+    ],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
