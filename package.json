@@ -21,7 +21,6 @@
     "build": "npm run build:shared && npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
     "test": "npm run test:install && npm run test:backup && node --test infra/docker/dev.test.mjs && npm run build:shared && npm run test --workspaces --if-present",
     "test:backup": "node --test scripts/database-backup.test.mjs",
-    "test:backup:powershell": "node --test scripts/database-backup.powershell.test.mjs",
     "test:backup:integration": "node --test scripts/database-backup.integration.test.mjs",
     "test:install": "node --test .husky/install.test.mjs",
     "test:integration": "npm run build:shared && npm run test:integration --workspace=apps/backend",

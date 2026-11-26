@@ -158,14 +158,11 @@ Una recuperación integral requiere un destino Supabase compatible, backups sepa
 Pruebas reproducibles, sin destinos remotos ni bases existentes:
 
 ```powershell
-npm run test:backup             # Node 22 + Git; incluido en npm test, sin requerir pwsh.
-npm run test:backup:powershell  # Node 22 + Git + pwsh 7.4+ en PATH; obligatorio por separado.
+npm run test:backup             # Incluido en npm test; Node 22 + Git + pwsh 7.4+ en PATH.
 npm run test:backup:integration # Además Docker local; sólo recursos sintéticos recién creados.
 ```
 
-Las pruebas portables Node verifican contratos, cifrado de metadata, rutas, limpieza y endpoints sin invocar PowerShell ni conectarse a Docker. Las pruebas de wrappers y operaciones protegidas conservan los dobles `.ps1` y, en Windows, ejercitan la protección ACL real. La falta de `pwsh` hace fallar explícitamente el comando específico; no omite pruebas. El uso operativo del backup en Windows sigue requiriendo PowerShell para proteger las claves y temporales.
-
-CI ejecuta ambos comandos en Windows, Linux y macOS con Node 22. El job `quality` depende de toda la matriz PowerShell y falla también si ésta falla o se cancela; no se puede aprobar el candidato sólo con `npm test`. Mantener **Quality Checks** como control requerido en la protección de la rama; los scripts no configuran esa protección remota.
+La suite de backup vuelve a incluir las pruebas Node, los wrappers y los dobles `.ps1` en un único comando. PowerShell 7.4+ es un prerrequisito de `npm test` en Windows, Linux y macOS. No hay un comando separado ni una matriz de CI específica de wrappers.
 
 La expresión de endpoints locales admite `npipe:////./pipe/docker_engine`, `npipe:////./pipe/dockerDesktopLinuxEngine` y sockets absolutos `unix:///…`. Rechaza TCP (también loopback), SSH y named pipes de servidores remotos. Los tests comprueban tanto la selección por contexto como `DOCKER_HOST` y su precedencia; no se ha ampliado la lista de destinos permitidos.
 

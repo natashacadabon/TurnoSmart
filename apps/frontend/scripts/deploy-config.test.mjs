@@ -55,10 +55,10 @@ test('Production manual y Render quedan limitados a dev y sus dependencias', () 
   assert.deepEqual(ci.on.pull_request.branches, ['dev', 'main']);
   const vercel = JSON.parse(readFileSync(join(repo, 'apps/frontend/vercel.json'), 'utf8'));
   assert.equal(vercel.git.deploymentEnabled, false);
-  assert.deepEqual(Object.keys(ci.jobs), ['backup-powershell', 'quality']);
+  assert.deepEqual(Object.keys(ci.jobs), ['quality']);
   assert.equal(ci.jobs.quality.name, 'Quality Checks');
-  assert.equal(ci.jobs.quality.needs, 'backup-powershell');
-  assert.equal(ci.jobs.quality.if, '${{ always() }}');
+  assert.equal(ci.jobs.quality.needs, undefined);
+  assert.equal(ci.jobs.quality.if, undefined);
   assert.equal(ci.on.pull_request.types, undefined);
   assert(ci.concurrency['cancel-in-progress']);
   assert.equal(render.branch, 'dev');
@@ -110,39 +110,6 @@ test('Production manual y Render quedan limitados a dev y sus dependencias', () 
     assert(index > previous, `Falta orden seguro: ${command}`);
     previous = index;
   }
-});
-
-test('CI exige pruebas Node y PowerShell en Node 22 sin omisiones toleradas', () => {
-  const ci = yaml.load(readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8'));
-  const wrappers = ci.jobs['backup-powershell'];
-  assert.deepEqual(wrappers.strategy.matrix.os, [
-    'ubuntu-latest',
-    'windows-latest',
-    'macos-latest',
-  ]);
-  assert.equal(wrappers.strategy['fail-fast'], false);
-  assert.equal(wrappers.if, undefined);
-  assert.notEqual(wrappers['continue-on-error'], true);
-  const setup = wrappers.steps.find((step) => step.uses?.startsWith('actions/setup-node@'));
-  assert.equal(setup.with['node-version'], '22');
-  const prerequisites = wrappers.steps.find(
-    (step) => step.name === 'Verify PowerShell and Node prerequisites',
-  );
-  assert.equal(prerequisites.shell, 'pwsh');
-  assert(prerequisites.run.includes("[version]'7.4'"));
-  assert(prerequisites.run.includes("throw 'Node.js 22.x required'"));
-  for (const command of ['npm ci', 'npm run test:backup', 'npm run test:backup:powershell']) {
-    const step = wrappers.steps.find((item) => item.run === command);
-    assert(step, command);
-    assert.equal(step.if, undefined);
-    assert.notEqual(step['continue-on-error'], true);
-  }
-  const quality = ci.jobs.quality;
-  assert.equal(quality.needs, 'backup-powershell');
-  assert.equal(quality.if, '${{ always() }}');
-  assert.equal(quality.steps[0].env.BACKUP_CHECK_RESULT, '${{ needs.backup-powershell.result }}');
-  assert.equal(quality.steps[0].run, 'test "$BACKUP_CHECK_RESULT" = success');
-  assert.notEqual(quality.steps[0]['continue-on-error'], true);
 });
 
 test('Preview descarga settings y publica sin consultar Production; Production conserva sus flags', (t) => {
@@ -403,8 +370,8 @@ test('Preview separa codigo de la PR, secretos y definicion del workflow', () =>
   const names = deploy.steps.map((step) => step.name ?? step.id);
   assert(names.indexOf('Check current revision') < names.indexOf('Upload prebuilt'));
   assert(names.indexOf('Upload prebuilt') < names.indexOf('Update verified Preview alias'));
-  // Ambos controles son obligatorios; CI no recibe secretos ni llama a Vercel.
-  assert.deepEqual(Object.keys(ci.jobs), ['backup-powershell', 'quality']);
+  // Quality Checks sigue siendo el unico job de CI; ya no recibe secretos ni llama a Vercel.
+  assert.deepEqual(Object.keys(ci.jobs), ['quality']);
   assert(!readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8').includes('VERCEL'));
 });
 

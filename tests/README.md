@@ -4,8 +4,7 @@ Ejecutar los comandos desde la raíz con Node.js 22 y las dependencias instalada
 
 | Suite                     | Alcance                                                                                                                                        | Comando                                         |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Unitarias                 | Instalación de hooks, seguridad portable de backups, scripts Docker y backend con dobles. No requiere PowerShell.                              | `npm test`                                      |
-| Wrappers PowerShell       | Wrappers, ACL de Windows y operaciones de backup con dobles `.ps1`. Obligatorio por separado, con Node 22 y `pwsh` 7.4+ en PATH.               | `npm run test:backup:powershell`                |
+| Unitarias                 | Instalación de hooks, backups con wrappers PowerShell, scripts Docker y backend con dobles. Requiere pwsh 7.4+.                                | `npm test`                                      |
 | Configuración de frontend | Validación de variables públicas, selección de despliegue y limpieza de previews.                                                              | `npm run test:config --workspace=apps/frontend` |
 | Integración               | API, concurrencia, rollback, aislamiento, slots, acciones públicas y cola de correo contra PostgreSQL.                                         | `npm run test:integration`                      |
 | Navegador                 | Login, clientes, servicios, agenda, detalle, avisos, preferencias y acciones públicas. Combina escenarios reales y simulaciones de Auth o API. | `npm run test:e2e --workspace=apps/frontend`    |
@@ -70,6 +69,8 @@ En Windows la prueba de interrupción emite el evento cooperativo SIGTERM dentro
 
 ## Revisión H01–H03 de backup/restore (26 de noviembre de 2026)
 
+**Registro histórico:** la separación de H01 y su job específico de CI fueron revertidos por pedido del usuario. Los resultados siguientes corresponden al estado previo a esa reversión; no describen los comandos vigentes. Se conservan las pruebas H02 de endpoints y H03 de Node 22. Actualmente `npm run test:backup` incluye todos los casos, requiere `pwsh` 7.4+ y vuelve a ejecutarse desde `npm test`.
+
 Node **22.23.4**, npm **10.9.9**, Windows y PowerShell **7.6.9**. Node 22.x sigue siendo la única versión soportada; el registro anterior con Node 24 es histórico y no amplía soporte.
 
 - **H01 confirmado:** las pruebas originales ejecutaban dobles `.ps1` en todos los sistemas y protección ACL mediante PowerShell en Windows. Se separaron sin retirar los casos originales: `npm run test:backup` verifica la parte portable y `npm run test:backup:powershell` conserva wrappers y operaciones protegidas. Los fixtures resuelven físicamente el directorio temporal para evitar alias del sistema como `/var` en macOS.
@@ -88,3 +89,5 @@ Resultados de esta revisión:
 - Workflows: YAML y selección de Node 22 verificados; prerrequisitos PowerShell ejecutados localmente. El comando del gate aprueba `success` y rechaza `failure`, `cancelled` y `skipped`. CI exige matriz Windows/Linux/macOS y condiciona `Quality Checks` al éxito completo. No se ejecutó GitHub Actions remoto ni se acreditan ejecuciones locales en Linux/macOS.
 
 Los resultados del ensayo PostgreSQL previo y sus tiempos permanecen arriba como evidencia histórica; no se reinterpretan como resultados de producción o recuperación integral de Supabase. El gate global de formato continúa pendiente para aprobar el candidato final.
+
+Tras revertir H01 por pedido del usuario, se ejecutaron con Node 22.23.4 las **16 pruebas de backup unificadas** y las **52 de configuración frontend**: todas aprobadas. La suite unificada conserva los 14 casos originales y las regresiones de H02/H03.

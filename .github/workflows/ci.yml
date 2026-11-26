@@ -19,58 +19,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backup-powershell:
-    name: Backup PowerShell (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: npm
-
-      # Hosted runners must provide pwsh 7.4+; absence fails the job, never skips tests.
-      - name: Verify PowerShell and Node prerequisites
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ($PSVersionTable.PSVersion -lt [version]'7.4') { throw 'PowerShell 7.4+ required' }
-          if ((node -p 'process.versions.node.split(".")[0]') -ne '22') { throw 'Node.js 22.x required' }
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Test portable Node.js backup checks
-        run: npm run test:backup
-
-      - name: Test PowerShell wrappers and protected backup operations
-        run: npm run test:backup:powershell
-
   quality:
     name: Quality Checks
-    needs: backup-powershell
-    if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
-      # Keep the existing quality gate red if any mandatory wrapper job fails.
-      - name: Require PowerShell checks
-        shell: bash
-        env:
-          BACKUP_CHECK_RESULT: ${{ needs.backup-powershell.result }}
-        run: test "$BACKUP_CHECK_RESULT" = success
-
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
