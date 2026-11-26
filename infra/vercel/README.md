@@ -153,6 +153,11 @@ sigue su propio workflow.
 
 ## Activacion de CD y rollback
 
+La arquitectura utiliza un repositorio con `dev` como rama predeterminada y un
+unico proyecto Vercel: `dev` publica Preview y `main` publica Production. Cada
+entorno tiene su propio servicio Render y proyecto Supabase. Publicar Production
+no requiere cambiar la rama predeterminada a `main`.
+
 1. Confirmar Hobby y el proyecto existente. Usar **GitHub Actions como unico
    publicador** y desconectar Git en Vercel. Si el proyecto aun tiene Git conectado,
    alinear Production Branch con `main` para Production. El `vercel.json`
@@ -160,8 +165,8 @@ sigue su propio workflow.
    de la tabla y mantener Node 22.
 2. En GitHub crear los environments `vercel-production` y `vercel-preview`.
    Restringir Production a `main`. Para Preview
-   permitir la rama predeterminada real del repositorio (Settings > Branches;
-   no se asume `dev`) y, si se usan checkpoints manuales, `dev`: los Previews corren en el workflow
+   permitir `dev`, la rama predeterminada y la utilizada por el checkpoint Azure:
+   los Previews corren en el workflow
    confiable `Frontend preview` (`workflow_run`), no en `refs/pull/*/merge`. En `vercel-preview` definir
    `EXPECTED_DEV_API` y `EXPECTED_DEV_SUPABASE` con los dos origenes Dev exactos
    sin slash final. Los Previews de Render fallan si el scope Preview apunta a
