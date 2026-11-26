@@ -1,7 +1,8 @@
 /** PostgreSQL descartable con migraciones. FakeVerifier no certifica tokens ni RLS. */
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient, type AppointmentStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import type { AppointmentStatus } from '@turnosmart/shared';
 import request from 'supertest';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PrismaSlotsRepository } from '../../src/modules/slots/repository.js';
@@ -43,7 +44,8 @@ async function appointment(status: AppointmentStatus, extra = {}) {
       serviceId,
       startsAt: new Date('2026-11-02T12:30Z'),
       endsAt: new Date('2026-11-02T13:30Z'),
-      status,
+      status: status === 'CONFIRMED' ? 'SCHEDULED' : status,
+      confirmationStatus: status === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING',
       ...extra,
     },
   });

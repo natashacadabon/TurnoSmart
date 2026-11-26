@@ -126,7 +126,8 @@ export function buildSeedData(now = new Date()) {
         duration: 30,
       },
       {
-        status: AppointmentStatus.CONFIRMED,
+        status: AppointmentStatus.SCHEDULED,
+        confirmationStatus: 'CONFIRMED' as const,
         direction: 1 as const,
         hour: 10,
         service: 2,
@@ -163,6 +164,7 @@ export function buildSeedData(now = new Date()) {
         startsAt,
         endsAt: new Date(startsAt.getTime() + a.duration * 60_000),
         status: a.status,
+        confirmationStatus: a.confirmationStatus ?? ('PENDING' as const),
         notes: 'Turno ficticio de desarrollo.',
       };
     }),
@@ -173,7 +175,7 @@ export type SeedData = ReturnType<typeof buildSeedData>;
 
 type Interval = { businessId: string; startsAt: Date; endsAt: Date; status: AppointmentStatus };
 export function assertNoActiveOverlaps(rows: Interval[]) {
-  const active = rows.filter((a) => a.status === 'SCHEDULED' || a.status === 'CONFIRMED');
+  const active = rows.filter((a) => a.status === 'SCHEDULED');
   for (let i = 0; i < active.length; i++) {
     const a = active[i]!;
     if (a.startsAt >= a.endsAt) throw new Error('Intervalo de prueba invalido.');
@@ -265,7 +267,7 @@ export function validateSeedData(data: SeedData) {
     )
       throw new Error('Turno de seed fuera de disponibilidad.');
     if (
-      ['SCHEDULED', 'CONFIRMED'].includes(appointment.status) &&
+      appointment.status === 'SCHEDULED' &&
       !data.services.find((s) => s.id === appointment.serviceId)!.active
     )
       throw new Error('Turno activo con servicio inactivo.');

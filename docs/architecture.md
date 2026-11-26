@@ -1,121 +1,41 @@
 # Arquitectura
 
-## Estado real
-
 ```text
-Navegador
-   |
-   v
-Next.js + Material UI (sesion y contexto real; agenda pendiente; /demo estatico)
-
-Express + TypeScript
-   |-- GET /health, GET /ready
-   |-- Supabase Auth (validacion de token)
-   |-- /api/me, /api/onboarding, /api/business
-   |-- /api/customers
-   |-- /api/services (GET, POST, PATCH /:id)
-   |-- /api/appointments/:id/events (lectura)
-   |-- /api/appointments/:id/risk/explanation --> Gemini API
-   `-- Prisma --> Supabase PostgreSQL
-                  |-- modelo multi-tenant
-                  |-- migraciones aplicadas
-                  `-- RLS habilitado
+Navegador ── sesión ──────────────────────────────── Supabase Auth
+   │
+   ├── agenda y pantallas del negocio ── REST + bearer de Supabase ──┐
+   └── /turno/gestionar ───────────────── REST + enlace firmado ─────┤
+                                                                    ▼
+Supabase Cron ── POST /internal/email-jobs ────────────────────── Express
+                                                                    ├── Prisma ── PostgreSQL
+                                                                    ├── explicación ── Gemini
+                                                                    └── procesador ── Resend
 ```
 
-El frontend usa Supabase Auth para login y consume la API en onboarding, negocio, clientes e historial/explicacion de un turno. El dashboard de `/` muestra negocio y total de clientes reales, pero la agenda esta pendiente; `/demo` contiene datos estaticos. Servicios solo tiene API.
+Next.js y Material UI presentan las pantallas del negocio. FullCalendar dibuja la agenda en su zona horaria. Express reúne los módulos A (identidad y clientes), B (servicios y horarios) y C (turnos y reservas), con riesgo y notificaciones como capacidades transversales. Las apps comparten tipos y validaciones de `@turnosmart/shared`.
 
-| Componente          | Estado                    | Alcance actual                                |
-| ------------------- | ------------------------- | --------------------------------------------- |
-| Frontend            | Implementado parcialmente | Login, onboarding, clientes                   |
-| Backend             | Implementado parcialmente | Identidad, clientes, servicios, historial, IA |
-| Prisma              | Implementado              | Schema, Client, migraciones y seed            |
-| Supabase PostgreSQL | Configurado y probado     | Persistencia remota                           |
-| RLS                 | Implementado              | Politicas por negocio                         |
-| Supabase Auth       | Implementado en backend   | Token, perfil y onboarding por API            |
-| Gemini              | Implementado en backend   | Explicacion de riesgo bajo demanda            |
-| Email               | Planificado               | Sin integracion                               |
-| Vercel y Azure      | Planificados              | Sin evidencia de despliegue                   |
-| Observabilidad      | Planificada               | Sin implementacion                            |
+## Identidad y aislamiento
 
-## Arquitectura objetivo
+- Supabase Auth valida la sesión con `auth.getUser`. Express busca `Profile` por usuario y aplica los permisos OWNER, ADMIN o STAFF. El onboarding crea negocio y perfil OWNER en una transacción y devuelve el negocio ganador ante solicitudes concurrentes.
+- `Business` es la raíz del tenant. Los repositorios filtran por su ID tomado del perfil. Las relaciones compuestas impiden referencias entre negocios y la API responde 404 para recursos de otro tenant.
+- PostgreSQL aplica RLS a las tablas de dominio expuestas a la Data API. La conexión de Prisma puede omitir RLS y depende de los filtros del backend. Las migraciones de notificaciones y acciones públicas revocan acceso directo a enlaces, avisos y cola, y revocan la escritura directa de turnos y eventos. Revisar los permisos restantes de la Data API es parte del [backlog](backlog.md).
 
-```text
-Usuario
-  |
-  | HTTPS
-  v
-Next.js en Vercel
-  |
-  | REST/JSON + token de Supabase Auth
-  v
-Express en Azure App Service
-  |-- Prisma --> Supabase PostgreSQL
-  |-- Supabase Auth
-  |-- Gemini API
-  `-- Proveedor de email
-```
+## Agenda, reservas y riesgo
 
-La arquitectura objetivo no implica que esos servicios esten desplegados actualmente.
+Las reglas semanales guardan horas locales `HH:mm`. Los turnos guardan instantes UTC. La consulta de slots calcula comienzos futuros cada 15 minutos desde el inicio de cada franja, según la duración del servicio y la ocupación de la única agenda. Una franja con horas ambiguas o inexistentes, o que cruza una transición de offset, no se ofrece.
 
-## Multi-tenancy
+Crear o reprogramar un turno bloquea la fila `Business` y vuelve a leer cliente, servicio, disponibilidad, zona horaria y ocupación dentro de la transacción. Las mutaciones de turno y los cambios de configuración relevantes comparten ese bloqueo. Los cambios de disponibilidad o zona se rechazan si dejan turnos vigentes fuera de atención. Turno, evento y trabajos asociados se persisten como parte de la mutación. El score se guarda después de confirmar la transacción de reserva o reprogramación.
 
-- `Business` es la raiz del tenant.
-- Las entidades operativas incluyen `businessId`.
-- Las relaciones compuestas impiden referencias entre negocios.
-- RLS usa `auth.uid()` y `Profile.id` para resolver el tenant.
-- `anon` no posee permisos sobre las tablas de dominio.
-- El alta inicial de negocio y perfil debe realizarse desde backend confiable.
-- El backend debe filtrar por `businessId` aunque Prisma use un rol que omita RLS.
+El score aplica reglas sobre antecedentes de ausencias, cancelaciones y anticipación, con niveles LOW, MEDIUM y HIGH. Gemini recibe el score, nivel y factores saneados para generar una explicación y recomendaciones bajo demanda. La salida estructurada se valida con Zod. La llamada tiene timeout, un reintento si la respuesta es inválida y un límite por usuario en memoria.
 
-## Seguridad en la API
+## Notificaciones
 
-1. `authenticate` valida el token contra Supabase Auth (`auth.getUser`): cubre firma, vencimiento y usuarios eliminados.
-2. `requireProfile` resuelve `businessId` y `role` desde `Profile` (`Profile.id = auth.users.id`).
-3. `requirePermission` aplica la matriz de roles de `@turnosmart/shared`.
-4. Cada repositorio recibe `businessId`; no existe consulta de un tenant sin ese filtro.
-5. Recursos de otro negocio responden 404, igual que los inexistentes, para no revelar su existencia.
+El centro de notificaciones registra avisos del negocio y lecturas por perfil. Una campana del layout autenticado comparte esos datos entre pantallas. El frontend consulta cada cinco segundos mientras está visible, actualiza la agenda ante notificaciones nuevas y muestra toasts de cancelaciones y solicitudes. La carga inicial es silenciosa; la reconciliación completa periódica contempla que `createdAt` no refleja necesariamente el orden de commit de eventos concurrentes. La agenda también muestra avisos de proximidad. Los correos transaccionales habilitados y con destinatario válido se encolan junto con el evento y la reserva en la misma transacción PostgreSQL. Tras completar la respuesta HTTP, se solicita su procesamiento asíncrono. Los recordatorios se programan en PostgreSQL según las preferencias guardadas, con claves de deduplicación. El procesador reclama trabajos vencidos y usa el proveedor configurado. Supabase Cron puede invocar ese mismo procesador si el backend se suspendió.
 
-Cubierto por `apps/backend/test/unit` y `apps/backend/test/integration/tenant-isolation.test.ts`.
+Los enlaces públicos se firman con HMAC y se limitan a una acción, destinatario y versión del horario. El cliente puede confirmar, cancelar según la política vigente o pedir una reprogramación. La reserva original se conserva hasta que el personal aprueba un horario disponible. Los detalles de configuración y validación están en la [guía de operación](operations.md#notificaciones-de-turnos).
 
-## Onboarding transaccional
+## Infraestructura y observabilidad
 
-`Business` + `Profile(OWNER)` se crean en una transaccion, con el email del usuario de Supabase Auth. Ante requests
-concurrentes, la clave primaria de `Profile` (= userId) hace fallar a todos menos uno con `P2002`; esas transacciones
-hacen rollback de su negocio y devuelven el ganador. Probado con 5 requests simultaneos contra PostgreSQL.
+Docker Compose provee PostgreSQL y Supabase Auth para desarrollo. GitHub Actions valida el monorepo y publica el frontend en Vercel cuando se habilita el flujo correspondiente. Render tiene una configuración para el backend de Dev. Azure App Service tiene Bicep y un artefacto ZIP para un despliegue manual de checkpoint.
 
-## Integracion con Gemini (A08)
-
-- Adaptador detras del puerto `LlmClient` (`modules/ai/llm.ts`), intercambiable y testeable con fakes.
-- Solo se envian `score`, `level` y factores `{code, label, impact, value}`; `sanitizeFactors` descarta cualquier otro
-  campo. Nunca nombres, emails, telefonos ni notas.
-- Salida estructurada (`responseJsonSchema`) validada con Zod; un unico reintento solo si el formato es invalido.
-- Timeout (`GEMINI_TIMEOUT_MS`), `maxOutputTokens` acotado y limite por usuario (`AI_RATE_LIMIT_*`) en memoria.
-  Con mas de una replica, ese limite debera moverse a PostgreSQL.
-- Gemini no modifica turnos ni decide estados. Si falla, la agenda y el score siguen operativos.
-- La explicacion es transitoria: no se persiste ni requiere cambios de schema.
-
-## Infraestructura
-
-Docker se usa para desarrollo. GitHub Actions provee CI con formato, lint, tipos, tests unitarios y build. El deploy del frontend es manual (`frontend-deploy.yml`, `workflow_dispatch`): Vercel Hobby o Azure Web App; el destino Azure requiere `output: 'standalone'` en Next.js. Vercel, Azure App Service y Application Insights permanecen planificados.
-
-## Modulos planificados
-
-Los contratos propuestos de B01 para servicios, disponibilidad semanal y slots se documentan en
-[Contratos de servicios y disponibilidad](api-services-availability.md). Incluyen las dependencias
-de autenticacion (A), reservas (C) y las decisiones pendientes de revision; no representan endpoints
-implementados.
-
-- autenticacion y perfiles;
-- negocios, servicios y clientes;
-- disponibilidad, turnos y eventos;
-- riesgo de no-show;
-- recordatorios y reportes.
-
-## Evolucion posterior al MVP
-
-- lista de espera y sugerencias para cubrir huecos;
-- recordatorios por WhatsApp;
-- pagos o senas;
-- analitica avanzada y umbrales configurables.
-
-Estas capacidades no forman parte del estado actual ni son requisitos de implementacion del Checkpoint 1.
+Express emite logs JSON y IDs de solicitud, expone `/health` y `/ready`, y publica contadores HTTP en memoria en `/metrics`. La integración con monitoreo externo y la verificación de los servicios publicados figuran en el [backlog](backlog.md).

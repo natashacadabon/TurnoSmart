@@ -14,6 +14,7 @@ export function useAppointmentSlots({
   initialStartsAt,
   excludeAppointmentId,
   omitStart,
+  publicToken,
 }: {
   timezone: string;
   serviceId: string;
@@ -21,6 +22,7 @@ export function useAppointmentSlots({
   initialStartsAt?: string;
   excludeAppointmentId?: string;
   omitStart?: string;
+  publicToken?: string;
 }) {
   const today = businessDate(new Date(), timezone);
   const [date, setDate] = useState(initialDate ?? today);
@@ -32,7 +34,7 @@ export function useAppointmentSlots({
   const suggestedStart = useRef(initialStartsAt);
   const validDate = slotsQuerySchema.shape.date.safeParse(date).success && date >= today;
   const query = { serviceId, date, ...(excludeAppointmentId ? { excludeAppointmentId } : {}) };
-  const validQuery = validDate && slotsQuerySchema.safeParse(query).success;
+  const validQuery = validDate && (!!publicToken || slotsQuerySchema.safeParse(query).success);
   const params = new URLSearchParams(query).toString();
   const key = params + '/' + retry;
   const current = result?.key === key ? result : null;
@@ -41,7 +43,14 @@ export function useAppointmentSlots({
   useEffect(() => {
     if (!validQuery) return;
     let active = true;
-    api<SlotsResponse>('/api/slots?' + params).then(
+    const request = publicToken
+      ? api<SlotsResponse>('/api/public/appointment-actions/slots', {
+          method: 'POST',
+          auth: false,
+          body: { token: publicToken, date },
+        })
+      : api<SlotsResponse>('/api/slots?' + params);
+    request.then(
       ({ data }) => {
         if (!active) return;
         const available = data.filter((slot) => slot.startsAt !== omitStart);
@@ -60,7 +69,7 @@ export function useAppointmentSlots({
     return () => {
       active = false;
     };
-  }, [date, initialDate, key, omitStart, params, validQuery]);
+  }, [date, initialDate, key, omitStart, params, publicToken, validQuery]);
 
   function refresh() {
     suggestedStart.current = undefined;
@@ -76,6 +85,7 @@ export function useAppointmentSlots({
     current,
     selected,
     serviceId,
+    publicToken,
     timezone,
     refresh,
     loading: validQuery && !current,
@@ -125,7 +135,7 @@ export function AppointmentSlotPicker({
       />
       <Box role="group" aria-label="Horarios disponibles">
         {slots.loading && <LinearProgress aria-label="Consultando horarios disponibles" />}
-        {!slots.serviceId && (
+        {!slots.serviceId && !slots.publicToken && (
           <Typography color="text.secondary" variant="body2">
             Seleccioná un servicio para consultar los horarios.
           </Typography>

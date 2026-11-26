@@ -44,10 +44,26 @@ export class FakeVerifier implements TokenVerifier {
 export class InMemoryIdentity implements IdentityRepository {
   readonly businesses = new Map<string, BusinessRecord>();
   readonly profiles = new Map<string, ProfileRecord>();
+  private readonly preferences = {
+    bookingEmailEnabled: true,
+    confirmationEmailEnabled: true,
+    remindersEnabled: true,
+    reminderHours: [48, 24],
+    reminder24hEnabled: true,
+    reminder48hEnabled: true,
+    cancellationEmailEnabled: false,
+    rescheduleEmailEnabled: false,
+    customerCancellationEnabled: true,
+    customerConfirmationEnabled: true,
+    customerRescheduleEnabled: true,
+    cancellationMinimumHours: 0,
+    rescheduleMinimumHours: 0,
+  };
 
   addMember(userId: string, businessId: string, role: Role) {
     if (!this.businesses.has(businessId)) {
       this.businesses.set(businessId, {
+        ...this.preferences,
         id: businessId,
         name: 'Negocio',
         timezone: 'UTC',
@@ -67,6 +83,7 @@ export class InMemoryIdentity implements IdentityRepository {
     const existing = await this.findProfileWithBusiness(input.userId);
     if (existing) return { ...existing, created: false };
     const business = {
+      ...this.preferences,
       id: randomUUID(),
       name: input.businessName,
       timezone: input.timezone,
@@ -83,7 +100,10 @@ export class InMemoryIdentity implements IdentityRepository {
     return { profile, business, created: true };
   }
 
-  async updateBusiness(businessId: string, data: { name?: string; timezone?: string }) {
+  async updateBusiness(
+    businessId: string,
+    data: Parameters<IdentityRepository['updateBusiness']>[1],
+  ) {
     const b = { ...this.businesses.get(businessId)!, ...data };
     this.businesses.set(businessId, b);
     return b;

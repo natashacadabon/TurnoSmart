@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { timingSafeEqual } from 'node:crypto';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { authenticate, requireProfile, type TokenVerifier } from './middleware/auth.js';
@@ -21,6 +22,8 @@ import { slotsRouter } from './modules/slots/routes.js';
 import type { SlotsRepository } from './modules/slots/repository.js';
 import type { AppointmentRepository } from './modules/appointments/repository.js';
 import { appointmentsRouter } from './modules/appointments/routes.js';
+import type { AppointmentActionLinks } from './modules/appointments/action-links.js';
+import { publicAppointmentActionsRouter } from './modules/appointments/public-routes.js';
 import type { PrismaNotificationRepository } from './modules/notifications/repository.js';
 import { notificationsRouter } from './modules/notifications/routes.js';
 import { getMetrics } from './lib/metrics.js';
@@ -35,8 +38,11 @@ export interface AppDeps {
   availability: AvailabilityRepository;
   slots: SlotsRepository;
   appointments: AppointmentRepository;
+  appointmentActionLinks?: AppointmentActionLinks;
   events: EventRepository;
   notifications?: PrismaNotificationRepository;
+  emailCron?: { secret: string; run: () => void };
+  requestEmailProcessing?: () => void;
   risk: RiskRepository;
   /** null si GEMINI_API_KEY no está configurada: la explicación responde 503. */
   explainer: RiskExplainer | null;
@@ -72,6 +78,24 @@ export function createApp(deps: AppDeps): Express {
     }),
   );
   app.use(express.json({ limit: '100kb' }));
+  if (deps.requestEmailProcessing) {
+    const requestProcessing = deps.requestEmailProcessing;
+    app.use((req, res, next) => {
+      const appointmentWrite =
+        req.method === 'POST' &&
+        (req.path === '/api/appointments' ||
+          req.path.startsWith('/api/appointments/') ||
+          req.path === '/api/public/appointment-actions');
+      const preferenceWrite =
+        req.method === 'PATCH' && req.path === '/api/business/notification-preferences';
+      if (appointmentWrite || preferenceWrite) {
+        res.once('finish', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) requestProcessing();
+        });
+      }
+      next();
+    });
+  }
 
   app.get('/health', (_req, res) => {
     res.json({
@@ -90,10 +114,31 @@ export function createApp(deps: AppDeps): Express {
     res.json(getMetrics());
   });
 
+  const emailCron = deps.emailCron;
+  if (emailCron) {
+    const expected = Buffer.from(`Bearer ${emailCron.secret}`);
+    app.post('/internal/email-jobs', (req, res) => {
+      const supplied = Buffer.from(req.header('authorization') ?? '');
+      res.set('Cache-Control', 'no-store');
+      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+        res.sendStatus(401);
+        return;
+      }
+      emailCron.run();
+      res.sendStatus(202);
+    });
+  }
+
   const authed = [authenticate(deps.verifier), requireProfile(deps.identity)];
   const limiter = new FixedWindowRateLimiter(deps.aiRateLimit.limit, deps.aiRateLimit.windowMs);
 
   app.use('/api', identityRouter(deps));
+  if (deps.appointmentActionLinks) {
+    app.use(
+      '/api/public/appointment-actions',
+      publicAppointmentActionsRouter(deps.appointmentActionLinks),
+    );
+  }
   app.use('/api/customers', ...authed, customersRouter(deps));
   app.use('/api/services', ...authed, servicesRouter(deps));
   app.use('/api/availability-rules', ...authed, availabilityRouter(deps));
@@ -105,6 +150,7 @@ export function createApp(deps: AppDeps): Express {
     ...authed,
     appointmentsRouter({
       appointments: deps.appointments,
+      actionLinks: deps.appointmentActionLinks,
       risk: deps.risk,
     }),
   );

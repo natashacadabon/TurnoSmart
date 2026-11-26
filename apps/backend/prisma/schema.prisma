@@ -16,10 +16,20 @@ enum ProfileRole {
 
 enum AppointmentStatus {
   SCHEDULED
-  CONFIRMED
   CANCELLED
   COMPLETED
   NO_SHOW
+}
+
+enum AppointmentConfirmationStatus {
+  PENDING
+  CONFIRMED
+}
+
+enum AppointmentPublicAction {
+  CONFIRM
+  CANCEL
+  REQUEST_RESCHEDULE
 }
 
 enum AppointmentEventType {
@@ -29,6 +39,8 @@ enum AppointmentEventType {
   CANCELLED
   COMPLETED
   MARKED_NO_SHOW
+  RESCHEDULE_REQUESTED
+  RESCHEDULE_REQUEST_DISMISSED
 }
 
 enum RiskLevel {
@@ -48,6 +60,17 @@ enum ReminderStatus {
   CANCELLED
 }
 
+enum AppointmentEmailKind {
+  BOOKED
+  CONFIRMED
+  CANCELLED
+  RESCHEDULED
+  RESCHEDULE_DECLINED
+  REMINDER_48H
+  REMINDER_24H
+  REMINDER
+}
+
 enum NotificationKind {
   APPOINTMENT_UPCOMING
   CONFIRMED
@@ -55,37 +78,51 @@ enum NotificationKind {
   RESCHEDULED
   MARKED_NO_SHOW
   COMPLETED
+  RESCHEDULE_REQUESTED
 }
 
 model Business {
-  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name              String
-  timezone          String             @default("America/Argentina/Buenos_Aires")
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
-  profiles          Profile[]
-  customers         Customer[]
-  services          Service[]
-  availabilityRules AvailabilityRule[]
-  appointments      Appointment[]
-  appointmentEvents AppointmentEvent[]
-  riskScores        RiskScore[]
-  reminders         Reminder[]
-  notifications     Notification[]
+  id                          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                        String
+  timezone                    String             @default("America/Argentina/Buenos_Aires")
+  bookingEmailEnabled         Boolean            @default(true) @map("booking_email_enabled")
+  confirmationEmailEnabled    Boolean            @default(true) @map("confirmation_email_enabled")
+  remindersEnabled            Boolean            @default(true) @map("reminders_enabled")
+  reminderHours               Int[]              @default([48, 24]) @map("reminder_hours")
+  reminder24hEnabled          Boolean            @default(true) @map("reminder_24h_enabled")
+  reminder48hEnabled          Boolean            @default(true) @map("reminder_48h_enabled")
+  cancellationEmailEnabled    Boolean            @default(false) @map("cancellation_email_enabled")
+  rescheduleEmailEnabled      Boolean            @default(false) @map("reschedule_email_enabled")
+  customerCancellationEnabled Boolean            @default(true) @map("customer_cancellation_enabled")
+  customerConfirmationEnabled Boolean            @default(true) @map("customer_confirmation_enabled")
+  customerRescheduleEnabled   Boolean            @default(true) @map("customer_reschedule_enabled")
+  cancellationMinimumHours    Int                @default(0) @map("cancellation_minimum_hours")
+  rescheduleMinimumHours      Int                @default(0) @map("reschedule_minimum_hours")
+  createdAt                   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  profiles                    Profile[]
+  customers                   Customer[]
+  services                    Service[]
+  availabilityRules           AvailabilityRule[]
+  appointments                Appointment[]
+  appointmentEvents           AppointmentEvent[]
+  riskScores                  RiskScore[]
+  reminders                   Reminder[]
+  notifications               Notification[]
 
   @@map("businesses")
 }
 
 model Profile {
   // Same UUID as auth.users.id. Creation is handled by trusted backend code.
-  id         String      @id @db.Uuid
-  businessId String      @map("business_id") @db.Uuid
-  email      String
-  fullName   String?     @map("full_name")
-  role       ProfileRole @default(STAFF)
-  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
-  business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id                String             @id @db.Uuid
+  businessId        String             @map("business_id") @db.Uuid
+  email             String
+  fullName          String?            @map("full_name")
+  role              ProfileRole        @default(STAFF)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business          Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   notificationReads NotificationRead[]
 
   @@unique([id, businessId])
@@ -148,29 +185,47 @@ model AvailabilityRule {
 }
 
 model Appointment {
-  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  businessId String             @map("business_id") @db.Uuid
-  customerId String             @map("customer_id") @db.Uuid
-  serviceId  String             @map("service_id") @db.Uuid
-  startsAt   DateTime           @map("starts_at") @db.Timestamptz(3)
-  endsAt     DateTime           @map("ends_at") @db.Timestamptz(3)
-  status     AppointmentStatus  @default(SCHEDULED)
-  notes      String?
-  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt  DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
-  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer           @relation(fields: [customerId, businessId], references: [id, businessId], onDelete: Restrict)
-  service    Service            @relation(fields: [serviceId, businessId], references: [id, businessId], onDelete: Restrict)
-  events     AppointmentEvent[]
-  riskScore  RiskScore?
-  reminders  Reminder[]
-  notifications Notification[]
+  id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId         String                        @map("business_id") @db.Uuid
+  customerId         String                        @map("customer_id") @db.Uuid
+  serviceId          String                        @map("service_id") @db.Uuid
+  startsAt           DateTime                      @map("starts_at") @db.Timestamptz(3)
+  endsAt             DateTime                      @map("ends_at") @db.Timestamptz(3)
+  status             AppointmentStatus             @default(SCHEDULED)
+  confirmationStatus AppointmentConfirmationStatus @default(PENDING) @map("confirmation_status")
+  scheduleVersion    Int                           @default(1) @map("schedule_version")
+  notes              String?
+  createdAt          DateTime                      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business           Business                      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer           Customer                      @relation(fields: [customerId, businessId], references: [id, businessId], onDelete: Restrict)
+  service            Service                       @relation(fields: [serviceId, businessId], references: [id, businessId], onDelete: Restrict)
+  events             AppointmentEvent[]
+  riskScore          RiskScore?
+  reminders          Reminder[]
+  notifications      Notification[]
+  publicActionLinks  AppointmentPublicActionLink[]
 
   @@unique([id, businessId])
   @@index([businessId, startsAt])
   @@index([businessId, status, startsAt])
   @@index([customerId, startsAt])
   @@map("appointments")
+}
+
+model AppointmentPublicActionLink {
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId      String                  @map("business_id") @db.Uuid
+  appointmentId   String                  @map("appointment_id") @db.Uuid
+  action          AppointmentPublicAction
+  recipient       String
+  scheduleVersion Int                     @map("schedule_version")
+  expiresAt       DateTime                @map("expires_at") @db.Timestamptz(3)
+  usedAt          DateTime?               @map("used_at") @db.Timestamptz(3)
+  appointment     Appointment             @relation(fields: [appointmentId, businessId], references: [id, businessId], onDelete: Cascade)
+
+  @@unique([appointmentId, businessId, scheduleVersion, action, recipient], map: "appointment_public_action_links_scope_key")
+  @@map("appointment_public_action_links")
 }
 
 model AppointmentEvent {
@@ -205,22 +260,34 @@ model RiskScore {
 }
 
 model Reminder {
-  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  businessId    String          @map("business_id") @db.Uuid
-  appointmentId String          @map("appointment_id") @db.Uuid
-  channel       ReminderChannel @default(EMAIL)
-  status        ReminderStatus  @default(PENDING)
-  scheduledAt   DateTime        @map("scheduled_at") @db.Timestamptz(3)
-  sentAt        DateTime?       @map("sent_at") @db.Timestamptz(3)
-  providerId    String?         @map("provider_id")
-  errorMessage  String?         @map("error_message")
-  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
-  business      Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  appointment   Appointment     @relation(fields: [appointmentId, businessId], references: [id, businessId], onDelete: Cascade)
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId          String                @map("business_id") @db.Uuid
+  appointmentId       String                @map("appointment_id") @db.Uuid
+  channel             ReminderChannel       @default(EMAIL)
+  status              ReminderStatus        @default(PENDING)
+  scheduledAt         DateTime              @map("scheduled_at") @db.Timestamptz(3)
+  sentAt              DateTime?             @map("sent_at") @db.Timestamptz(3)
+  providerId          String?               @map("provider_id")
+  errorMessage        String?               @map("error_message")
+  emailKind           AppointmentEmailKind? @map("email_kind")
+  reminderOffsetHours Int?                  @map("reminder_offset_hours")
+  deduplicationKey    String?               @unique @map("deduplication_key")
+  scheduleVersion     Int?                  @map("schedule_version")
+  recipient           String?
+  emailData           Json?                 @map("email_data")
+  attempts            Int                   @default(0)
+  firstAttemptAt      DateTime?             @map("first_attempt_at") @db.Timestamptz(3)
+  lastAttemptAt       DateTime?             @map("last_attempt_at") @db.Timestamptz(3)
+  leaseUntil          DateTime?             @map("lease_until") @db.Timestamptz(3)
+  payloadHash         String?               @map("payload_hash")
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business            Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment         Appointment           @relation(fields: [appointmentId, businessId], references: [id, businessId], onDelete: Cascade)
 
   @@index([businessId, status, scheduledAt])
   @@index([appointmentId])
+  @@index([status, scheduledAt])
   @@map("reminders")
 }
 

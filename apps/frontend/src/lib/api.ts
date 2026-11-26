@@ -29,11 +29,13 @@ const API_URL = selectBackendUrl(
 /** Cliente HTTP común: adjunta el access token vigente y normaliza errores del contrato A01. */
 export async function api<T>(
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; auth?: boolean } = {},
 ): Promise<T> {
   if (!API_URL) throw new ApiError(0, 'NETWORK_ERROR', 'Falta configurar la URL publica de la API');
-  const { data } = await getSupabase().auth.getSession();
-  const token = data.session?.access_token;
+  const token =
+    init.auth === false
+      ? undefined
+      : (await getSupabase().auth.getSession()).data.session?.access_token;
 
   let res: Response;
   try {

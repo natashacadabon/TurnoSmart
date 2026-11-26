@@ -10,7 +10,7 @@ import type { SlotsRepository } from './repository.js';
 export class SlotsService {
   constructor(
     private readonly repository: SlotsRepository,
-    private readonly availability: AvailabilityRepository,
+    private readonly availability: Pick<AvailabilityRepository, 'list'>,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 

@@ -15,28 +15,20 @@ import { Bell } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useToast } from '@/components/ToastProvider';
+import { useUnsavedChanges } from '@/components/UnsavedChangesProvider';
 import { errorMessage } from '@/lib/api';
 import { useNotifications } from './NotificationProvider';
 import { NotificationRows } from './NotificationRows';
 
-export function NotificationBell({
-  timezone,
-  refreshRevision,
-  onOpenChange,
-}: {
-  timezone: string;
-  refreshRevision: number;
-  onOpenChange(open: boolean): void;
-}) {
-  const { recent, error, refresh, markAllRead } = useNotifications();
+export function NotificationBell({ timezone }: { timezone: string }) {
+  const { recent, error, refresh, markAllRead, setPopoverOpen } = useNotifications();
+  const { allowNavigation } = useUnsavedChanges();
   const { notify } = useToast();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const unread = recent?.unreadCount ?? 0;
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh, refreshRevision]);
+  useEffect(() => () => setPopoverOpen(false), [setPopoverOpen]);
 
   async function readAll() {
     setBusy(true);
@@ -53,18 +45,28 @@ export function NotificationBell({
 
   const close = () => {
     setAnchor(null);
-    onOpenChange(false);
+    setPopoverOpen(false);
   };
   return (
     <>
       <IconButton
+        sx={{
+          width: 44,
+          height: 44,
+          bgcolor: 'background.paper',
+          border: 1,
+          borderColor: 'divider',
+          borderRadius: '12px',
+          boxShadow: 1,
+          '&:hover': { bgcolor: 'action.hover' },
+        }}
         aria-label={unread ? `Notificaciones (${unread} sin leer)` : 'Notificaciones'}
         aria-haspopup="dialog"
         aria-expanded={!!anchor}
         aria-controls={anchor ? 'notifications-popover' : undefined}
         onClick={(event) => {
           setAnchor(event.currentTarget);
-          onOpenChange(true);
+          setPopoverOpen(true);
           void refresh();
         }}
       >
@@ -144,7 +146,18 @@ export function NotificationBell({
           )}
         </Box>
         <Box sx={{ p: 1, borderTop: 1, borderColor: 'divider', textAlign: 'center' }}>
-          <Button component={Link} href="/notifications" size="small" onClick={close}>
+          <Button
+            component={Link}
+            href="/notifications"
+            size="small"
+            onNavigate={(event: { preventDefault(): void }) => {
+              if (!allowNavigation()) {
+                event.preventDefault();
+                return;
+              }
+              close();
+            }}
+          >
             Ver todas las notificaciones
           </Button>
         </Box>

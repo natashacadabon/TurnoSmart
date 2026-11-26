@@ -116,16 +116,23 @@ export function appointmentFits(
   );
 }
 
+export async function listWeeklyAvailability(
+  db: Pick<PrismaClient, 'business'>,
+  businessId: string,
+): Promise<WeeklyAvailability> {
+  const business = await db.business.findUniqueOrThrow({
+    where: { id: businessId },
+    select: { timezone: true, availabilityRules: { orderBy: [...orderBy] } },
+  });
+  timezoneFormatter(business.timezone);
+  return { timezone: business.timezone, rules: business.availabilityRules };
+}
+
 export class PrismaAvailabilityRepository implements AvailabilityRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async list(businessId: string): Promise<WeeklyAvailability> {
-    const business = await this.prisma.business.findUniqueOrThrow({
-      where: { id: businessId },
-      select: { timezone: true, availabilityRules: { orderBy: [...orderBy] } },
-    });
-    timezoneFormatter(business.timezone);
-    return { timezone: business.timezone, rules: business.availabilityRules };
+  list(businessId: string) {
+    return listWeeklyAvailability(this.prisma, businessId);
   }
 
   async replace(businessId: string, rules: AvailabilityRuleInput[]): Promise<WeeklyAvailability> {
@@ -141,7 +148,7 @@ export class PrismaAvailabilityRepository implements AvailabilityRepository {
         const appointments = await tx.appointment.findMany({
           where: {
             businessId,
-            status: { in: ['SCHEDULED', 'CONFIRMED'] },
+            status: 'SCHEDULED',
             endsAt: { gt: new Date() },
           },
           select: { startsAt: true, endsAt: true },

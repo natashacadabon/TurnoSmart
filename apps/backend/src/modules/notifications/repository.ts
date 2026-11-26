@@ -1,4 +1,9 @@
-import { Prisma, type AppointmentEvent, type PrismaClient } from '@prisma/client';
+import {
+  Prisma,
+  type AppointmentEvent,
+  type NotificationKind,
+  type PrismaClient,
+} from '@prisma/client';
 import {
   NOTIFICATION_LEAD_MS,
   type AuthContext,
@@ -11,8 +16,18 @@ import { notFound } from '../../lib/errors.js';
 
 type Scope = Pick<AuthContext, 'businessId' | 'userId'>;
 
-function unread({ businessId, userId }: Scope): Prisma.NotificationWhereInput {
-  return { businessId, reads: { none: { profileId: userId, businessId } } };
+function visible(businessId: string, includeRequests = false): Prisma.NotificationWhereInput {
+  return { businessId, ...(!includeRequests && { kind: { not: 'RESCHEDULE_REQUESTED' } }) };
+}
+
+function unread(
+  { businessId, userId }: Scope,
+  includeRequests = false,
+): Prisma.NotificationWhereInput {
+  return {
+    ...visible(businessId, includeRequests),
+    reads: { none: { profileId: userId, businessId } },
+  };
 }
 
 export async function recordAppointmentNotification(
@@ -20,7 +35,7 @@ export async function recordAppointmentNotification(
   event: AppointmentEvent,
   startsAt: Date,
 ) {
-  if (event.type === 'CREATED') return;
+  if (event.type === 'CREATED' || event.type === 'RESCHEDULE_REQUEST_DISMISSED') return;
   await tx.notification.create({
     data: {
       businessId: event.businessId,
@@ -36,21 +51,22 @@ export async function recordAppointmentNotification(
 export class PrismaNotificationRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  list(scope: Scope, query: NotificationsQuery): Promise<NotificationsResponse> {
+  list(scope: Scope, query: NotificationsQuery): Promise<NotificationsResponse<NotificationKind>> {
     const { businessId, userId } = scope;
+    const scopeFilter = visible(businessId, query.includeRequests);
     return this.prisma.$transaction(
       async (tx) => {
         // Resolve the cursor within the tenant before using it as an ordering anchor.
         const anchor = query.cursor
-          ? await tx.notification.findUnique({
-              where: { id_businessId: { id: query.cursor, businessId } },
+          ? await tx.notification.findFirst({
+              where: { ...scopeFilter, id: query.cursor },
               select: { id: true, createdAt: true },
             })
           : null;
         if (query.cursor && !anchor) throw notFound('Notificación');
         const rows = await tx.notification.findMany({
           where: {
-            ...(query.filter === 'unread' ? unread(scope) : { businessId }),
+            ...(query.filter === 'unread' ? unread(scope, query.includeRequests) : scopeFilter),
             ...(anchor && {
               OR: [
                 { createdAt: { lt: anchor.createdAt } },
@@ -79,7 +95,7 @@ export class PrismaNotificationRepository {
         }));
         return {
           items,
-          unreadCount: await tx.notification.count({ where: unread(scope) }),
+          unreadCount: await tx.notification.count({ where: unread(scope, query.includeRequests) }),
           nextCursor: rows.length > query.limit ? (items.at(-1)?.id ?? null) : null,
         };
       },
@@ -87,11 +103,15 @@ export class PrismaNotificationRepository {
     );
   }
 
-  markRead(scope: Scope, notificationId: string): Promise<NotificationReadResponse> {
+  markRead(
+    scope: Scope,
+    notificationId: string,
+    includeRequests = false,
+  ): Promise<NotificationReadResponse> {
     const { businessId, userId: profileId } = scope;
     return this.prisma.$transaction(async (tx) => {
-      const notification = await tx.notification.findUnique({
-        where: { id_businessId: { id: notificationId, businessId } },
+      const notification = await tx.notification.findFirst({
+        where: { ...visible(businessId, includeRequests), id: notificationId },
         select: { id: true },
       });
       if (!notification) throw notFound('Notificación');
@@ -104,17 +124,18 @@ export class PrismaNotificationRepository {
       });
       return {
         readAt: receipt.readAt.toISOString(),
-        unreadCount: await tx.notification.count({ where: unread(scope) }),
+        unreadCount: await tx.notification.count({ where: unread(scope, includeRequests) }),
       };
     });
   }
 
-  async markAllRead({ businessId, userId }: Scope) {
+  async markAllRead({ businessId, userId }: Scope, includeRequests = false) {
     await this.prisma.$executeRaw`
       INSERT INTO public.notification_reads (business_id, notification_id, profile_id)
       SELECT n.business_id, n.id, ${userId}::uuid
       FROM public.notifications n
       WHERE n.business_id = ${businessId}::uuid
+        AND (${includeRequests} OR n.kind <> 'RESCHEDULE_REQUESTED')
         AND NOT EXISTS (
           SELECT 1 FROM public.notification_reads r
           WHERE r.notification_id = n.id AND r.profile_id = ${userId}::uuid
@@ -129,7 +150,7 @@ export class PrismaNotificationRepository {
   ): Promise<UpcomingNotification[]> {
     const until = new Date(now.getTime() + NOTIFICATION_LEAD_MS);
     const due = Prisma.sql`
-      a.business_id = ${businessId}::uuid AND a.status IN ('SCHEDULED', 'CONFIRMED')
+      a.business_id = ${businessId}::uuid AND a.status = 'SCHEDULED'
       AND a.starts_at >= (date_trunc('day', ${now}::timestamptz AT TIME ZONE ${timezone})
                            AT TIME ZONE ${timezone})
       AND a.starts_at <= ${until}::timestamptz

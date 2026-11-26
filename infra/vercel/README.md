@@ -1,4 +1,4 @@
-# Frontend de demo — Vercel Hobby (preparado, sin desplegar)
+# Frontend en Vercel Hobby
 
 ## Elegibilidad y alcance
 
@@ -243,7 +243,7 @@ y republicar una vez validado antes de reactivar CD. Preview puede eliminarse
 desde Deployments. Revisar [cuotas Hobby](https://vercel.com/docs/plans/hobby)
 y [retencion](https://vercel.com/changelog/hobby-projects-now-retain-fewer-deployments-to-free-up-storage).
 
-Validar desde navegador publicado: /demo y /login; /customers sin sesion redirige;
+Validar en el navegador publicado que `/login` carga y `/customers` redirige al login si la sesión está cerrada. Completar
 login, onboarding solo si corresponde, clientes, recarga y logout. DevTools Network
 debe mostrar Auth a Supabase y API solo al backend elegido, sin localhost ni mixed content.
 OPTIONS a /api/customers con Origin Vercel y Access-Control-Request-Headers:

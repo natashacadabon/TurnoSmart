@@ -9,6 +9,15 @@ export const APPOINTMENT_STATUSES = [
   'NO_SHOW',
 ] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+export type AppointmentOperationalStatus = Exclude<AppointmentStatus, 'CONFIRMED'>;
+export type AppointmentConfirmationStatus = 'PENDING' | 'CONFIRMED';
+
+export function projectAppointmentStatus(
+  status: AppointmentOperationalStatus,
+  confirmation: AppointmentConfirmationStatus,
+): AppointmentStatus {
+  return status === 'SCHEDULED' && confirmation === 'CONFIRMED' ? 'CONFIRMED' : status;
+}
 
 export const appointmentStatusSchema = z.enum(APPOINTMENT_STATUSES);
 
@@ -21,6 +30,8 @@ export const APPOINTMENT_EVENT_TYPES = [
   'MARKED_NO_SHOW',
 ] as const;
 export type AppointmentEventType = (typeof APPOINTMENT_EVENT_TYPES)[number];
+export type AppointmentRescheduleEventType =
+  'RESCHEDULE_REQUESTED' | 'RESCHEDULE_REQUEST_DISMISSED';
 
 export const appointmentEventTypeSchema = z.enum(APPOINTMENT_EVENT_TYPES);
 
@@ -40,6 +51,10 @@ export interface AppointmentDto {
   startsAt: string;
   endsAt: string;
   status: AppointmentStatus;
+  /** Present in API responses. Optional for consumers of older snapshots. */
+  operationalStatus?: AppointmentOperationalStatus;
+  confirmationStatus?: AppointmentConfirmationStatus;
+  rescheduleRequested?: boolean;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -82,6 +97,48 @@ export const rescheduleAppointmentSchema = z.strictObject({
   startsAt: appointmentInstant,
 });
 export type RescheduleAppointmentRequest = z.input<typeof rescheduleAppointmentSchema>;
+
+export const approveRescheduleRequestSchema = rescheduleAppointmentSchema.extend({
+  requestId: appointmentId,
+});
+
+export const dismissRescheduleRequestSchema = z.strictObject({ requestId: appointmentId });
+
+export interface PendingRescheduleRequestDto {
+  id: string;
+  message: string | null;
+  createdAt: string;
+  requestedStartsAt?: string;
+}
+
+export const appointmentPublicActionSchema = z.enum(['CONFIRM', 'CANCEL', 'REQUEST_RESCHEDULE']);
+export type AppointmentPublicAction = z.infer<typeof appointmentPublicActionSchema>;
+
+export const issueAppointmentActionSchema = z.strictObject({
+  action: appointmentPublicActionSchema,
+});
+export const previewAppointmentActionSchema = z.strictObject({
+  token: z.string().min(1).max(128),
+});
+export const executeAppointmentActionSchema = previewAppointmentActionSchema.extend({
+  confirmed: z.literal(true),
+  message: z.string().trim().min(1).max(500).optional(),
+  requestedStartsAt: appointmentInstant.optional(),
+});
+
+export const publicAppointmentSlotsSchema = previewAppointmentActionSchema.extend({
+  date: z.iso.date(),
+});
+
+export interface PublicAppointmentPreview {
+  businessName: string;
+  serviceName: string;
+  startsAt: string;
+  timezone: string;
+  action: AppointmentPublicAction;
+  allowed: boolean;
+  alreadySubmitted?: boolean;
+}
 
 /** GET /api/appointments */
 export const listAppointmentsQuerySchema = z
@@ -146,10 +203,10 @@ export function appointmentStatusTransitions(
  * GET /api/appointments/:id/events (C07): orden cronológico ascendente.
  * Estados previos/nuevos y actor, si C los registra, viajan en metadata.
  */
-export interface AppointmentEventDto {
+export interface AppointmentEventDto<T = AppointmentEventType> {
   id: string;
   appointmentId: string;
-  type: AppointmentEventType;
+  type: T;
   metadata: Record<string, unknown> | null;
   createdAt: string;
 }

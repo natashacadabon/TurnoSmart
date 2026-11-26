@@ -161,7 +161,7 @@ describe('contratos y consultas de slots', () => {
     expect(prisma.appointment.findMany).toHaveBeenCalledExactlyOnceWith({
       where: {
         businessId: 'tenant',
-        status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        status: 'SCHEDULED',
         startsAt: { lt: range.endsAt },
         endsAt: { gt: range.startsAt },
         id: { not: 'excluded' },

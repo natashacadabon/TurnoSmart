@@ -1,7 +1,6 @@
 # Backlog del Desarrollador A — 56 h
 
-Estado en este repositorio al 26/10/2026. "Implementado" significa código + tests locales; la aceptación final requiere
-además la validación cloud de las ventanas V1–V4.
+Registro histórico del 26 de octubre de 2026. Desde ese corte se integraron el score real, el historial desde la agenda, los flujos de Vercel y escenarios Playwright de turnos. El trabajo vigente y las verificaciones pendientes están en el [backlog general](backlog.md).
 
 | ID  | Tarea                                                              | h   | Estado              | Dónde                                                           | Falta para aceptar                                                   |
 | --- | ------------------------------------------------------------------ | --- | ------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -18,7 +17,7 @@ además la validación cloud de las ventanas V1–V4.
 | A11 | Créditos, cuotas, presupuesto y ledger de costos                   | 3   | En curso            | `docs/costs.md`                                                 | Crear budget USD 2, decisión de Vercel, completar ledger por ventana |
 | C07 | Historial de eventos (lectura + UI)                                | 3   | Implementado        | `modules/events`, `EventHistory.tsx`                            | Eventos reales escritos por C; enlace desde la agenda (C)            |
 
-## Integraciones pendientes con el equipo
+## Integraciones previstas en el corte de octubre
 
 - **C**: persistir `RiskScore.factors` como `RiskFactor[]` (`{code, label, impact, value?}`). Si se quiere mostrar estado
   anterior/nuevo o actor en el historial, guardarlos en `AppointmentEvent.metadata`.

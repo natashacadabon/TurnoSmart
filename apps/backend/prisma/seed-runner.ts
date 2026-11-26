@@ -107,7 +107,13 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
           await tx.appointment.upsert({
             where: { id: appointment.id },
             create: appointment,
-            update: appointment,
+            update: {
+              ...appointment,
+              ...(existing &&
+                existing.startsAt.getTime() !== appointment.startsAt.getTime() && {
+                  scheduleVersion: { increment: 1 },
+                }),
+            },
           });
           const business = data.businesses.findIndex((b) => b.id === appointment.businessId) + 1;
           const index =
@@ -119,8 +125,10 @@ export async function seedDomain(prisma: PrismaClient, data: SeedData, profiles:
             businessId: appointment.businessId,
             appointmentId: appointment.id,
             type: {
-              SCHEDULED: AppointmentEventType.CREATED,
-              CONFIRMED: AppointmentEventType.CONFIRMED,
+              SCHEDULED:
+                appointment.confirmationStatus === 'CONFIRMED'
+                  ? AppointmentEventType.CONFIRMED
+                  : AppointmentEventType.CREATED,
               COMPLETED: AppointmentEventType.COMPLETED,
               CANCELLED: AppointmentEventType.CANCELLED,
               NO_SHOW: AppointmentEventType.MARKED_NO_SHOW,

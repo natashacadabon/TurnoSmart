@@ -5,10 +5,10 @@ import type {
   AvailabilityRuleInput,
   CreateAppointmentRequest,
   CustomerDto,
-  NotificationDto,
   ServiceDto,
 } from '@turnosmart/shared';
 import { APPOINTMENT_STATUSES } from '@turnosmart/shared';
+import type { CenterNotifications } from '../src/components/notifications/NotificationProvider';
 import {
   agendaReminders,
   canApplyReminderAction,
@@ -57,7 +57,7 @@ const weekdays: AvailabilityRuleInput[] = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
 }));
 const timezone = 'America/Argentina/Buenos_Aires';
 
-function respond(route: Route, json: object, status = 200) {
+function respond(route: Route, json: object | null, status = 200) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers':
@@ -66,7 +66,12 @@ function respond(route: Route, json: object, status = 200) {
   };
   return route.request().method() === 'OPTIONS' || status === 204
     ? route.fulfill({ status: 204, headers })
-    : route.fulfill({ status, json, headers });
+    : route.fulfill({
+        status,
+        body: JSON.stringify(json),
+        contentType: 'application/json',
+        headers,
+      });
 }
 
 async function openAgenda(
@@ -78,6 +83,8 @@ async function openAgenda(
     rules?: AvailabilityRuleInput[];
     rejectFirstTransition?: boolean;
     failMetrics?: boolean;
+    role?: 'OWNER' | 'ADMIN' | 'STAFF';
+    initialNotifications?: CenterNotifications['items'];
   } = {},
 ) {
   const instant = options.instant ?? now;
@@ -113,7 +120,7 @@ async function openAgenda(
   );
   const writes: CreateAppointmentRequest[] = [];
   const appointments = [...initialAppointments];
-  const notifications: NotificationDto[] = [];
+  const notifications: CenterNotifications['items'] = [...(options.initialNotifications ?? [])];
   let failNotificationList = false;
   const transitions: string[] = [];
   const riskCalls: string[] = [];
@@ -190,7 +197,7 @@ async function openAgenda(
     });
   });
   await page.route(
-    /\/api\/(me|services|slots|customers(?:\/[^/?]+)?|availability-rules|appointments(?:\/[^/?]+(?:\/(?:events|confirm|cancel|complete|no-show|risk\/explanation))?)?)(\?.*)?$/,
+    /\/api\/(me|services|slots|customers(?:\/[^/?]+)?|availability-rules|appointments(?:\/[^/?]+(?:\/(?:events|confirm|cancel|complete|no-show|reschedule-request|risk\/explanation))?)?)(\?.*)?$/,
     async (route) => {
       const request = route.request();
       if (request.method() === 'OPTIONS') return respond(route, {});
@@ -218,6 +225,7 @@ async function openAgenda(
         });
       }
       if (url.pathname.endsWith('/events')) return respond(route, []);
+      if (url.pathname.endsWith('/reschedule-request')) return respond(route, null);
       if (url.pathname.startsWith('/api/customers/')) {
         const found = customers.find((item) => url.pathname.endsWith('/' + item.id));
         return found
@@ -267,7 +275,7 @@ async function openAgenda(
           return respond(route, {
             onboarded: true,
             user: { id: user.id, email },
-            profile: { id: user.id, role: 'OWNER', fullName: 'Operadora' },
+            profile: { id: user.id, role: options.role ?? 'OWNER', fullName: 'Operadora' },
             business: {
               id: id(4),
               name: 'Negocio de prueba',
@@ -352,6 +360,10 @@ async function openAgenda(
   await page.getByRole('link', { name: 'Agenda', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Nuevo turno' })).toBeVisible({ timeout: 30_000 });
   return {
+    updateAppointment(updated: AppointmentDto) {
+      const index = appointments.findIndex((item) => item.id === updated.id);
+      if (index >= 0) appointments[index] = updated;
+    },
     writes,
     slotDates,
     transitions,
@@ -435,6 +447,152 @@ function reminderFixture(
     ...timestamps,
   };
 }
+
+const notificationPreferences = () => ({
+  bookingEmailEnabled: false,
+  confirmationEmailEnabled: false,
+  remindersEnabled: false,
+  reminderHours: [48, 24],
+  reminder24hEnabled: false,
+  reminder48hEnabled: false,
+  cancellationEmailEnabled: false,
+  rescheduleEmailEnabled: false,
+  customerConfirmationEnabled: true,
+  customerCancellationEnabled: true,
+  customerRescheduleEnabled: true,
+  cancellationMinimumHours: 0,
+  rescheduleMinimumHours: 0,
+});
+
+test('guarda configuración de correos y hasta tres recordatorios únicos en móvil', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const preferences = notificationPreferences();
+  const writes: object[] = [];
+  await page.route('**/api/business/notification-preferences', (route) => {
+    if (route.request().method() === 'OPTIONS') return respond(route, {});
+    if (route.request().method() === 'PATCH') {
+      const update = route.request().postDataJSON() as Partial<typeof preferences>;
+      writes.push(update);
+      Object.assign(preferences, update);
+    }
+    return respond(route, preferences);
+  });
+  await page.route('**/api/business/notification-preferences/preview/BOOKED', (route) =>
+    respond(route, { subject: 'Tu turno está reservado', html: '<p>Vista previa de reserva</p>' }),
+  );
+  await openAgenda(page);
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Configuración', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Configuración', exact: true })).toBeVisible();
+  const settings = page.getByRole('region', { name: 'Notificaciones', exact: true });
+  const save = settings.getByRole('button', { name: 'Guardar cambios', exact: true });
+  await expect(save).toBeDisabled();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 1' })).toBeDisabled();
+  await settings.getByLabel('Email al reservar').check();
+  await settings.getByLabel('Email de confirmación', { exact: true }).check();
+  await settings.getByLabel('Recordatorios automáticos').check();
+  await settings.getByRole('button', { name: 'Agregar recordatorio' }).click();
+  await expect(settings.getByRole('button', { name: 'Agregar recordatorio' })).toBeDisabled();
+  await settings.getByRole('combobox', { name: 'Recordatorio 3' }).click();
+  await expect(page.getByRole('option', { name: '24 h antes', exact: true })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await page.getByRole('option', { name: '6 h antes', exact: true }).click();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 3' })).toHaveText('6 h antes');
+  await settings.getByLabel('Anticipación mínima para cancelar (horas)').fill('12');
+  await settings.getByLabel('Anticipación mínima para solicitar un cambio (horas)').fill('6');
+  await settings.getByLabel('Permitir confirmación mediante enlace').uncheck();
+  await expect(settings.getByRole('status')).toContainText('Cambios sin guardar');
+  await save.click();
+  await expect(page.getByText('Preferencias de notificaciones guardadas')).toBeVisible();
+  expect(writes).toEqual([
+    {
+      bookingEmailEnabled: true,
+      confirmationEmailEnabled: true,
+      remindersEnabled: true,
+      reminderHours: [48, 24, 6],
+      customerConfirmationEnabled: false,
+      cancellationMinimumHours: 12,
+      rescheduleMinimumHours: 6,
+    },
+  ]);
+  await page.reload();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 3' })).toHaveText('6 h antes');
+  await expect(save).toBeDisabled();
+  await settings.getByRole('button', { name: 'Eliminar recordatorio 3' }).click();
+  await settings.getByLabel('Recordatorios automáticos').uncheck();
+  await expect(settings.getByRole('combobox', { name: 'Recordatorio 1' })).toBeDisabled();
+  await save.click();
+  expect(writes.at(-1)).toEqual({ remindersEnabled: false, reminderHours: [48, 24] });
+  await settings.getByRole('button', { name: 'Vista previa de emails' }).click();
+  await expect(
+    page.frameLocator('iframe[title="Contenido del email"]').getByText('Vista previa de reserva'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  expect(await page.locator('html').evaluate((element) => element.scrollWidth)).toBe(390);
+});
+
+test('STAFF puede consultar configuración y no tiene controles de escritura', async ({ page }) => {
+  const writes: object[] = [];
+  await page.route('**/api/business/notification-preferences', (route) => {
+    if (route.request().method() === 'PATCH') writes.push(route.request().postDataJSON());
+    return respond(route, notificationPreferences());
+  });
+  await openAgenda(page, false, [], { role: 'STAFF' });
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Configuración', exact: true })
+    .click();
+  const settings = page.getByRole('region', { name: 'Notificaciones', exact: true });
+  await expect(
+    settings.getByText('Solo dueños y administradores pueden modificar estas preferencias.'),
+  ).toBeVisible();
+  await expect(settings.getByLabel('Email al reservar')).toBeDisabled();
+  await expect(settings.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
+test('muestra la solicitud en agenda y permite rechazarla desde el detalle', async ({ page }) => {
+  const item = { ...reminderFixture(95, 60), rescheduleRequested: true };
+  const pending = {
+    id: id(96),
+    message: 'Prefiero más tarde',
+    createdAt: now,
+    requestedStartsAt: second.startsAt,
+  };
+  let rejected = false;
+  await openAgenda(page, false, [item]);
+  await expect(
+    page.locator('[data-agenda-event-content][aria-label*="Reprogramación solicitada"]').first(),
+  ).toBeVisible();
+  const path = '/api/appointments/' + item.id + '/reschedule-request';
+  await page.route('**' + path, (route) => respond(route, rejected ? null : pending));
+  await page.route('**' + path + '/dismiss', (route) => {
+    if (route.request().method() === 'OPTIONS') return respond(route, {});
+    expect(route.request().postDataJSON()).toEqual({ requestId: pending.id });
+    rejected = true;
+    return respond(route, {}, 204);
+  });
+  await page.goto('/appointments/' + item.id);
+  await expect(page.getByText('Pendiente de confirmación')).toBeVisible();
+  await expect(page.getByText('Prefiero más tarde')).toBeVisible();
+  await page.getByRole('button', { name: 'Revisar y aprobar' }).click();
+  const review = page.getByRole('dialog', { name: 'Aprobar reprogramación' });
+  await expect(review.getByRole('button', { name: '11:00 – 11:30' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await review.getByRole('button', { name: 'Cerrar' }).click();
+  await page.getByRole('button', { name: 'Rechazar solicitud' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Rechazar solicitud' }).click();
+  await expect(page.getByText('Solicitud rechazada. El turno conserva su horario.')).toBeVisible();
+  await expect(page.getByText('Prefiero más tarde')).toHaveCount(0);
+});
 
 test('calcula el umbral, las transiciones, el descarte y la reaparición de avisos', () => {
   const clock = Date.parse(now);
@@ -622,7 +780,7 @@ test('detalle reprograma con confirmación, maneja errores y actualiza historial
     { id: id(90), appointmentId: item.id, type: 'CREATED', createdAt: now, metadata: null },
   ];
   await openAgenda(page, false, [item]);
-  await page.route('**' + path + '/events', (route) => respond(route, events));
+  await page.route('**' + path + '/events?includeRequests=true', (route) => respond(route, events));
   await page.route(/\/api\/slots\?/, (route) => {
     const query = new URL(route.request().url()).searchParams;
     expect(query.get('excludeAppointmentId')).toBe(item.id);
@@ -1366,4 +1524,292 @@ test('mantiene la agenda sin actualizaciones antes del montaje al volver a la pe
   await expect(grid.locator('.booking-calendar-title')).toBeVisible();
 
   expect(errors).toEqual([]);
+});
+
+test('sincroniza cancelación y solicitud públicas con la agenda y toasts sin recargar', async ({
+  page,
+}, testInfo) => {
+  const item = reminderFixture(901, 60);
+  const next = reminderFixture(902, 120);
+  const { notifications, updateAppointment } = await openAgenda(page, false, [item, next]);
+  await expect(page.getByRole('button', { name: 'Notificaciones', exact: true })).toBeVisible();
+  const getEvent = (title: string) =>
+    page.locator('[data-agenda-event-content]').filter({ hasText: title }).first();
+  await expect(getEvent('Turno programado')).toBeVisible();
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/appointments?')) requests.push(request.url());
+  });
+  updateAppointment({ ...item, status: 'CANCELLED' });
+  notifications.push({
+    id: id(9901),
+    appointmentId: item.id,
+    kind: 'CANCELLED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  const cancelled = page.getByRole('status').filter({ hasText: 'Turno cancelado ·' });
+  await expect(cancelled).toBeVisible({ timeout: 12_000 });
+  await expect(
+    page.locator('[data-agenda-event-content][aria-label*="Turno cancelado"]'),
+  ).toBeVisible();
+  expect(requests.length).toBeGreaterThanOrEqual(2);
+  expect(notifications[0]!.readAt).toBeNull();
+  await cancelled.getByRole('button', { name: 'Cerrar notificación' }).click();
+  await expect(cancelled).toBeHidden();
+  await page.waitForTimeout(5_500);
+  await expect(cancelled).toBeHidden();
+  updateAppointment({ ...next, rescheduleRequested: true });
+  notifications.push({
+    id: id(9902),
+    appointmentId: next.id,
+    kind: 'RESCHEDULE_REQUESTED',
+    startsAt: next.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  const requested = page
+    .getByRole('status')
+    .filter({ hasText: 'Nueva solicitud de reprogramación ·' });
+  await expect(requested).toBeVisible({ timeout: 12_000 });
+  await expect(
+    page.locator('[data-agenda-event-content][aria-label*="Reprogramación solicitada"]'),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Notificaciones (2 sin leer)' })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('external-request-toast.png'),
+    fullPage: true,
+  });
+  await requested.getByRole('button', { name: 'Cerrar notificación' }).click();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Notificaciones (2 sin leer)' })).toBeVisible();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Nueva solicitud de reprogramación ·' }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'Turno cancelado ·' })).toHaveCount(0);
+});
+
+test('recupera tras error y agrupa avisos nuevos más allá de la primera página', async ({
+  page,
+}) => {
+  const item = reminderFixture(903, 60);
+  const previous = {
+    id: id(9800),
+    appointmentId: item.id,
+    kind: 'CANCELLED' as const,
+    startsAt: item.startsAt,
+    createdAt: '2099-01-05T11:00:00.000Z',
+    readAt: null,
+  };
+  const { notifications, setNotificationError, updateAppointment } = await openAgenda(
+    page,
+    false,
+    [item],
+    { initialNotifications: [previous] },
+  );
+  await expect(page.getByRole('button', { name: 'Notificaciones (1 sin leer)' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Turno cancelado ·' })).toHaveCount(0);
+  setNotificationError(true);
+  await page.waitForTimeout(5_500);
+  updateAppointment({ ...item, status: 'CANCELLED' });
+  notifications.push({
+    id: id(9801),
+    appointmentId: item.id,
+    kind: 'CANCELLED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  notifications.push({
+    id: id(9802),
+    appointmentId: item.id,
+    kind: 'RESCHEDULE_REQUESTED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  for (let index = 0; index < 10; index++)
+    notifications.push({
+      id: id(9810 + index),
+      appointmentId: item.id,
+      kind: 'CONFIRMED',
+      startsAt: item.startsAt,
+      createdAt: now,
+      readAt: null,
+    });
+  const cursors: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/notifications?') && request.url().includes('cursor='))
+      cursors.push(request.url());
+  });
+  setNotificationError(false);
+  const toast = page.getByRole('status').filter({ hasText: 'Turno cancelado ·' });
+  await expect(toast).toContainText('Nueva solicitud de reprogramación ·', { timeout: 12_000 });
+  expect(cursors.length).toBeGreaterThan(0);
+  await expect(
+    page.locator('[data-agenda-event-content][aria-label*="Turno cancelado"]'),
+  ).toBeVisible();
+  await toast.getByRole('button', { name: 'Cerrar notificación' }).click();
+  await page.waitForTimeout(5_500);
+  await expect(toast).toBeHidden();
+});
+
+test('detecta eventos publicados tarde aunque el inicio de transacción los ordene detrás de avisos conocidos', async ({
+  page,
+}) => {
+  const item = reminderFixture(904, 60);
+  const next = reminderFixture(905, 120);
+  const previous: CenterNotifications['items'] = Array.from({ length: 12 }, (_, index) => ({
+    id: id(10200 + index),
+    appointmentId: item.id,
+    kind: 'CONFIRMED',
+    startsAt: item.startsAt,
+    createdAt: '2099-01-05T11:59:00.000Z',
+    readAt: null,
+  }));
+  const { notifications, updateAppointment } = await openAgenda(page, false, [item, next], {
+    initialNotifications: previous,
+  });
+  await expect(page.getByRole('button', { name: 'Notificaciones (12 sin leer)' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Turno cancelado ·' })).toHaveCount(0);
+  updateAppointment({ ...item, status: 'CANCELLED' });
+  notifications.push({
+    id: id(10300),
+    appointmentId: item.id,
+    kind: 'CANCELLED',
+    startsAt: item.startsAt,
+    createdAt: '2099-01-05T11:00:00.000Z',
+    readAt: null,
+  });
+  const cancelled = page.getByRole('status').filter({ hasText: 'Turno cancelado ·' });
+  await expect(cancelled).toBeVisible({ timeout: 12_000 });
+  await expect(
+    page.locator('[data-agenda-event-content][aria-label*="Turno cancelado"]'),
+  ).toBeVisible();
+  await cancelled.getByRole('button', { name: 'Cerrar notificación' }).click();
+  // A simultaneous read can hide the unread-count change; periodic reconciliation still finds it.
+  notifications[0]!.readAt = now;
+  updateAppointment({ ...next, rescheduleRequested: true });
+  notifications.push({
+    id: id(10301),
+    appointmentId: next.id,
+    kind: 'RESCHEDULE_REQUESTED',
+    startsAt: next.startsAt,
+    createdAt: '2099-01-05T10:30:00.000Z',
+    readAt: null,
+  });
+  await page.clock.setFixedTime(new Date(Date.parse(now) + 61_000));
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Nueva solicitud de reprogramación ·' }),
+  ).toBeVisible({ timeout: 12_000 });
+  await expect(
+    page.locator('[data-agenda-event-content][aria-label*="Reprogramación solicitada"]'),
+  ).toBeVisible();
+});
+
+for (const width of [1366, 375]) {
+  test(`campana global fija en todas las pantallas privadas a ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 768 });
+    await page.route('**/api/business/notification-preferences', (route) =>
+      respond(route, notificationPreferences()),
+    );
+    const item = reminderFixture(906, 60);
+    const { notifications } = await openAgenda(page, false, [item]);
+    const bell = page.getByRole('button', { name: /^Notificaciones(?: \(|$)/ });
+    const navigation = page.getByRole('navigation', { name: 'Secciones principales' });
+    for (const [label, path] of [
+      ['Servicios', '/services'],
+      ['Clientes', '/customers'],
+      ['Configuración', '/settings'],
+      ['Agenda', '/'],
+    ] as const) {
+      await navigation.getByRole('link', { name: label, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(path === '/' ? '/$' : path + '$'));
+      await expect(bell).toHaveCount(1);
+      await expect(bell).toBeInViewport();
+      const before = (await bell.boundingBox())!;
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const after = (await bell.boundingBox())!;
+      expect(Math.abs(before.y - after.y)).toBeLessThan(1);
+      expect(Math.abs(before.x - after.x)).toBeLessThan(1);
+      await bell.click();
+      const popup = page.getByRole('dialog', { name: 'Notificaciones', exact: true });
+      await expect(popup).toBeVisible();
+      const bounds = (await popup.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+      if (label === 'Servicios')
+        await page.screenshot({ path: testInfo.outputPath(`global-bell-${width}.png`) });
+      await page.keyboard.press('Escape');
+    }
+    notifications.push({
+      id: id(10400),
+      appointmentId: item.id,
+      kind: 'CONFIRMED',
+      startsAt: item.startsAt,
+      createdAt: now,
+      readAt: null,
+    });
+    await expect(bell).toHaveAccessibleName('Notificaciones (1 sin leer)', { timeout: 12_000 });
+    await bell.click();
+    await page
+      .getByRole('dialog', { name: 'Notificaciones', exact: true })
+      .getByRole('button', { name: 'Ver turno', exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp('/appointments/' + item.id + '$'));
+    await expect(bell).toBeInViewport();
+    await expect(page.getByRole('dialog', { name: 'Notificaciones', exact: true })).toBeHidden();
+    await bell.click();
+    await page.getByRole('link', { name: 'Ver todas las notificaciones', exact: true }).click();
+    await expect(page).toHaveURL(/\/notifications$/);
+    await expect(bell).toBeInViewport();
+    await expect(bell).toHaveCount(1);
+  });
+}
+
+test('la campana global respeta los horarios sin guardar al navegar desde una notificación', async ({
+  page,
+}) => {
+  const item = reminderFixture(907, 60);
+  const { notifications } = await openAgenda(page, false, [item]);
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Servicios', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true }).click();
+  await page.getByLabel('Inicio lunes 1').fill('10:00');
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  notifications.push({
+    id: id(10401),
+    appointmentId: item.id,
+    kind: 'CONFIRMED',
+    startsAt: item.startsAt,
+    createdAt: now,
+    readAt: null,
+  });
+  const bell = page.getByRole('button', { name: 'Notificaciones (1 sin leer)' });
+  await expect(bell).toBeVisible({ timeout: 12_000 });
+  await bell.click();
+  const popup = page.getByRole('dialog', { name: 'Notificaciones', exact: true });
+  for (const target of [
+    popup.getByRole('link', { name: 'Ver todas las notificaciones', exact: true }),
+    popup.getByRole('button', { name: 'Ver turno', exact: true }),
+  ]) {
+    page.once('dialog', (dialog) => dialog.dismiss());
+    await target.click();
+    await expect(page).toHaveURL(/\/services$/);
+    await expect(popup).toBeVisible();
+    expect(notifications[0]!.readAt).toBeNull();
+  }
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true }).click();
+  await expect(page.getByLabel('Inicio lunes 1')).toHaveValue('10:00');
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await bell.click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await popup.getByRole('link', { name: 'Ver todas las notificaciones', exact: true }).click();
+  await expect(page).toHaveURL(/\/notifications$/);
 });

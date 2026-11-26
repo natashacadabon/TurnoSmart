@@ -1,12 +1,16 @@
 'use client';
 
-import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import RoomServiceRoundedIcon from '@mui/icons-material/RoomServiceRounded';
 import {
   Alert,
+  Box,
+  IconButton,
+  LinearProgress,
+  Menu,
+  MenuItem,
+  Tooltip,
   Button,
   Card,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -20,6 +24,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   TextField,
   Typography,
   useMediaQuery,
@@ -31,6 +36,7 @@ import {
   type ServiceDto,
   type ServiceResponse,
 } from '@turnosmart/shared';
+import { MoreHorizontal, Pencil } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { EmptyState } from '@/components/ui';
 import { api, ApiError, errorMessage, fieldErrors } from '@/lib/api';
@@ -47,7 +53,7 @@ function serviceError(error: unknown) {
   return errorMessage(error);
 }
 
-function ServiceDialog({
+export function ServiceDialog({
   service,
   onClose,
   onSaved,
@@ -191,18 +197,33 @@ export function ServicesPanel({
   services,
   canWrite,
   onChanged,
+  onEdit,
+  changing,
+  onChanging: setChanging,
 }: {
   services: ServiceDto[];
   canWrite: boolean;
   onChanged(): Promise<void>;
+  onEdit(service: ServiceDto | null): void;
+  changing: string | null;
+  onChanging(id: string | null): void;
 }) {
   const [query, setQuery] = useState('');
-  const [dialog, setDialog] = useState<{ service: ServiceDto | null } | null>(null);
-  const [changing, setChanging] = useState<string | null>(null);
+  const [filter, setFilter] = useState('all');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [menu, setMenu] = useState<{ anchor: HTMLElement; service: ServiceDto } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase('es-AR');
-  const visibleServices = services.filter((service) =>
-    service.name.toLocaleLowerCase('es-AR').includes(normalizedQuery),
+  const visibleServices = services.filter(
+    (service) =>
+      service.name.toLocaleLowerCase('es-AR').includes(normalizedQuery) &&
+      (filter === 'all' || service.active === (filter === 'active')),
+  );
+
+  const currentPage = Math.min(
+    page,
+    Math.max(0, Math.ceil(visibleServices.length / rowsPerPage) - 1),
   );
 
   async function toggle(service: ServiceDto) {
@@ -223,126 +244,230 @@ export function ServicesPanel({
   }
 
   return (
-    <Card variant="outlined">
-      <Stack spacing={2} sx={{ p: { xs: 2, sm: 3 } }}>
+    <Card component="section" aria-labelledby="service-catalog-title" sx={{ minWidth: 0 }}>
+      <Stack spacing={1.5} sx={{ p: 2 }}>
         <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={2}
-          sx={{ justifyContent: 'space-between' }}
+          direction="row"
+          sx={{ justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
         >
-          <Typography variant="h2">Catálogo de servicios</Typography>
-          {canWrite && (
-            <Button
-              variant="contained"
-              startIcon={<AddRoundedIcon />}
-              disabled={Boolean(changing)}
-              onClick={() => setDialog({ service: null })}
-            >
-              Nuevo servicio
-            </Button>
-          )}
+          <Typography id="service-catalog-title" component="h2" variant="h2" sx={{ fontSize: 17 }}>
+            Catálogo de servicios
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {visibleServices.length} de {services.length}
+          </Typography>
         </Stack>
-        {error && <Alert severity="error">{error}</Alert>}
-        {services.length > 0 && (
+        <Stack direction="row" spacing={1}>
           <TextField
             size="small"
             label="Buscar por nombre"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            sx={{ maxWidth: 340 }}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+            }}
+            sx={{ flex: 1, minWidth: 0 }}
           />
-        )}
+          <TextField
+            select
+            size="small"
+            label="Estado"
+            value={filter}
+            onChange={(event) => {
+              setFilter(event.target.value);
+              setPage(0);
+            }}
+            sx={{ width: 120, flexShrink: 0 }}
+          >
+            <MenuItem value="all">Todos</MenuItem>
+            <MenuItem value="active">Activos</MenuItem>
+            <MenuItem value="inactive">Inactivos</MenuItem>
+          </TextField>
+        </Stack>
+        {changing && <LinearProgress aria-label="Actualizando servicio" />}
+        {error && <Alert severity="error">{error}</Alert>}
         {visibleServices.length === 0 ? (
-          <EmptyState
-            icon={<RoomServiceRoundedIcon />}
-            title={services.length ? 'No hay resultados' : 'Todavía no hay servicios'}
-            description={services.length ? 'Probá con otro nombre.' : undefined}
-          />
+          <Box sx={{ '& > .MuiStack-root': { py: 2 } }}>
+            <EmptyState
+              icon={<RoomServiceRoundedIcon />}
+              title={services.length ? 'No hay resultados' : 'Todavía no hay servicios'}
+              description={services.length ? 'Probá con otro nombre o estado.' : undefined}
+            />
+          </Box>
         ) : (
           <TableContainer>
-            <Table size="small" aria-label="Catálogo de servicios">
+            <Table
+              size="small"
+              aria-label="Catálogo de servicios"
+              sx={{
+                tableLayout: 'fixed',
+                minWidth: 530,
+                '& th, & td': { px: 0.75, py: 0.75, fontSize: 12 },
+                '& th': { color: 'text.secondary' },
+              }}
+            >
               <TableHead>
                 <TableRow>
-                  <TableCell>Nombre y descripción</TableCell>
-                  <TableCell>Duración</TableCell>
-                  <TableCell>Precio</TableCell>
-                  <TableCell>Estado</TableCell>
-                  {canWrite && <TableCell>Acciones</TableCell>}
+                  <TableCell sx={{ width: '23%' }}>Nombre</TableCell>
+                  <TableCell sx={{ width: '22%' }}>Descripción</TableCell>
+                  <TableCell sx={{ width: '12%' }}>Duración</TableCell>
+                  <TableCell sx={{ width: '14%' }}>Precio</TableCell>
+                  <TableCell sx={{ width: '14%' }}>Estado</TableCell>
+                  {canWrite && (
+                    <TableCell align="right" sx={{ width: '15%' }}>
+                      Acciones
+                    </TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
-                {visibleServices.map((service) => (
-                  <TableRow key={service.id}>
-                    <TableCell
-                      component="th"
-                      scope="row"
-                      sx={{ minWidth: 145, overflowWrap: 'anywhere' }}
-                    >
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {service.name}
-                      </Typography>
-                      {service.description && (
-                        <Typography variant="body2" color="text.secondary">
-                          {service.description}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      {service.durationMinutes} min
-                    </TableCell>
-                    <TableCell>
-                      {service.priceCents == null
-                        ? 'Sin precio'
-                        : priceFormat.format(service.priceCents / 100)}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        color={service.active ? 'success' : 'default'}
-                        label={service.active ? 'Activo' : 'Inactivo'}
-                      />
-                    </TableCell>
-                    {canWrite && (
-                      <TableCell>
-                        <Stack direction="row">
-                          <Button
-                            size="small"
-                            disabled={Boolean(changing)}
-                            onClick={() => setDialog({ service })}
+                {visibleServices
+                  .slice(currentPage * rowsPerPage, (currentPage + 1) * rowsPerPage)
+                  .map((service) => (
+                    <TableRow key={service.id} hover>
+                      <TableCell component="th" scope="row">
+                        <Tooltip title={service.name} describeChild>
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary' }}
                           >
-                            Editar
-                          </Button>
-                          <Button
-                            size="small"
-                            disabled={Boolean(changing)}
-                            onClick={() => void toggle(service)}
-                          >
-                            {changing === service.id
-                              ? 'Actualizando…'
-                              : service.active
-                                ? 'Desactivar'
-                                : 'Activar'}
-                          </Button>
-                        </Stack>
+                            {service.name}
+                          </Typography>
+                        </Tooltip>
                       </TableCell>
-                    )}
-                  </TableRow>
-                ))}
+                      <TableCell>
+                        <Tooltip title={service.description ?? 'Sin descripción'} describeChild>
+                          <Typography noWrap sx={{ fontSize: 12 }} color="text.secondary">
+                            {service.description || '—'}
+                          </Typography>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                        {service.durationMinutes} min
+                      </TableCell>
+                      <TableCell sx={{ overflowWrap: 'anywhere' }}>
+                        {service.priceCents == null
+                          ? 'Sin precio'
+                          : priceFormat.format(service.priceCents / 100)}
+                      </TableCell>
+                      <TableCell>
+                        <Box
+                          component="span"
+                          sx={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <Box
+                            component="span"
+                            aria-hidden
+                            sx={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: '50%',
+                              bgcolor: service.active ? 'success.main' : 'text.disabled',
+                            }}
+                          />
+                          {service.active ? 'Activo' : 'Inactivo'}
+                        </Box>
+                      </TableCell>
+                      {canWrite && (
+                        <TableCell align="right">
+                          <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
+                            <Tooltip title="Editar servicio">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  aria-label={`Editar ${service.name}`}
+                                  disabled={Boolean(changing)}
+                                  onClick={() => onEdit(service)}
+                                >
+                                  <Pencil size={16} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Más acciones">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  aria-label={`Más acciones de ${service.name}`}
+                                  aria-haspopup="menu"
+                                  aria-expanded={menu?.service.id === service.id ? true : undefined}
+                                  aria-controls={
+                                    menu?.service.id === service.id
+                                      ? 'service-actions-menu'
+                                      : undefined
+                                  }
+                                  disabled={Boolean(changing)}
+                                  onClick={(event) =>
+                                    setMenu({ anchor: event.currentTarget, service })
+                                  }
+                                >
+                                  <MoreHorizontal size={17} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           </TableContainer>
         )}
+        {visibleServices.length > 5 && (
+          <TablePagination
+            component="div"
+            count={visibleServices.length}
+            page={currentPage}
+            rowsPerPage={rowsPerPage}
+            rowsPerPageOptions={[5, 10, 25]}
+            labelRowsPerPage="Filas"
+            labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+            getItemAriaLabel={(type) =>
+              type === 'next'
+                ? 'Página siguiente'
+                : type === 'previous'
+                  ? 'Página anterior'
+                  : type === 'first'
+                    ? 'Primera página'
+                    : 'Última página'
+            }
+            onPageChange={(_, next) => setPage(next)}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(Number(event.target.value));
+              setPage(0);
+            }}
+            sx={{
+              '& .MuiTablePagination-toolbar': { px: 0, minHeight: 36, flexWrap: 'wrap' },
+              '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': {
+                fontSize: 12,
+              },
+              '& .MuiTablePagination-actions': { ml: 1 },
+            }}
+          />
+        )}
       </Stack>
-      {canWrite && dialog && (
-        <ServiceDialog
-          service={dialog.service}
-          onClose={() => setDialog(null)}
-          onSaved={async () => {
-            setDialog(null);
-            await onChanged();
+      <Menu
+        id="service-actions-menu"
+        anchorEl={menu?.anchor}
+        open={Boolean(menu)}
+        onClose={() => setMenu(null)}
+      >
+        <MenuItem
+          disabled={Boolean(changing)}
+          onClick={() => {
+            if (menu) void toggle(menu.service);
+            setMenu(null);
           }}
-        />
-      )}
+        >
+          {menu?.service.active ? 'Desactivar servicio' : 'Activar servicio'}
+        </MenuItem>
+      </Menu>
     </Card>
   );
 }

@@ -8,7 +8,6 @@ import {
   Button,
   Card,
   CardContent,
-  Divider,
   Stack,
   TextField,
   Typography,
@@ -17,6 +16,7 @@ import { can, type BusinessDto, type UpdateBusinessRequest } from '@turnosmart/s
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { PageHeader } from '@/components/ui';
+import { NotificationSettings } from '@/components/notifications/NotificationSettings';
 import { api, errorMessage, fieldErrors } from '@/lib/api';
 import { listTimezones, type TimezoneOption } from '@/lib/timezones';
 
@@ -25,18 +25,21 @@ function Field({ label, hint, children }: { label: string; hint: string; childre
     <Box
       sx={{
         display: 'grid',
-        gridTemplateColumns: { xs: '1fr', md: '240px 1fr' },
-        gap: { xs: 1, md: 4 },
-        py: 2.5,
+        gridTemplateColumns: '1fr',
+        gap: 0.75,
+        minWidth: 0,
       }}
     >
       <Box>
         <Typography variant="subtitle2">{label}</Typography>
-        <Typography variant="body2" color="text.secondary">
+        <Typography
+          sx={{ fontSize: 12, display: { xs: 'block', md: 'none' } }}
+          color="text.secondary"
+        >
           {hint}
         </Typography>
       </Box>
-      <Box sx={{ maxWidth: 440 }}>{children}</Box>
+      <Box>{children}</Box>
     </Box>
   );
 }
@@ -78,13 +81,29 @@ export default function SettingsPage() {
   }
 
   return (
-    <>
+    <Box
+      data-settings-page
+      sx={{ display: 'grid', gap: 2, '& .MuiTypography-overline': { display: 'none' } }}
+    >
       <PageHeader
-        title="Negocio"
-        subtitle="Datos generales que ven todas las personas del equipo."
+        title="Configuración"
+        subtitle="Datos del negocio, correos y acciones disponibles para tus clientes."
       />
       <Card component="form" onSubmit={onSubmit}>
-        <CardContent sx={{ pb: 0 }}>
+        <CardContent
+          sx={{
+            p: 2,
+            '&:last-child': { pb: 2 },
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '140px minmax(0, 1fr)' },
+            alignItems: 'center',
+            gap: 1.5,
+            '& .MuiAlert-root': { gridColumn: '1 / -1' },
+          }}
+        >
+          <Typography component="h2" variant="h2" sx={{ fontSize: 17 }}>
+            Datos del negocio
+          </Typography>
           {!editable && (
             <Alert severity="info" icon={<LockRoundedIcon fontSize="inherit" />} sx={{ mb: 1 }}>
               Sólo dueños/as y administradores/as pueden modificar estos datos.
@@ -96,85 +115,95 @@ export default function SettingsPage() {
             </Alert>
           )}
 
-          <Field label="Nombre" hint="Cómo se identifica tu negocio en TurnoSmart.">
-            <TextField
-              fullWidth
-              size="small"
-              value={form.name}
-              disabled={!editable}
-              error={!!errors.name}
-              helperText={errors.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              slotProps={{ htmlInput: { 'aria-label': 'Nombre' } }}
-            />
-          </Field>
-          <Divider />
-          <Field label="Zona horaria" hint="Se usa para mostrar y reservar los turnos.">
-            {selected && (
-              <Autocomplete<TimezoneOption, false, true>
-                options={timezones}
-                value={selected}
-                disabled={!editable}
-                disableClearable
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+              gridColumn: { md: 2 },
+              gridRow: { md: 1 },
+              minWidth: 0,
+              gap: 2,
+            }}
+          >
+            <Field label="Nombre" hint="Cómo se identifica tu negocio en TurnoSmart.">
+              <TextField
+                fullWidth
                 size="small"
-                getOptionLabel={(o) => `${o.city} (${o.offset})`}
-                isOptionEqualToValue={(o, v) => o.id === v.id}
-                filterOptions={(options, { inputValue }) => {
-                  const q = inputValue.trim().toLowerCase();
-                  if (!q) return options;
-                  return options.filter(
-                    (o) =>
-                      o.city.toLowerCase().includes(q) ||
-                      o.id.toLowerCase().includes(q) ||
-                      o.offset.includes(q),
-                  );
-                }}
-                onChange={(_, option) => setForm({ ...form, timezone: option.id })}
-                renderOption={({ key, ...props }, o) => (
-                  <Box
-                    component="li"
-                    key={key}
-                    {...props}
-                    sx={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-start !important',
-                    }}
-                  >
-                    <span>
-                      {o.city}{' '}
-                      <Typography component="span" variant="body2" color="text.secondary">
-                        ({o.offset})
-                      </Typography>
-                    </span>
-                    <Typography variant="caption" color="text.secondary">
-                      {o.id}
-                    </Typography>
-                  </Box>
-                )}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    error={!!errors.timezone}
-                    helperText={errors.timezone ?? 'Buscá por ciudad, país o desfasaje (ej.: -03).'}
-                    slotProps={{
-                      ...params.slotProps,
-                      htmlInput: { ...params.slotProps.htmlInput, 'aria-label': 'Zona horaria' },
-                    }}
-                  />
-                )}
+                value={form.name}
+                disabled={!editable}
+                error={!!errors.name}
+                helperText={errors.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                slotProps={{ htmlInput: { 'aria-label': 'Nombre' } }}
               />
-            )}
-          </Field>
+            </Field>
+            <Field label="Zona horaria" hint="Se usa para mostrar y reservar los turnos.">
+              {selected && (
+                <Autocomplete<TimezoneOption, false, true>
+                  options={timezones}
+                  value={selected}
+                  disabled={!editable}
+                  disableClearable
+                  size="small"
+                  getOptionLabel={(o) => `${o.city} (${o.offset})`}
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  filterOptions={(options, { inputValue }) => {
+                    const q = inputValue.trim().toLowerCase();
+                    if (!q) return options;
+                    return options.filter(
+                      (o) =>
+                        o.city.toLowerCase().includes(q) ||
+                        o.id.toLowerCase().includes(q) ||
+                        o.offset.includes(q),
+                    );
+                  }}
+                  onChange={(_, option) => setForm({ ...form, timezone: option.id })}
+                  renderOption={({ key, ...props }, o) => (
+                    <Box
+                      component="li"
+                      key={key}
+                      {...props}
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start !important',
+                      }}
+                    >
+                      <span>
+                        {o.city}{' '}
+                        <Typography component="span" variant="body2" color="text.secondary">
+                          ({o.offset})
+                        </Typography>
+                      </span>
+                      <Typography variant="caption" color="text.secondary">
+                        {o.id}
+                      </Typography>
+                    </Box>
+                  )}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      error={!!errors.timezone}
+                      helperText={errors.timezone}
+                      slotProps={{
+                        ...params.slotProps,
+                        htmlInput: { ...params.slotProps.htmlInput, 'aria-label': 'Zona horaria' },
+                      }}
+                    />
+                  )}
+                />
+              )}
+            </Field>
+          </Box>
         </CardContent>
-        {editable && (
+        {editable && dirty && (
           <Stack
             direction="row"
             spacing={1}
             sx={{
               justifyContent: 'flex-end',
-              px: 3,
-              py: 2,
+              px: 2,
+              py: 1,
               borderTop: 1,
               borderColor: 'divider',
               bgcolor: 'action.hover',
@@ -189,6 +218,7 @@ export default function SettingsPage() {
           </Stack>
         )}
       </Card>
-    </>
+      <NotificationSettings key={me.business.id} editable={editable} />
+    </Box>
   );
 }

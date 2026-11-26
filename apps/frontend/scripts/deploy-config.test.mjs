@@ -182,7 +182,7 @@ test('Preview descarga settings y publica sin consultar Production; Production c
     const commands = readFileSync(join(root, 'commands.log'), 'utf8').trim().split('\n');
     assert.equal(commands.length, 2);
     assert.match(commands[0], new RegExp(`pull --yes --environment=${target}`));
-    assert.match(commands[1], /deploy --prebuilt --yes/);
+    assert.match(commands[1], /deploy --prebuilt --archive=tgz --yes/);
     if (target === 'preview') {
       assert.match(commands[0], /--git-branch dev/);
       assert.match(commands[1], /--environment=preview/);

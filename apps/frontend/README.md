@@ -1,134 +1,40 @@
-# Frontend - TurnoSmart
+# Frontend de TurnoSmart
 
-Aplicación web de TurnoSmart para la operación diaria del negocio: agenda, clientes, configuración del negocio, historial de turnos y explicación del riesgo con IA.
+Aplicación Next.js con App Router, React, Material UI y FullCalendar. Usa Supabase Auth para iniciar sesión y consume la API Express con contratos de `@turnosmart/shared`.
 
-Construida con Next.js 16 (App Router), React 19, TypeScript, Material UI y CSS Modules.
+| Ruta                    | Funcionalidad                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/login`, `/onboarding` | Inicio de sesión y alta del negocio para una cuenta confirmada.                                                                                |
+| `/`                     | Agenda de día, semana y mes en la zona del negocio, alta de turnos, indicadores diarios y evaluación de riesgo bajo demanda.                   |
+| `/appointments/[id]`    | Detalle, notas, historial, acciones del personal, solicitudes de cambio y explicación con Gemini.                                              |
+| `/customers`            | Búsqueda, alta y edición. La baja requiere OWNER o ADMIN y que el cliente carezca de turnos.                                                   |
+| `/services`             | Servicios, franjas semanales y consulta de slots. STAFF tiene acceso de lectura.                                                               |
+| `/settings`             | Configuración del negocio y de sus notificaciones, con vistas previas de correo. OWNER y ADMIN pueden editar.                                  |
+| `/notifications`        | Historial interno, filtro de avisos sin leer y lecturas por usuario.                                                                           |
+| `/turno/gestionar`      | Página pública que recibe un token en el fragmento de URL. Permite confirmar, cancelar según la política vigente o pedir un cambio de horario. |
 
-## Pantallas
+## Desarrollo
 
-| Ruta                 | Acceso             | Contenido                                                                                                                                                                          |
-| -------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                  | Sesión y negocio   | Agenda con el diseño del dashboard y datos reales: nombre del negocio, fecha y total de clientes. Turnos, riesgo y reportes aparecen vacíos hasta que exista la reserva de turnos. |
-| `/demo`              | Pública            | Dashboard con datos de ejemplo.                                                                                                                                                    |
-| `/login`             | Pública            | Inicio de sesión con Supabase Auth.                                                                                                                                                |
-| `/onboarding`        | Sesión sin negocio | Alta del negocio; la zona horaria se detecta del navegador.                                                                                                                        |
-| `/customers`         | Sesión y negocio   | Listado con búsqueda y paginación; alta y edición con errores de validación por campo; baja con confirmación (OWNER y ADMIN).                                                      |
-| `/settings`          | Sesión y negocio   | Nombre y zona horaria del negocio (editable por OWNER y ADMIN).                                                                                                                    |
-| `/appointments/[id]` | Sesión y negocio   | Historial del turno y explicación del riesgo con Gemini. Todavía no hay una agenda de turnos que enlace a esta página.                                                             |
+Configurar `apps/frontend/.env.local` a partir de [la plantilla](.env.example). Usar la URL y la clave pública del mismo Supabase que consume el backend. Desde la raíz:
 
-Las rutas de `src/app/(app)` comparten el sidebar del dashboard (`AppSidebar`), con la cuenta, el acceso a Negocio y "Cerrar sesión". Sin sesión redirigen a `/login` y sin negocio a `/onboarding`. Si la API no puede resolver la cuenta, muestran el error con "Reintentar" y "Cerrar sesión" en lugar de quedar cargando.
-
-Supabase se usa solo para autenticación; las operaciones de negocio pasan por la API (`src/lib/api.ts`), que agrega el token y normaliza los errores. Los colores y la tipografía salen de `src/app/theme.ts`.
-
-## Stack
-
-- Next.js 16, React 19 y TypeScript.
-- Material UI, MUI Icons, Emotion y CSS Modules.
-- Supabase JS, solo para Auth.
-- `@turnosmart/shared`: contratos y validaciones compartidas con la API.
-- Playwright para pruebas end-to-end.
-- ESLint con las reglas de Next.js y React Compiler.
-
-Previsto: calendario para la agenda semanal.
-
-## Comandos
-
-```bash
+```sh
 npm run dev:frontend
-npm run build --workspace=@turnosmart/frontend
-npm run typecheck --workspace=@turnosmart/frontend
-npm run lint --workspace=@turnosmart/frontend
-npm run test:e2e --workspace=@turnosmart/frontend
+npm run test:config --workspace=apps/frontend
 ```
 
-La app se sirve en `http://localhost:3000`. Next.js lee las variables desde `apps/frontend/.env.local` (plantilla: `apps/frontend/.env.example`), con los mismos valores de Supabase que `apps/backend/.env`. Sin las variables de Supabase solo funciona `/demo`. La guía completa para configurar y correr el proyecto está en el README de la raíz.
-En `next dev`, las llamadas API van directamente a `http://localhost:4000`,
-tambien con Docker Compose; no se usa un proveedor remoto como fallback.
+El frontend escucha en `http://localhost:3000` por defecto. En desarrollo consume `http://localhost:4000`. El entorno Docker puede ajustar este origen con `NEXT_PUBLIC_API_URL`. En un build publicado, Next.js incorpora al bundle los valores `NEXT_PUBLIC_*`. Se requieren los dos orígenes HTTPS de API y `NEXT_PUBLIC_USE_AZURE` selecciona Azure cuando vale `true`. Consultar la [guía de Vercel](../../infra/vercel/README.md) para Preview y Production y la [guía de pruebas](../../tests/README.md) para Playwright.
 
-`test:e2e` corre el recorrido crítico sin mocks: requiere frontend, API y Supabase levantados, y una cuenta de prueba en `E2E_USER_EMAIL` / `E2E_USER_PASSWORD`. Una cuenta nueva pasa por el onboarding una sola vez.
+Los archivos bajo `src/app/(app)/` usan la sesión del personal. Las pantallas llaman a la API desde `src/lib/api.ts` y muestran los horarios en la zona del negocio. `src/app/turno/gestionar` queda fuera del layout autenticado.
 
-El despliegue Vercel Hobby esta preparado, sin publicar: [guia de demo](../../infra/vercel/README.md).
-El build exige NEXT_PUBLIC_API_URL_RENDER, NEXT_PUBLIC_API_URL_AZURE y las dos
-variables Supabase publicas; compilar shared primero. NEXT_PUBLIC_USE_AZURE ausente
-o false usa Render; true usa Azure. Ambas URLs deben ser HTTPS publicas, incluso
-la inactiva. No hay fallback automatico; NEXT_PUBLIC_API_URL antigua se ignora.
-Cambiar el proveedor requiere rebuild. Auth, CORS y contratos no cambian.
-Pruebas de configuracion: `npm run test:config --workspace=apps/frontend`;
-smoke del build con Auth/API simuladas: `npm run test:deploy --workspace=apps/frontend`.
+## Interfaz y sincronización
 
-## Estructura
+- **Servicios.** Los tres indicadores blancos muestran el total del catálogo, sus servicios activos y las horas de las franjas activas guardadas. Búsqueda, filtro Todos/Activos/Inactivos y paginación se aplican al catálogo cargado. Edición y activación/desactivación reutilizan los formularios y permisos existentes.
+- **Disponibilidad.** Una grilla muestra los siete días, las jornadas partidas y los días cerrados. Cada día abre un modal para habilitar atención, agregar o eliminar franjas y copiar horarios con advertencia de reemplazo. El borrador y las validaciones se conservan al cerrar el modal; Guardar persiste la semana. En escritorio, catálogo y disponibilidad comparten altura mediante grid; en pantallas pequeñas se apilan con altura automática.
+- **Consulta de horarios.** El panel colapsable muestra resultados después de Consultar, con estados de carga, error y ausencia de slots. Seleccionar un horario solo lo resalta: consultar o seleccionar no reserva.
+- **Configuración.** Datos del negocio y preferencias tienen guardado independiente. Las notificaciones se organizan en dos tarjetas desde 900 px, con acciones de guardado sticky y aviso de cambios pendientes. Los controles dependientes se deshabilitan con su función principal. La vista previa utiliza el HTML del backend, mantiene selector y Cerrar visibles y concentra el scroll en el correo.
+- **Campana global.** Está fija junto a la marca en escritorio y arriba a la derecha en pantallas angostas. Comparte contador e historial en Agenda, Servicios, Clientes, Configuración, detalle y centro de notificaciones. Al navegar desde la campana se respeta la confirmación de disponibilidad sin guardar. Los avisos próximos de agenda se pausan mientras el historial está abierto.
+- **Actualización automática.** `NotificationProvider` consulta el endpoint existente cada cinco segundos con la pestaña visible y al recuperar foco o visibilidad. Notificaciones nuevas invalidan el feed diario y el rango visible del calendario sin cambiar la vista ni cerrar el formulario de reserva. Las cancelaciones y solicitudes de reprogramación muestran toasts en la zona horaria del negocio. La carga inicial es silenciosa; los IDs ya observados evitan repeticiones y mostrar un toast no marca la notificación como leída. Hay reconciliación completa cada minuto y ante cambios para recuperar eventos publicados tarde; la agenda también conserva su refresco de recuperación de un minuto.
 
-```text
-apps/frontend/
-├── e2e/                     # Pruebas end-to-end (Playwright)
-├── src/
-│   ├── app/
-│   │   ├── (app)/           # Pantallas con sesión: agenda, clientes, negocio y detalle de turno
-│   │   ├── demo/            # Dashboard con datos de ejemplo
-│   │   ├── login/
-│   │   ├── onboarding/
-│   │   ├── page.module.css  # Estilos del dashboard
-│   │   ├── providers.tsx    # Tema de MUI y sesión
-│   │   └── theme.ts
-│   ├── components/          # Sidebar, sesión, formularios, historial y panel de IA
-│   └── lib/                 # Cliente HTTP, Supabase y zonas horarias
-├── next.config.ts
-├── playwright.config.ts
-└── package.json
-```
+## Pendientes
 
-## Convenciones
-
-- TypeScript en toda la lógica.
-- Componentes pequeños y reutilizables; la lógica de datos en `src/lib`.
-- Validaciones desde `@turnosmart/shared`, las mismas que usa la API.
-- Estilos con el tema de MUI y CSS Modules, siguiendo el diseño del dashboard.
-- La `service_role` de Supabase y la clave de Gemini nunca se usan en el frontend.
-
-## Próximos pasos
-
-- Agenda real con turnos del día y enlace al detalle de cada turno.
-- Servicios y disponibilidad.
-- Reserva, reprogramación y cancelación de turnos.
-- Registro público y recuperación de contraseña.
-
-## Contribución
-
-1. Crear una rama desde la rama principal.
-2. Desarrollar la funcionalidad con commits claros.
-3. Validar que la app compila y no presenta errores de lint.
-4. Abrir un pull request describiendo el cambio.
-
-## Recursos útiles
-
-- [Documentación de Next.js](https://nextjs.org/docs)
-- [Next.js App Router](https://nextjs.org/docs/app)
-- [TypeScript](https://www.typescriptlang.org/)
-
-## Servicios y disponibilidad (B03)
-
-Abrir **Servicios** en el dashboard autenticado. OWNER y ADMIN pueden gestionar
-servicios y reemplazar la disponibilidad semanal. STAFF puede consultar ambos
-listados y los horarios. La consulta usa la fecha local y el servicio activo,
-y presenta los intervalos UTC de la API en la zona del negocio.
-
-La agenda de reservas usará FullCalendar Standard (MIT) con la integración
-oficial de React. B03 no requiere el calendario y no instala paquetes. Para
-incorporar la línea v6 en una tarea futura, usar versiones coordinadas de
-`@fullcalendar/react`, `@fullcalendar/core`, `@fullcalendar/daygrid`,
-`@fullcalendar/timegrid` y `@fullcalendar/interaction`. Para zonas IANA usar
-`@fullcalendar/luxon3` y `luxon` con esa línea. Verificar los peers de la versión
-elegida y ejecutar un build y un smoke de Next.js al integrar. El paquete React
-de v6.1.22 declara compatibilidad con React 19. No se necesitan
-plugins Premium.
-
-`src/lib/calendar-events.ts` adapta `SlotDto` y `AppointmentDto` a eventos sin
-reinterpretar sus instantes UTC. La agenda deberá pasar `Business.timezone` al
-calendario. Express sigue siendo la fuente de verdad para slots y reservas.
-Tras una mutación, volver a consultar los datos. Ante un 409 en drag & drop,
-revertir el movimiento visual y refrescar. Este recorrido corresponde al
-futuro frontend de reservas.
-
-Los casos de UI de Servicios interceptan Auth y Express con fixtures. El smoke
-real requiere `E2E_USER_EMAIL` y `E2E_USER_PASSWORD`, servidores levantados y
-un negocio con al menos un servicio activo y disponibilidad semanal.
+El [backlog](../../docs/backlog.md) reúne el trabajo pendiente, incluidos el recorrido publicado de los enlaces, la cobertura de navegador con API real y las funcionalidades de cuenta fuera del flujo actual.

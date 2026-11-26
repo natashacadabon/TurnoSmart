@@ -1,9 +1,10 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
+import { scheduleAppointmentReminders } from '../notifications/reminder-schedule.js';
 import { appointmentFits, localTime } from '../availability/repository.js';
-import type { Role } from '@turnosmart/shared';
+import type { BusinessNotificationPreferences, Role } from '@turnosmart/shared';
 
-export interface BusinessRecord {
+export interface BusinessRecord extends BusinessNotificationPreferences {
   id: string;
   name: string;
   timezone: string;
@@ -41,11 +42,29 @@ export interface IdentityRepository {
   onboard(input: OnboardingInput): Promise<ProfileWithBusiness & { created: boolean }>;
   updateBusiness(
     businessId: string,
-    data: { name?: string; timezone?: string },
+    data: Partial<Pick<BusinessRecord, 'name' | 'timezone'> & BusinessNotificationPreferences>,
   ): Promise<BusinessRecord>;
 }
 
-const businessSelect = { id: true, name: true, timezone: true, createdAt: true } as const;
+const businessSelect = {
+  id: true,
+  name: true,
+  timezone: true,
+  createdAt: true,
+  bookingEmailEnabled: true,
+  confirmationEmailEnabled: true,
+  remindersEnabled: true,
+  reminderHours: true,
+  reminder24hEnabled: true,
+  reminder48hEnabled: true,
+  cancellationEmailEnabled: true,
+  rescheduleEmailEnabled: true,
+  customerCancellationEnabled: true,
+  customerConfirmationEnabled: true,
+  customerRescheduleEnabled: true,
+  cancellationMinimumHours: true,
+  rescheduleMinimumHours: true,
+} as const;
 
 export class PrismaIdentityRepository implements IdentityRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -103,18 +122,53 @@ export class PrismaIdentityRepository implements IdentityRepository {
 
   updateBusiness(
     businessId: string,
-    data: { name?: string; timezone?: string },
+    data: Partial<Pick<BusinessRecord, 'name' | 'timezone'> & BusinessNotificationPreferences>,
   ): Promise<BusinessRecord> {
     return this.prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+        const reminderChange =
+          data.remindersEnabled !== undefined ||
+          data.reminderHours !== undefined ||
+          data.reminder48hEnabled !== undefined ||
+          data.reminder24hEnabled !== undefined;
+        let changes = data;
+        if (reminderChange) {
+          const current = await tx.business.findUniqueOrThrow({
+            where: { id: businessId },
+            select: businessSelect,
+          });
+          const usesCanonical =
+            data.remindersEnabled !== undefined || data.reminderHours !== undefined;
+          const legacy48h = data.reminder48hEnabled ?? current.reminder48hEnabled;
+          const legacy24h = data.reminder24hEnabled ?? current.reminder24hEnabled;
+          const hours = usesCanonical
+            ? (data.reminderHours ?? current.reminderHours)
+            : [...(legacy48h ? [48] : []), ...(legacy24h ? [24] : [])];
+          const enabled = usesCanonical
+            ? (data.remindersEnabled ?? current.remindersEnabled)
+            : legacy48h || legacy24h;
+          if (enabled && hours.length === 0)
+            throw new AppError(
+              'VALIDATION_ERROR',
+              'Configurá al menos un recordatorio o desactivá los recordatorios automáticos.',
+              [{ path: 'reminderHours', message: 'Elegí al menos una anticipación.' }],
+            );
+          changes = {
+            ...data,
+            reminderHours: hours,
+            remindersEnabled: enabled,
+            reminder48hEnabled: enabled && hours.includes(48),
+            reminder24hEnabled: enabled && hours.includes(24),
+          };
+        }
         if (data.timezone !== undefined) {
           const timezone = data.timezone;
           const rules = await tx.availabilityRule.findMany({ where: { businessId } });
           const appointments = await tx.appointment.findMany({
             where: {
               businessId,
-              status: { in: ['SCHEDULED', 'CONFIRMED'] },
+              status: 'SCHEDULED',
               endsAt: { gt: new Date() },
             },
             select: { startsAt: true, endsAt: true },
@@ -132,7 +186,13 @@ export class PrismaIdentityRepository implements IdentityRepository {
             );
           }
         }
-        return tx.business.update({ where: { id: businessId }, data, select: businessSelect });
+        const business = await tx.business.update({
+          where: { id: businessId },
+          data: changes,
+          select: businessSelect,
+        });
+        if (reminderChange) await scheduleAppointmentReminders(tx, businessId, null, new Date());
+        return business;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
     );

@@ -11,10 +11,12 @@ import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
+import { useUnsavedChanges } from '@/components/UnsavedChangesProvider';
 import { useNotifications } from './NotificationProvider';
 
+type CenterKind = NotificationKind;
 const kinds: Record<
-  NotificationKind,
+  CenterKind,
   {
     title: string;
     description: string;
@@ -46,6 +48,12 @@ const kinds: Record<
     icon: CalendarClock,
     color: 'info.main',
   },
+  RESCHEDULE_REQUESTED: {
+    title: 'Reprogramación solicitada',
+    description: 'Revisá el horario propuesto en el detalle del turno.',
+    icon: CalendarClock,
+    color: 'warning.dark',
+  },
   MARKED_NO_SHOW: {
     title: 'Turno marcado como ausente',
     description: 'Se registró una ausencia.',
@@ -66,7 +74,7 @@ export function NotificationRows({
   onRead,
   onNavigate,
 }: {
-  items: NotificationDto[];
+  items: NotificationDto<CenterKind>[];
   timezone: string;
   onRead?(id: string, result: NotificationReadResponse): void;
   onNavigate?(): void;
@@ -97,12 +105,13 @@ function NotificationRow({
   onRead,
   onNavigate,
 }: {
-  item: NotificationDto;
+  item: NotificationDto<CenterKind>;
   format: Intl.DateTimeFormat;
   onRead?: ((id: string, result: NotificationReadResponse) => void) | undefined;
   onNavigate?: (() => void) | undefined;
 }) {
   const router = useRouter();
+  const { allowNavigation } = useUnsavedChanges();
   const { markRead } = useNotifications();
   const { notify } = useToast();
   const [busy, setBusy] = useState(false);
@@ -112,6 +121,7 @@ function NotificationRow({
 
   async function act(navigate: boolean) {
     if (pending.current) return;
+    if (navigate && item.appointmentId && !allowNavigation()) return;
     pending.current = true;
     setBusy(true);
     try {

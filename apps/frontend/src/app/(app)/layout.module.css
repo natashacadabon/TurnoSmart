@@ -1,8 +1,9 @@
 /* Misma grilla y contenido que el dashboard de src/app/page.module.css. */
 .shell {
+  --sidebar-width: 248px;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   background: #f6f8fb;
 }
 
@@ -27,8 +28,20 @@
   background: #f6f8fb;
 }
 
+.notificationDock {
+  position: fixed;
+  top: 20px;
+  left: calc(var(--sidebar-width) - 44px - 16px);
+  z-index: 1100;
+}
+
 @media (max-width: 1040px) {
+  .notificationDock {
+    left: auto;
+    right: 20px;
+  }
   .shell {
+    --sidebar-width: 248px;
     grid-template-columns: 1fr;
     /* El sidebar mide lo justo; el alto sobrante es del contenido, aunque la página sea corta. */
     grid-template-rows: auto 1fr;
@@ -43,4 +56,15 @@
   .content {
     padding: 20px;
   }
+}
+
+/* Configuración usa el ancho disponible sin alterar la navegación global. */
+.content:has(> [data-settings-page]) {
+  max-width: 1540px;
+  padding: 20px;
+}
+
+.content:has(> [data-services-page]) {
+  max-width: none;
+  padding: 20px;
 }

@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppointmentStatus } from '@prisma/client';
+import type { AppointmentStatus } from '@turnosmart/shared';
 import { buildTestApp } from '../fakes.js';
 
 describe('B05 HTTP', () => {

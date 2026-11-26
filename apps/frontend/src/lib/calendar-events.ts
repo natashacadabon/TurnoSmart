@@ -10,7 +10,11 @@ export function appointmentToCalendarEvent(appointment: AppointmentDto, title: s
     ...slotToCalendarEvent(appointment),
     id: appointment.id,
     title,
-    extendedProps: { status: appointment.status },
+    extendedProps: {
+      status: appointment.status,
+      ...(appointment.confirmationStatus && { confirmationStatus: appointment.confirmationStatus }),
+      ...(appointment.rescheduleRequested && { rescheduleRequested: true }),
+    },
   };
 }
 

@@ -175,7 +175,7 @@ describe('PrismaAvailabilityRepository', () => {
     expect(tx.appointment.findMany).toHaveBeenCalledWith({
       where: {
         businessId: 'tenant',
-        status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        status: 'SCHEDULED',
         endsAt: { gt: expect.any(Date) },
       },
       select: { startsAt: true, endsAt: true },

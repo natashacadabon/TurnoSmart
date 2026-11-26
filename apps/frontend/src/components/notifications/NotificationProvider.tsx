@@ -15,15 +15,22 @@ import {
   type ReactNode,
 } from 'react';
 import { api, errorMessage } from '@/lib/api';
+import { useAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/ToastProvider';
 
 export function listNotifications(filter: 'all' | 'unread', limit: number, cursor?: string) {
-  const query = new URLSearchParams({ filter, limit: String(limit) });
+  const query = new URLSearchParams({ filter, limit: String(limit), includeRequests: 'true' });
   if (cursor) query.set('cursor', cursor);
-  return api<NotificationsResponse>('/api/notifications?' + query);
+  return api<CenterNotifications>('/api/notifications?' + query);
 }
 
+export type CenterNotifications = NotificationsResponse;
+
 interface Center {
-  recent: NotificationsResponse | null;
+  recent: CenterNotifications | null;
+  appointmentRevision: number;
+  popoverOpen: boolean;
+  setPopoverOpen(open: boolean): void;
   error: string;
   refresh(force?: boolean): Promise<void>;
   markRead(id: string): Promise<NotificationReadResponse>;
@@ -34,7 +41,15 @@ interface Center {
 const Context = createContext<Center | null>(null);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [recent, setRecent] = useState<NotificationsResponse | null>(null);
+  const { me } = useAuth();
+  const { notify } = useToast();
+  const timezone = me?.onboarded ? me.business.timezone : 'UTC';
+  const [recent, setRecent] = useState<CenterNotifications | null>(null);
+  const [appointmentRevision, setAppointmentRevision] = useState(0);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const seen = useRef<Set<string> | null>(null);
+  const observedUnread = useRef<number | null>(null);
+  const reconciledAt = useRef(0);
   const [error, setError] = useState('');
   const revision = useRef(0);
   const listing = useRef<Promise<void> | null>(null);
@@ -48,34 +63,99 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => invalidate, [invalidate]);
 
-  const refresh = useCallback((force = false) => {
-    if (!force && listing.current) return listing.current;
-    const version = ++revision.current;
-    const request = listNotifications('all', 8)
-      .then(
-        (result) => {
+  const refresh = useCallback(
+    (force = false) => {
+      if (!force && listing.current) return listing.current;
+      const version = ++revision.current;
+      const request = listNotifications('all', 8)
+        .then(async (result) => {
           if (version !== revision.current) return;
+          const known = seen.current;
+          const reconcile =
+            !known ||
+            result.unreadCount !== observedUnread.current ||
+            result.items.some((item) => !known.has(item.id)) ||
+            Date.now() - reconciledAt.current >= 60_000;
+          const observed = [...result.items];
+          if (reconcile) {
+            // createdAt is not commit order: a transaction waiting on a lock can publish an
+            // older event. Reconcile the existing cursor feed without stopping at known IDs.
+            let cursor = result.nextCursor;
+            while (cursor && version === revision.current) {
+              const page = await listNotifications('all', 50, cursor);
+              observed.push(...page.items);
+              cursor = page.nextCursor;
+            }
+          }
+          if (version !== revision.current) return;
+          const added = known ? observed.filter((item) => !known.has(item.id)) : [];
+          seen.current ??= new Set();
+          for (const item of observed) seen.current.add(item.id);
+          observedUnread.current = result.unreadCount;
+          if (reconcile) reconciledAt.current = Date.now();
+          if (added.some((item) => item.appointmentId && item.kind !== 'APPOINTMENT_UPCOMING')) {
+            setAppointmentRevision((value) => value + 1);
+          }
+          const cancelled = added.filter((item) => item.kind === 'CANCELLED');
+          const requested = added.filter((item) => item.kind === 'RESCHEDULE_REQUESTED');
+          const format = new Intl.DateTimeFormat('es-AR', {
+            dateStyle: 'short',
+            timeStyle: 'short',
+            timeZone: timezone,
+          });
+          const messages = [
+            cancelled.length === 1
+              ? `Turno cancelado · ${format.format(new Date(cancelled[0]!.startsAt))}`
+              : cancelled.length
+                ? `${cancelled.length} turnos cancelados`
+                : '',
+            requested.length === 1
+              ? `Nueva solicitud de reprogramación · ${format.format(new Date(requested[0]!.startsAt))}`
+              : requested.length
+                ? `${requested.length} nuevas solicitudes de reprogramación`
+                : '',
+          ].filter(Boolean);
+          if (messages.length) notify(messages.join(' | '), 'info');
           setRecent(result);
           setError('');
-        },
-        (err) => {
+        })
+        .catch((err) => {
           if (version === revision.current) setError(errorMessage(err));
-        },
-      )
-      .finally(() => {
-        if (listing.current === request) listing.current = null;
-      });
-    listing.current = request;
-    return request;
-  }, []);
+        })
+        .finally(() => {
+          if (listing.current === request) listing.current = null;
+        });
+      listing.current = request;
+      return request;
+    },
+    [notify, timezone],
+  );
+
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (!document.hidden) void refresh();
+    };
+    refreshVisible();
+    const timer = window.setInterval(refreshVisible, 5_000);
+    window.addEventListener('focus', refreshVisible);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshVisible);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
+  }, [refresh]);
 
   const markRead = useCallback(
     (id: string) => {
       const pending = reading.current.get(id);
       if (pending) return pending;
-      const request = api<NotificationReadResponse>('/api/notifications/' + id + '/read', {
-        method: 'PATCH',
-      })
+      const request = api<NotificationReadResponse>(
+        '/api/notifications/' + id + '/read?includeRequests=true',
+        {
+          method: 'PATCH',
+        },
+      )
         .then((result) => {
           invalidate();
           setRecent((previous) =>
@@ -100,7 +180,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const markAllRead = useCallback(() => {
     if (bulkReading.current) return bulkReading.current;
-    const request = api<void>('/api/notifications/read-all', { method: 'PATCH' })
+    const request = api<void>('/api/notifications/read-all?includeRequests=true', {
+      method: 'PATCH',
+    })
       .then(() => {
         invalidate();
         const readAt = new Date().toISOString();
@@ -139,7 +221,19 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   return (
-    <Context.Provider value={{ recent, error, refresh, markRead, markAllRead, syncUpcoming }}>
+    <Context.Provider
+      value={{
+        recent,
+        appointmentRevision,
+        popoverOpen,
+        setPopoverOpen,
+        error,
+        refresh,
+        markRead,
+        markAllRead,
+        syncUpcoming,
+      }}
+    >
       {children}
     </Context.Provider>
   );

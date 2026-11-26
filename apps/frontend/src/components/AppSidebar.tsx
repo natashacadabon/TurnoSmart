@@ -6,6 +6,7 @@ import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
 import LoginRoundedIcon from '@mui/icons-material/LoginRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import QueryStatsRoundedIcon from '@mui/icons-material/QueryStatsRounded';
+import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import StorefrontRoundedIcon from '@mui/icons-material/StorefrontRounded';
 import { Box, Button, Chip, Stack, Typography } from '@mui/material';
 import type { Role } from '@turnosmart/shared';
@@ -16,13 +17,14 @@ import { useAuth } from './AuthProvider';
 import { softDangerButtonSx } from './ui';
 import styles from './AppSidebar.module.css';
 
-/** Mismas secciones que el dashboard; Agenda, Predicciones y Reportes siguen siendo la vista demo de /. */
+/** Secciones compartidas por las pantallas del negocio. */
 const NAV = [
   { href: '/', label: 'Agenda', icon: <CalendarMonthRoundedIcon fontSize="small" /> },
   { href: '/services', label: 'Servicios', icon: <StorefrontRoundedIcon fontSize="small" /> },
   { href: '/customers', label: 'Clientes', icon: <GroupsRoundedIcon fontSize="small" /> },
   { href: '/#riesgo', label: 'Predicciones IA', icon: <AutoAwesomeRoundedIcon fontSize="small" /> },
   { href: '/#reportes', label: 'Reportes', icon: <QueryStatsRoundedIcon fontSize="small" /> },
+  { href: '/settings', label: 'Configuración', icon: <SettingsRoundedIcon fontSize="small" /> },
 ];
 
 const ROLE_LABEL: Record<Role, string> = { OWNER: 'Dueño/a', ADMIN: 'Admin', STAFF: 'Staff' };

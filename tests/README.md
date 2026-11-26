@@ -1,28 +1,33 @@
-# Tests
+# Pruebas
 
-Las pruebas viven junto a cada app. Los comandos y requisitos están en la sección "Calidad, pruebas y CI" del README de la raíz.
+Ejecutar los comandos desde la raíz con Node.js 22 y las dependencias instaladas.
 
-## Implementado
+| Suite                     | Alcance                                                                                                                                                 | Comando                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Unitarias                 | Instalación de hooks, scripts Docker y backend con dobles. Cubre identidad, clientes, servicios, disponibilidad, slots, reservas, riesgo, email y seed. | `npm test`                                      |
+| Configuración de frontend | Validación de variables públicas, selección de despliegue y limpieza de previews.                                                                       | `npm run test:config --workspace=apps/frontend` |
+| Integración               | API, concurrencia, rollback, aislamiento, slots, acciones públicas y cola de correo contra PostgreSQL.                                                  | `npm run test:integration`                      |
+| Navegador                 | Login, clientes, servicios, agenda, detalle, avisos, preferencias y acciones públicas. Combina escenarios reales y simulaciones de Auth o API.          | `npm run test:e2e --workspace=apps/frontend`    |
 
-| Tipo        | Dónde                           | Qué cubre                                                                                                                                                                                                                                                                                       |
-| ----------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unitarias   | `apps/backend/test/unit`        | API completa con fakes en memoria: autenticación (401), permisos por rol (403), aislamiento entre negocios (404), onboarding, clientes (alta, edición, baja y validaciones), historial, explicación con IA (timeout, cuota, respuesta inválida, datos sensibles), CORS y errores. Corren en CI. |
-| Integración | `apps/backend/test/integration` | API + PostgreSQL real con las migraciones: onboarding concurrente que crea un único negocio, persistencia y aislamiento de clientes entre dos negocios, y baja bloqueada por la FK cuando el cliente tiene turnos.                                                                              |
-| End-to-end  | `apps/frontend/e2e`             | Navegador real, sin mocks: login inválido, rutas protegidas, recuperación ante una API caída y alta, recarga, edición, baja y cierre de sesión con un cliente.                                                                                                                                  |
+## Integración con PostgreSQL
 
-La suite de integración contra PostgreSQL crea y borra negocios: usar una base descartable con las migraciones aplicadas, nunca la del equipo ni la de la demo.
+Configurar `DATABASE_URL` y `DIRECT_URL` de una base descartable con las migraciones aplicadas. Las suites crean y eliminan datos. Las pruebas de correo usan un proveedor simulado y un reloj controlado. Las suites HTTP de servicios, disponibilidad y slots usan dobles y pueden ejecutarse sin PostgreSQL:
 
-La suite `services-http.test.ts` es una excepcion: prueba la API de servicios con
-fakes, sin PostgreSQL ni `.env`. Ejecutarla con
-`npm run test:integration --workspace=@turnosmart/backend -- services-http.test.ts`.
-Las unitarias tambien cubren servicios y el seed local con dobles, sin cargar datos.
-Estas suites no demuestran persistencia ni RLS de PostgreSQL.
+```sh
+npm run build:shared
+npm run test:integration --workspace=apps/backend -- services-http.test.ts availability-http.test.ts slots-http.test.ts
+```
 
-## Pendiente
+Las pruebas de aislamiento de Express y Prisma verifican sus filtros. La suite de integración también comprueba restricciones de acceso a las tablas nuevas. La validación de roles de la Data API para las tablas de dominio queda en el [backlog](../docs/backlog.md).
 
-- Unitarias del score de riesgo, la disponibilidad y las transiciones de estado de un turno.
-- Integración de reservas: dos solicitudes simultáneas al mismo horario (una sola persiste), rollback del evento y RLS con dos negocios.
-- End-to-end de reserva, reprogramación y cancelación.
-- Correr las pruebas de integración en CI con una base efímera.
+## Navegador
 
-El criterio del piloto es operar una agenda completa e identificar turnos riesgosos sin intervención técnica.
+Instalar Chromium con `npx playwright install chromium`. Levantar el frontend y ajustar `E2E_BASE_URL` si usa un puerto distinto de 3000. Para correr toda la suite, levantar además backend y Supabase y definir `E2E_USER_EMAIL` y `E2E_USER_PASSWORD` de un usuario de prueba. El flujo crítico usa una cuenta real y simula el fallo de `/api/me` para comprobar la recuperación.
+
+Para probar agenda y enlaces públicos con respuestas interceptadas:
+
+```sh
+npm run test:e2e --workspace=apps/frontend -- new-appointment public-appointment-actions calendar-events
+```
+
+El workflow [TurnoSmart CI](../.github/workflows/ci.yml) ejecuta formato, lint, validación de Prisma, tipos, unitarias, pruebas de configuración y builds. Las suites de PostgreSQL y navegador se ejecutan por separado. El recorrido con Resend y Supabase Cron en el entorno publicado se verifica siguiendo la [guía de operación](../docs/operations.md#notificaciones-de-turnos).

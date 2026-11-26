@@ -385,7 +385,8 @@ for (const status of ['SCHEDULED', 'CONFIRMED'] as const) {
       where: { id },
       include: { events: true },
     });
-    expect(row.status).toBe(status);
+    expect(row.status).toBe('SCHEDULED');
+    expect(row.confirmationStatus).toBe(status === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING');
     expect(row.startsAt.toISOString()).toBe(second);
     expect(row.endsAt.toISOString()).toBe('2099-01-05T15:00:00.000Z');
     expect(row.events).toHaveLength(before.events.length + 2);
@@ -406,7 +407,8 @@ for (const status of ['CANCELLED', 'COMPLETED', 'NO_SHOW', 'SCHEDULED', 'CONFIRM
     await observer.appointment.update({
       where: { id },
       data: {
-        status,
+        status: status === 'CONFIRMED' ? 'SCHEDULED' : status,
+        confirmationStatus: status === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING',
         ...(['SCHEDULED', 'CONFIRMED'].includes(status)
           ? { startsAt: new Date('2020-01-06T10:00Z'), endsAt: new Date('2020-01-06T11:00Z') }
           : {}),

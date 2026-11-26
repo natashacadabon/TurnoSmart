@@ -1,4 +1,5 @@
-import type { AppointmentStatus, PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
+import type { AppointmentStatus } from '@turnosmart/shared';
 import type { Interval } from './calculator.js';
 
 export interface SlotAppointment extends Interval {
@@ -17,7 +18,7 @@ export interface SlotsRepository {
 
 /** Lecturas acotadas por tenant; ocupacion de TODOS los servicios en una sola consulta. */
 export class PrismaSlotsRepository implements SlotsRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: Pick<PrismaClient, 'service' | 'appointment'>) {}
 
   findService(businessId: string, id: string) {
     return this.prisma.service.findUnique({
@@ -37,7 +38,7 @@ export class PrismaSlotsRepository implements SlotsRepository {
     return this.prisma.appointment.findMany({
       where: {
         businessId,
-        status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        status: 'SCHEDULED',
         startsAt: { lt: range.endsAt },
         endsAt: { gt: range.startsAt },
         ...(excludeId ? { id: { not: excludeId } } : {}),

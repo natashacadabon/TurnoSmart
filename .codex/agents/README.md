@@ -17,12 +17,12 @@ implican cuatro ejecuciones simultaneas: se respetan los limites de la sesion.
 Abrir una nueva sesion de Codex en la raiz Git `TurnoSmart/TurnoSmart` para que
 descubra estos archivos. Pedir explicitamente la delegacion por nombre:
 
-| Agente                  | Ejemplo de pedido                                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend-architect`     | Usa el subagente backend-architect para revisar la arquitectura y los DTOs del modulo B frente a B01. No edites archivos.                 |
-| `scheduling-specialist` | Usa el subagente scheduling-specialist para revisar slots, UTC, zonas IANA, limites y carreras con reservas C. No edites archivos.        |
-| `security-reviewer`     | Usa el subagente security-reviewer para auditar roles, aislamiento entre negocios y posibles escrituras directas que evadan Express.      |
-| `test-engineer`         | Usa el subagente test-engineer para proponer pruebas locales reproducibles de B y detectar cobertura faltante, sin instalar dependencias. |
+| Agente                  | Ejemplo de pedido                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend-architect`     | Usa el subagente backend-architect para revisar la arquitectura y los DTOs del modulo B frente a los contratos vigentes. No edites archivos. |
+| `scheduling-specialist` | Usa el subagente scheduling-specialist para revisar slots, UTC, zonas IANA, limites y carreras con reservas C. No edites archivos.           |
+| `security-reviewer`     | Usa el subagente security-reviewer para auditar roles, aislamiento entre negocios y posibles escrituras directas que evadan Express.         |
+| `test-engineer`         | Usa el subagente test-engineer para proponer pruebas locales reproducibles de B y detectar cobertura faltante, sin instalar dependencias.    |
 
 Para una revision conjunta: "Usa los cuatro subagentes del modulo B en modo
 revision, espera sus resultados y consolida los hallazgos por severidad, sin
@@ -35,18 +35,9 @@ secuencia con transferencia explicita. El agente principal integra y verifica.
 `security-reviewer` se mantiene como auditor; las correcciones se delegan en otra
 tarea autorizada.
 
-## Alcance y decisiones pendientes
+## Alcance técnico
 
-B01 se encuentra en `docs/api-services-availability.md`, aun marcado como
-propuesta con D01-D08 pendientes. Esta solicitud fija agenda unica por negocio,
-capacidad uno y comienzos cada 15 minutos; no aprueba automaticamente los otros
-detalles del contrato. Los agentes deben comprobar el estado actualizado de
-esas decisiones antes de implementar.
-
-El backend actual solo expone `/health`. `packages/shared` contiene tipos de
-estado de turnos y riesgo. El compose de desarrollo no incluye una base local
-y backend no declara un script de tests. Estas limitaciones deben revisarse
-nuevamente al comenzar cada tarea: no asumir endpoints ni pruebas existentes.
+Los [contratos vigentes](../../docs/api-services-availability.md) describen los endpoints de servicios, disponibilidad y slots. La agenda es única por negocio, con comienzos cada 15 minutos. Ver el protocolo transaccional en [arquitectura](../../docs/architecture.md), la [guía de pruebas](../../tests/README.md) y el [backlog](../../docs/backlog.md).
 
 ## Validacion realizada
 

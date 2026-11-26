@@ -18,14 +18,14 @@ import {
   type CustomerDto,
   type Paginated,
 } from '@turnosmart/shared';
-import { CalendarDays, Eye, Mail, TriangleAlert, UsersRound } from 'lucide-react';
+import { CalendarDays, Mail, TriangleAlert, UsersRound } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { AgendaInsights } from '@/components/appointments/AgendaInsights';
 import { AgendaReminders } from '@/components/appointments/AgendaReminders';
-import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { useNotifications } from '@/components/notifications/NotificationProvider';
 import { businessDayRange } from '@/lib/agenda';
 import { listAgendaAppointments } from '@/lib/agenda-data';
 import { REMINDER_LEAD_MS } from '@/lib/agenda-reminders';
@@ -65,6 +65,8 @@ function AgendaDashboard({
   canBook: boolean;
   canExplain: boolean;
 }) {
+  const { appointmentRevision: externalRevision, popoverOpen: notificationsOpen } =
+    useNotifications();
   const [customers, setCustomers] = useState<number | null>();
   const [feedResult, setFeedResult] = useState<{
     from: string;
@@ -78,7 +80,6 @@ function AgendaDashboard({
   const [customerRevision, setCustomerRevision] = useState(0);
   const [calendarRevision, setCalendarRevision] = useState(0);
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [riskDialogOpen, setRiskDialogOpen] = useState(false);
   const [riskCount, setRiskCount] = useState<number | null>(null);
@@ -158,7 +159,7 @@ function AgendaDashboard({
     return () => {
       current = false;
     };
-  }, [from, to, revision]);
+  }, [from, to, revision, externalRevision]);
 
   function reminderChanged(appointment?: AppointmentDto) {
     if (appointment)
@@ -211,11 +212,6 @@ function AgendaDashboard({
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-          <NotificationBell
-            timezone={currentTimezone}
-            refreshRevision={revision}
-            onOpenChange={setNotificationsOpen}
-          />
           <AgendaReminders
             appointments={feed ?? []}
             now={now}
@@ -321,7 +317,7 @@ function AgendaDashboard({
                 rules={week.rules}
                 canBook={canBook}
                 expanded={expanded}
-                appointmentRevision={calendarRevision}
+                appointmentRevision={calendarRevision + externalRevision + revision}
                 customerRevision={customerRevision}
                 onBookingOpenChange={setBookingOpen}
                 onToggleExpanded={() => setExpanded((value) => !value)}

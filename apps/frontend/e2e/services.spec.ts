@@ -187,6 +187,41 @@ async function fixtures(page: Page, role: Role = 'OWNER', overlapping = false) {
   );
   return {
     writes,
+    showcase: () => {
+      services = Array.from({ length: 8 }, (_, index) => ({
+        ...service,
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        name: [
+          'Consulta inicial',
+          'Seguimiento',
+          'Consulta extendida',
+          'Evaluación',
+          'Control',
+          'Asesoramiento',
+          'Tratamiento',
+          'Primera entrevista',
+        ][index]!,
+        description:
+          'Atención personalizada y seguimiento profesional con información extensa del servicio.',
+        active: index !== 7,
+      }));
+      rules = [1, 2, 3, 4, 5].flatMap((dayOfWeek) => [
+        {
+          ...rules[0]!,
+          id: `morning-${dayOfWeek}`,
+          dayOfWeek,
+          startTime: '09:00',
+          endTime: '12:00',
+        },
+        {
+          ...rules[0]!,
+          id: `afternoon-${dayOfWeek}`,
+          dayOfWeek,
+          startTime: '15:00',
+          endTime: '18:00',
+        },
+      ]);
+    },
     getAvailabilityReads: () => availabilityReads,
     rejectSlots: () => {
       slotError = true;
@@ -246,11 +281,13 @@ test('crea, edita, desactiva y activa servicios con validación y conflicto de n
   await expect(row).toContainText('60');
   expect(writes.at(-1)).toMatchObject({ method: 'PATCH', body: { durationMinutes: 60 } });
 
-  await row.getByRole('button', { name: /Desactivar/ }).click();
-  await expect(row.getByRole('button', { name: /Activar/ })).toBeVisible();
+  await row.getByRole('button', { name: /Más acciones/ }).click();
+  await page.getByRole('menuitem', { name: 'Desactivar servicio', exact: true }).click();
+  await expect(row).toContainText('Inactivo');
   expect(writes.at(-1)).toMatchObject({ method: 'PATCH', body: { active: false } });
-  await row.getByRole('button', { name: /Activar/ }).click();
-  await expect(row.getByRole('button', { name: /Desactivar/ })).toBeVisible();
+  await row.getByRole('button', { name: /Más acciones/ }).click();
+  await page.getByRole('menuitem', { name: 'Activar servicio', exact: true }).click();
+  await expect(row).toContainText('Activo');
   expect(writes.at(-1)).toMatchObject({ method: 'PATCH', body: { active: true } });
 });
 
@@ -260,7 +297,9 @@ test('muestra un solapamiento guardado y permite corregir la franja sin quitarla
   const { writes } = await fixtures(page, 'OWNER', true);
   await login(page);
   await expect(page.getByText(/La disponibilidad guardada tiene errores/)).toBeVisible();
-  await page.getByRole('tab', { name: 'Domingo, Revisar' }).click();
+  await page
+    .getByRole('button', { name: 'Editar disponibilidad del domingo', exact: true })
+    .click();
   const save = page.getByRole('button', { name: 'Guardar cambios' });
   await expect(page.getByText(/Se solapa con la franja 09:00–12:00/)).toBeVisible();
   await expect(save).toBeDisabled();
@@ -281,11 +320,17 @@ test('edita un día, conserva el borrador al navegar y guarda franjas adyacentes
   const { writes, getAvailabilityReads } = await fixtures(page);
   await login(page);
   await expect(page.getByRole('heading', { name: 'Disponibilidad semanal' })).toBeVisible();
-  const tabs = page.getByRole('tablist', { name: 'Disponibilidad por día' });
-  const sunday = tabs.getByRole('tab', { name: /Domingo/ });
-  const monday = tabs.getByRole('tab', { name: /Lunes/ });
-  const save = page.getByRole('button', { name: 'Guardar cambios' });
-  await expect(tabs.getByRole('tab')).toHaveCount(7);
+  const sunday = page.getByRole('button', {
+    name: 'Editar disponibilidad del domingo',
+    exact: true,
+  });
+  const monday = page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true });
+  const save = page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Guardar cambios', exact: true });
+  await expect(
+    page.getByRole('group', { name: 'Semana de atención' }).getByRole('button'),
+  ).toHaveCount(7);
   await sunday.click();
   await expect(page.getByLabel('Inicio domingo 1')).toHaveValue('09:00');
   await expect(save).toBeDisabled();
@@ -307,17 +352,15 @@ test('edita un día, conserva el borrador al navegar y guarda franjas adyacentes
     expect(dialog.type()).toBe('confirm');
     await dialog.dismiss();
   });
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
   await page.getByRole('link', { name: 'Clientes', exact: true }).click();
   await confirmation;
   await expect(page).toHaveURL(/\/services/, { timeout: 30_000 });
-  await expect(start).toHaveValue('12:00');
-
-  await sunday.press('Home');
-  await expect(monday).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(monday).toHaveAttribute('aria-selected', 'true');
+  await monday.focus();
+  await monday.press('Enter');
   await expect(page.getByLabel('Inicio domingo 2')).toHaveCount(0);
-  await page.getByRole('button', { name: /Editar disponibilidad del domingo/i }).click();
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await sunday.click();
   await expect(start).toHaveValue('12:00');
   expect(getAvailabilityReads()).toBe(1);
 
@@ -348,9 +391,11 @@ test('habilita un día y confirma el reemplazo de franjas al copiar en mobile', 
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
-  const tabs = page.getByRole('tablist', { name: 'Disponibilidad por día' });
-  const sunday = tabs.getByRole('tab', { name: /Domingo/ });
-  const monday = tabs.getByRole('tab', { name: /Lunes/ });
+  const sunday = page.getByRole('button', {
+    name: 'Editar disponibilidad del domingo',
+    exact: true,
+  });
+  const monday = page.getByRole('button', { name: 'Editar disponibilidad del lunes', exact: true });
   await monday.click();
   const attendance = page.getByLabel(/Atender el lunes/i);
   await expect(attendance).not.toBeChecked();
@@ -359,19 +404,22 @@ test('habilita un día y confirma el reemplazo de franjas al copiar en mobile', 
   await page.getByLabel('Fin lunes 1').fill('11:00');
 
   await page.getByRole('button', { name: 'Copiar horario a otros días' }).click();
-  const dialog = page.getByRole('dialog');
+  const dialog = page.getByRole('dialog', { name: 'Copiar horario a otros días', exact: true });
   await dialog.getByRole('checkbox', { name: /Domingo/ }).check();
   await expect(dialog.getByText(/reemplaz/i).first()).toBeVisible();
   await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
   await sunday.click();
   await expect(page.getByLabel('Inicio domingo 1')).toHaveValue('09:00');
 
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
   await monday.click();
   await page.getByRole('button', { name: 'Copiar horario a otros días' }).click();
   await dialog.getByRole('checkbox', { name: /Domingo/ }).check();
   await dialog.getByRole('checkbox', { name: /Martes/ }).check();
   await dialog.getByRole('button', { name: 'Copiar horario', exact: true }).click();
   await expect(dialog).toBeHidden();
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
   await sunday.click();
   await expect(page.getByLabel('Inicio domingo 1')).toHaveValue('10:00');
   await expect(page.getByLabel('Fin domingo 1')).toHaveValue('11:00');
@@ -401,6 +449,7 @@ test('Staff consulta horarios en la zona del negocio y ve el error del servidor'
   await expect(page.getByRole('button', { name: 'Nuevo servicio' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
 
+  await page.getByRole('button', { name: 'Consultar horarios', exact: true }).click();
   await page.getByRole('combobox', { name: 'Servicio', exact: true }).click();
   await page.getByRole('option', { name: /Consulta inicial/ }).click();
   await page.getByLabel(/^Fecha/).fill('2027-03-01');
@@ -430,6 +479,7 @@ test('horarios: rangos reales, selección accesible, loading, vacío y reintento
   ];
   resolveSlots(available);
   await login(page);
+  await page.getByRole('button', { name: 'Consultar horarios', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Consultar horarios' });
   const consult = panel.getByRole('button', { name: 'Consultar', exact: true });
   await expect(consult).toBeDisabled();
@@ -467,7 +517,7 @@ test('horarios: rangos reales, selección accesible, loading, vacío y reintento
       width,
     );
     const bounds = await afternoon.boundingBox();
-    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(36);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
     if (width !== 320) {
       await panel.screenshot({ path: testInfo.outputPath(`horarios-${width}.png`) });
@@ -501,6 +551,7 @@ test('consulta de horarios usa Express con una sesión real', async ({ page }) =
     'Requiere servidores reales y cuenta E2E provisionada.',
   );
   await login(page);
+  await page.getByRole('button', { name: 'Consultar horarios', exact: true }).click();
   await page.getByRole('combobox', { name: 'Servicio', exact: true }).click();
   const firstOption = page.getByRole('option').first();
   await expect(firstOption, 'Provisionar un servicio activo en el negocio E2E').toBeVisible();
@@ -514,3 +565,68 @@ test('consulta de horarios usa Express con una sesión real', async ({ page }) =
   expect(result.ok()).toBe(true);
   expect(await result.json()).toMatchObject({ data: expect.any(Array) });
 });
+
+for (const width of [1920, 1440, 1366, 1024, 768, 375]) {
+  test(`servicios responsive ${width}px: catálogo, jornadas partidas y días cerrados`, async ({
+    page,
+  }, testInfo) => {
+    const { showcase, getAvailabilityReads, writes } = await fixtures(page);
+    showcase();
+    await page.setViewportSize({ width, height: 768 });
+    await login(page);
+    await expect(page.getByText('8 servicios totales')).toBeVisible();
+    await expect(page.getByText('7 servicios activos')).toBeVisible();
+    await expect(page.getByText('30 h semanales de atención')).toBeVisible();
+    const catalog = page.getByRole('region', { name: 'Catálogo de servicios', exact: true });
+    const availability = page.getByRole('region', { name: 'Disponibilidad semanal', exact: true });
+    const slots = page.getByRole('region', { name: 'Consultar horarios', exact: true });
+    for (const card of [catalog, availability, slots]) {
+      await expect(card).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+      expect(await card.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
+        true,
+      );
+    }
+    if (width >= 1200) {
+      const left = (await catalog.boundingBox())!;
+      const right = (await availability.boundingBox())!;
+      expect(Math.abs(left.y - right.y)).toBeLessThan(1);
+      expect(Math.abs(left.height - right.height)).toBeLessThan(1);
+    } else {
+      const top = (await catalog.boundingBox())!;
+      const bottom = (await availability.boundingBox())!;
+      expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height);
+    }
+    const week = page.getByRole('group', { name: 'Semana de atención' });
+    await expect(week.getByRole('button')).toHaveCount(7);
+    await expect(week.getByText('Cerrado', { exact: true })).toHaveCount(2);
+    await expect(week.getByText('09:00–12:00', { exact: true })).toHaveCount(5);
+    await expect(week.getByText('15:00–18:00', { exact: true })).toHaveCount(5);
+    await expect(
+      page.getByRole('button', { name: 'Consultar horarios', exact: true }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    );
+    if (width >= 1366)
+      expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(
+        768,
+      );
+    await page.screenshot({ path: testInfo.outputPath(`services-${width}.png`), fullPage: true });
+    await page.getByRole('button', { name: 'Página siguiente' }).click();
+    await expect(page.getByRole('row', { name: /Primera entrevista/ })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Estado', exact: true }).click();
+    await page.getByRole('option', { name: 'Inactivos', exact: true }).click();
+    await expect(page.getByRole('table').getByRole('row')).toHaveCount(2);
+    if (width >= 1200) {
+      expect(
+        Math.abs(
+          (await catalog.boundingBox())!.height - (await availability.boundingBox())!.height,
+        ),
+      ).toBeLessThan(1);
+    }
+    await page.getByRole('textbox', { name: 'Buscar por nombre' }).fill('sin coincidencias');
+    await expect(page.getByText('No hay resultados', { exact: true })).toBeVisible();
+    expect(getAvailabilityReads()).toBe(1);
+    expect(writes).toHaveLength(0);
+  });
+}

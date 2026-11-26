@@ -46,30 +46,11 @@ y no forman parte del arranque de desarrollo. Las imagenes y volumenes anteriore
 Los contenedores huerfanos del mismo proyecto Compose se retiran al arrancar
 o detener, sin borrar volumenes.
 
-- [Vercel](vercel/README.md) publica Preview y Production desde Actions.
-  [Render Dev](render/README.md) publica desde `dev` tras los checks de GitHub.
+## Publicación
 
-## Planificado
+- [Vercel](vercel/README.md) publica el frontend mediante GitHub Actions. Preview puede seguir a CI desde `dev` y PR internas elegibles. Production se inicia por dispatch.
+- [Render](render/README.md) configura el backend de Dev y el despliegue desde `dev` tras los checks. Las migraciones se aplican por separado.
+- [Azure](azure/README.md) contiene Bicep, el ZIP de la API y el procedimiento manual para validar un checkpoint temporal.
+- [Supabase Cron](supabase/appointment-email-cron.sql) puede invocar al procesador de correos del backend cuando haya trabajos vencidos. La configuración de Vault y Resend se documenta en la [guía de operación](../docs/operations.md#notificaciones-de-turnos).
 
-B07 M1Ã¢â‚¬â€œM2 preparado en [azure/README.md](azure/README.md): Bicep de RG temporal,
-Plan F1 Linux/App Service Node 22, ZIP de produccion y comandos PowerShell manuales.
-No se crearon recursos Azure; B1 requiere aprobacion explicita. La demo exige
-preflight/what-if, despliegue manual y limpieza del RG.
-
-- Azure App Service para backend.
-- Gestion de secretos por ambiente.
-- Azure Monitor o Application Insights.
-- Imagenes y pipeline de produccion.
-
-La infraestructura como codigo de Azure se reserva para checkpoints temporales.
-
-## Plan de evolucion
-
-1. Separar ambientes de desarrollo y produccion.
-2. Activar CD en Vercel y Render con los servicios existentes.
-3. Preparar una imagen de produccion para el backend.
-4. Desplegar la API en Azure App Service.
-5. Gestionar secretos fuera del repositorio.
-6. Incorporar health checks, logs estructurados y metricas.
-
-La configuracion de desarrollo no debe reutilizarse como imagen de produccion sin hardening.
+La verificación del entorno publicado y la integración con monitoreo externo figuran en el [backlog](../docs/backlog.md).
