@@ -260,6 +260,9 @@ test('Preview descarga settings y publica sin consultar Production; Production c
     assert.equal(result.status, 0, result.stderr || result.error?.message);
     const commands = readFileSync(join(root, 'commands.log'), 'utf8').trim().split('\n');
     assert.equal(commands.length, 2);
+    for (const command of commands) {
+      assert.match(command, /--token=fixture-token(?:\s|$)/);
+    }
     assert.match(commands[0], new RegExp(`pull --yes --environment=${target}`));
     assert.match(commands[1], /deploy --prebuilt --archive=tgz --yes/);
     if (target === 'preview') {
@@ -285,6 +288,74 @@ test('Preview descarga settings y publica sin consultar Production; Production c
       .if,
     "env.DEPLOY_TARGET == 'production'",
   );
+});
+
+test('Promote usa el mismo token y equipo que upload; falla si faltan o la CLI rechaza', (t) => {
+  const {
+    jobs: { deploy },
+  } = yaml.load(readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'));
+  const promote = deploy.steps.find((step) => step.name === 'Promote Production');
+  const upload = deploy.steps.find((step) => step.id === 'upload');
+  const pull = deploy.steps.find((step) => step.name === 'Pull Vercel settings');
+  assert.equal(deploy.env.VERCEL_CLI_VERSION, '65.9.0');
+  assert.equal(deploy.env.VERCEL_ORG_ID, '${{ vars.VERCEL_ORG_ID }}');
+  assert.equal(promote.env.VERCEL_TOKEN, '${{ secrets.VERCEL_TOKEN }}');
+  assert.equal(upload.env.VERCEL_TOKEN, promote.env.VERCEL_TOKEN);
+  assert.equal(pull.env.VERCEL_TOKEN, promote.env.VERCEL_TOKEN);
+  assert.equal(promote.env.DEPLOYMENT_URL, '${{ steps.upload.outputs.url }}');
+  const gitBash = join(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe');
+  const bash = process.platform === 'win32' && existsSync(gitBash) ? gitBash : 'bash';
+  for (const [org, token, cliExit, expected] of [
+    ['team_fixture', 'fixture-token', '0', 0],
+    ['', 'fixture-token', '0', 1],
+    ['team_fixture', '', '0', 1],
+    ['team_fixture', 'fixture-token', '1', 1],
+  ]) {
+    const { root } = fixture(t);
+    const result = spawnSync(
+      bash,
+      [
+        '--noprofile',
+        '--norc',
+        '-euo',
+        'pipefail',
+        '-c',
+        `
+      npx() { printf '%s\\n' "$@" > args.log; return "$CLI_EXIT"; }
+      ${promote.run}
+    `,
+      ],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          VERCEL_ORG_ID: org,
+          VERCEL_TOKEN: token,
+          VERCEL_CLI_VERSION: '65.9.0',
+          DEPLOYMENT_URL: 'https://fixture.vercel.app',
+          CLI_EXIT: cliExit,
+        },
+        encoding: 'utf8',
+        timeout: 10000,
+      },
+    );
+    assert.ifError(result.error);
+    assert.equal(result.status, expected, result.stderr);
+    if (!org || !token) {
+      assert(!existsSync(join(root, 'args.log')));
+      assert.match(result.stderr, /Configurar VERCEL_(ORG_ID|TOKEN)/);
+    } else {
+      assert.deepEqual(readFileSync(join(root, 'args.log'), 'utf8').trim().split('\n'), [
+        '--yes',
+        'vercel@65.9.0',
+        'promote',
+        'https://fixture.vercel.app',
+        '--yes',
+        '--scope=team_fixture',
+        '--token=fixture-token',
+      ]);
+    }
+  }
 });
 
 test('El alias es estable por PR y rechaza colisiones o revisiones obsoletas', async () => {
