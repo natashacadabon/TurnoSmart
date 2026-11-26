@@ -49,6 +49,11 @@ const explainer = env.GEMINI_API_KEY
   ? new RiskExplainer(new GeminiLlmClient(env.GEMINI_API_KEY, env.GEMINI_MODEL), {
       timeoutMs: env.GEMINI_TIMEOUT_MS,
       maxOutputTokens: env.GEMINI_MAX_OUTPUT_TOKENS,
+      globalLimit: { limit: env.AI_GLOBAL_LIMIT_PER_WINDOW, windowMs: env.AI_RATE_LIMIT_WINDOW_MS },
+      circuit: {
+        failureThreshold: env.AI_CIRCUIT_FAILURES,
+        cooldownMs: env.AI_CIRCUIT_COOLDOWN_MS,
+      },
     })
   : null;
 const release = releaseInfo(process.env, env.RELEASE_SHA);

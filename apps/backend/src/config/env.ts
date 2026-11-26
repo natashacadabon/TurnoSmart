@@ -64,6 +64,10 @@ const envSchema = z.object({
   GEMINI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(2048).default(400),
   AI_RATE_LIMIT_PER_USER: z.coerce.number().int().min(1).default(10),
   AI_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(3_600_000),
+  // Tope de costo por instancia y circuito ante fallas seguidas del proveedor (FINAL-05B).
+  AI_GLOBAL_LIMIT_PER_WINDOW: z.coerce.number().int().min(1).default(200),
+  AI_CIRCUIT_FAILURES: z.coerce.number().int().min(1).max(20).default(3),
+  AI_CIRCUIT_COOLDOWN_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
   // Observabilidad (FINAL-08): /metrics exige `Authorization: Bearer <METRICS_TOKEN>`.
   // Sin token, /metrics responde 404 fuera de desarrollo y test.
   METRICS_TOKEN: emptyAsUndefined(z.string().trim().min(32).optional()),

@@ -130,7 +130,9 @@ Object.assign(env, {
   SUPABASE_SECRET_KEY: '',
   SUPABASE_SERVICE_ROLE_KEY: env.TS_SERVICE_KEY,
   SEED_ADMIN_PASSWORD: env.TS_SEED_PASSWORD,
-  GEMINI_API_KEY: '',
+  // Gemini is opt-in: only read from the git-ignored .env.dev, never from the terminal.
+  GEMINI_API_KEY: local.GEMINI_API_KEY ?? '',
+  ...(local.GEMINI_MODEL ? { GEMINI_MODEL: local.GEMINI_MODEL } : {}),
   NEXT_PUBLIC_API_URL: `http://localhost:${env.TS_BACKEND_PORT}`,
   NEXT_PUBLIC_SUPABASE_URL: `http://127.0.0.1:${env.TS_AUTH_PORT}`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: env.TS_ANON_KEY,

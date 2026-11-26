@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { RiskFactor, RiskLevel } from '@turnosmart/shared';
+import { withCustomerConfirmation } from './risk-calculator.js';
 
 export interface RiskRecord {
   appointmentId: string;
@@ -14,6 +15,32 @@ export interface RiskScoreInput {
   score: number;
   level: RiskLevel;
   factors: RiskFactor[];
+}
+
+/**
+ * Suma el factor de confirmación al score guardado, dentro de la transacción que confirma el
+ * turno. Sin score previo no hace nada: el score se crea al reservar.
+ */
+export async function applyConfirmationToRisk(
+  tx: Prisma.TransactionClient,
+  businessId: string,
+  appointmentId: string,
+) {
+  const current = await tx.riskScore.findUnique({
+    where: { appointmentId_businessId: { appointmentId, businessId } },
+    select: { factors: true },
+  });
+  if (!current) return;
+  const next = withCustomerConfirmation(sanitizeFactors(current.factors));
+  await tx.riskScore.update({
+    where: { appointmentId_businessId: { appointmentId, businessId } },
+    data: {
+      score: next.score,
+      level: next.level,
+      factors: next.factors as unknown as Prisma.InputJsonValue,
+      calculatedAt: new Date(),
+    },
+  });
 }
 
 /** Lectura y persistencia del score calculado por el dominio de reservas. */

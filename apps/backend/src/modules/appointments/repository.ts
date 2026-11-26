@@ -5,6 +5,7 @@ import {
   type AppointmentStatus,
 } from '@turnosmart/shared';
 import { AppError } from '../../lib/errors.js';
+import { applyConfirmationToRisk } from '../ai/risk-repository.js';
 import { operationalAvailabilityRules } from '../availability/repository.js';
 import { recordAppointmentNotification } from '../notifications/repository.js';
 import { enqueueAppointmentEmail } from '../notifications/email-queue.js';
@@ -184,6 +185,8 @@ export async function transitionAppointment(
     type: nextStatus === 'NO_SHOW' ? 'MARKED_NO_SHOW' : nextStatus,
     metadata: { previousStatus, status: nextStatus, ...actor },
   });
+  // Confirmación del cliente o del negocio: el riesgo baja en la misma transacción.
+  if (nextStatus === 'CONFIRMED') await applyConfirmationToRisk(tx, row.businessId, row.id);
   if (row.status !== 'SCHEDULED') {
     await invalidateAppointmentReminders(tx, row.businessId, { appointmentId: row.id }, new Date());
   }

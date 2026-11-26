@@ -1,5 +1,11 @@
 import { AppointmentEventType, Prisma, type PrismaClient } from '@prisma/client';
-import { assertNoActiveOverlaps, seedId, validateSeedData, type SeedData } from './seed-data.js';
+import {
+  assertNoActiveOverlaps,
+  seedId,
+  seedRiskScore,
+  validateSeedData,
+  type SeedData,
+} from './seed-data.js';
 import { SeedError, seedFailure, type SeedStage } from './seed-diagnostics.js';
 
 export type SeedProfile = SeedData['accounts'][number] & { id: string };
@@ -171,14 +177,14 @@ export async function seedDomain(
             create: event,
             update: event,
           });
+          // Mismo calculador que la API: factores reales para que la explicación de IA los use.
+          const riskScore = seedRiskScore(data, appointment);
           const score = {
             id: seedId(7, business, index),
             businessId: appointment.businessId,
             appointmentId: appointment.id,
-            score: index * 18,
-            level:
-              index < 2 ? ('LOW' as const) : index < 4 ? ('MEDIUM' as const) : ('HIGH' as const),
-            factors: ['Dato ficticio de desarrollo; no es una prediccion real.'],
+            ...riskScore,
+            factors: riskScore.factors as unknown as Prisma.InputJsonValue,
           };
           details.risks.push(score.id);
           stage = 'risk_scores';
