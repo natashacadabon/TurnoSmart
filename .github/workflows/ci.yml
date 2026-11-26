@@ -1,0 +1,88 @@
+name: TurnoSmart CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Run ESLint
+        run: npm run lint
+
+      # Schema validation and client generation do not connect to a database.
+      - name: Validate Prisma schema
+        run: npm run prisma:validate --workspace=apps/backend
+        env:
+          DATABASE_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
+          DIRECT_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace=apps/backend
+        env:
+          DATABASE_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
+          DIRECT_URL: postgresql://prisma-schema-check@127.0.0.1:1/turnosmart
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: |
+          npm test
+          npm run test:config --workspace=apps/frontend
+
+      - name: Cache Next.js build
+        uses: actions/cache@v5
+        with:
+          path: apps/frontend/.next/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-node22-next-v1-${{ hashFiles('package-lock.json') }}-${{ hashFiles('package.json', 'apps/frontend/src/**', 'apps/frontend/scripts/**', 'apps/frontend/*.json', 'apps/frontend/next.config.*', 'packages/shared/src/**', 'packages/shared/*.json', '.github/workflows/ci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-node22-next-v1-${{ hashFiles('package-lock.json') }}-
+
+      - name: Build backend
+        run: npm run build --workspace=apps/backend
+
+      - name: Build frontend for CI
+        run: npm run build --workspace=apps/frontend
+        env:
+          NEXT_PUBLIC_USE_AZURE: 'false'
+          NEXT_PUBLIC_API_URL_RENDER: https://turnosmart-render.invalid
+          NEXT_PUBLIC_API_URL_AZURE: https://turnosmart-azure.invalid
+          NEXT_PUBLIC_SUPABASE_URL: https://supabase.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_ci_build_only

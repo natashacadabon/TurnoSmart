@@ -1,0 +1,100 @@
+/* Reglas del sidebar del dashboard (src/app/page.module.css), compartidas por todas las pantallas. */
+.sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.brand {
+  color: #0f172a;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.nav {
+  display: grid;
+  gap: 4px;
+}
+
+.nav a {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.nav a:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.navActive {
+  background: #eff6ff;
+  color: #2563eb !important;
+}
+
+.account {
+  margin-top: auto;
+  display: grid;
+  gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.accountInfo {
+  min-width: 0;
+}
+
+.accountActions {
+  display: grid;
+  gap: 8px;
+}
+
+.accountName {
+  color: #0f172a;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1040px) {
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Sidebar arriba: la cuenta pasa a una fila compacta. */
+  .account {
+    margin-top: 0;
+    padding-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .accountActions {
+    grid-auto-flow: column;
+  }
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    padding: 20px;
+  }
+}

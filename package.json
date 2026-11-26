@@ -8,14 +8,43 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "echo \"Pendiente: configurar frontend y backend\"",
-    "dev:frontend": "echo \"Pendiente: crear app Next.js en apps/frontend\"",
-    "dev:backend": "echo \"Pendiente: crear API Express en apps/backend\"",
-    "build": "echo \"Pendiente: configurar build del monorepo\"",
-    "test": "echo \"Pendiente: configurar tests\""
+    "dev": "npm run dev:frontend",
+    "dev:frontend": "npm run build:shared && npm run dev --workspace=apps/frontend",
+    "dev:backend": "npm run build:shared && npm run dev --workspace=apps/backend",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "build:render": "npm ci --include=dev --workspace=apps/backend --workspace=packages/shared && npm run prisma:generate --workspace=apps/backend && npm run build:shared && npm run build --workspace=apps/backend",
+    "start:render": "npm run start --workspace=apps/backend",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run build:shared && npm run typecheck --workspace=apps/frontend && npm run typecheck --workspace=apps/backend && npm run typecheck --workspace=packages/shared",
+    "build": "npm run build:shared && npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
+    "test": "npm run test:install && npm run test:backup && node --test infra/docker/dev.test.mjs && npm run build:shared && npm run test --workspaces --if-present",
+    "test:backup": "node --test scripts/database-backup.test.mjs",
+    "test:backup:integration": "node --test scripts/database-backup.integration.test.mjs",
+    "test:install": "node --test .husky/install.test.mjs",
+    "test:integration": "npm run build:shared && npm run test:integration --workspace=apps/backend",
+    "docker:dev": "node infra/docker/dev.mjs up",
+    "docker:down": "node infra/docker/dev.mjs down",
+    "docker:logs": "node infra/docker/dev.mjs logs",
+    "docker:reset": "node infra/docker/dev.mjs reset",
+    "docker:config": "node infra/docker/dev.mjs config",
+    "prepare": "node .husky/install.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "@eslint/js": "^9.36.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.4.5",
+    "eslint-config-prettier": "^10.0.2",
+    "globals": "^16.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.73.0"
   }
 }
-

@@ -1,240 +1,95 @@
 # TurnoSmart
 
-TurnoSmart es una plataforma SaaS para la gestion inteligente de turnos en pequenos y medianos negocios. Combina una agenda online con analisis de riesgo de no-show para ayudar a reducir ausencias sin aviso, cancelaciones tardias y huecos dificiles de cubrir.
+TurnoSmart es un proyecto académico de SaaS para negocios que atienden con turnos. El personal administra clientes, servicios y disponibilidad, opera la agenda y consulta el riesgo de inasistencia de cada turno. Los clientes pueden gestionar una reserva existente desde los enlaces de correo.
 
-El proyecto fue pensado para negocios con atencion por reserva, como peluquerias, centros de estetica, consultorios, estudios y servicios profesionales.
+## Estado del repositorio
 
-## Problema
+La descripción corresponde al código actual del repositorio. La activación y las pruebas en cada entorno publicado se registran por separado en el [backlog](docs/backlog.md).
 
-Los negocios que trabajan con turnos pierden tiempo e ingresos cuando los clientes no asisten, cancelan tarde o dejan espacios libres en la agenda. Las agendas tradicionales permiten registrar reservas, pero no aprovechan el historial de clientes para anticipar riesgos ni ayudar a tomar mejores decisiones operativas.
+| Área                 | Funcionalidad disponible en el código                                                                                                                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identidad y clientes | Inicio y cierre de sesión con Supabase Auth, onboarding del negocio, roles OWNER/ADMIN/STAFF, configuración de nombre y zona horaria, alta, edición, búsqueda y baja de clientes sin turnos.                                                                      |
+| Servicios y horarios | Catálogo con búsqueda, estados y paginación local; disponibilidad semanal visual con edición en modal y consulta de slots colapsable. Cada negocio tiene una agenda y una grilla de comienzos cada 15 minutos desde la apertura de cada franja.                   |
+| Agenda y turnos      | Vistas de día, semana y mes, alta, edición de notas, confirmación, cancelación, reprogramación, cierre, registro de ausencias e historial. La API vuelve a validar el horario dentro de la transacción.                                                           |
+| Riesgo               | Score heurístico persistido y explicación bajo demanda con Gemini cuando se configura su clave.                                                                                                                                                                   |
+| Notificaciones       | Campana fija en las pantallas privadas, lecturas por perfil y actualización automática de agenda con toasts. Correos transaccionales, hasta tres recordatorios configurables y enlaces para confirmar, cancelar o solicitar un cambio con aprobación del negocio. |
+| Operación            | Docker Compose local, checks de GitHub Actions, configuración de Vercel y Render y artefactos para un despliegue manual del backend en Azure. La API expone health, readiness y métricas en memoria.                                                              |
 
-## Propuesta de valor
+La instalación limpia de migraciones y las suites locales ya se verificaron; los resultados están en la [guía de pruebas](tests/README.md#validación-local-del-25-de-noviembre-de-2026). Queda por validar el recorrido completo en el entorno publicado con su base migrada, Resend y Supabase Cron. El [backlog](docs/backlog.md) detalla además la cobertura pendiente en CI, el endurecimiento de permisos de la Data API y las capacidades previstas fuera del alcance actual.
 
-TurnoSmart permite administrar turnos, clientes, servicios y recordatorios desde un unico lugar. Su diferencial es un score de riesgo de no-show por turno, calculado a partir de reglas explicables y complementado con recomendaciones generadas por IA.
+## Stack y estructura
 
-Con esta informacion, el negocio puede:
+| Directorio         | Responsabilidad                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `apps/frontend/`   | Next.js 16, React 19, Material UI, FullCalendar y pruebas Playwright.                                         |
+| `apps/backend/`    | Node.js 22, Express 5, Prisma 6.12, PostgreSQL, Supabase Auth, Gemini, correo y pruebas con Vitest/Supertest. |
+| `packages/shared/` | Tipos, esquemas Zod y códigos de error compartidos.                                                           |
+| `infra/`           | Docker Compose, guías de Vercel y Render, Bicep y empaquetado para Azure, y SQL de Supabase Cron.             |
+| `docs/`            | Arquitectura, contratos, operación, costos y backlog.                                                         |
 
-- identificar turnos con mayor probabilidad de ausencia;
-- reforzar recordatorios para clientes de riesgo;
-- priorizar confirmaciones antes de horarios criticos;
-- mejorar la ocupacion de la agenda;
-- reducir capacidad ociosa.
+## Desarrollo local con Docker
 
-## Usuarios objetivo
+Requiere Node.js 22.x (única versión soportada), npm y Docker Desktop con contenedores Linux. Las pruebas de backup incluidas en `npm test` requieren `pwsh` 7.4+ en PATH. Ver [validación de backups](docs/operations.md#backup). Ejecutar desde la raíz Git:
 
-- Negocios con atencion por turnos.
-- Personal administrativo que organiza agenda, clientes, servicios y recordatorios.
-- Clientes finales que necesitan reservar, cancelar o reprogramar de forma simple.
-
-## Funcionalidades principales
-
-### MVP
-
-- Autenticacion de usuarios.
-- Alta y configuracion de negocio.
-- Gestion de servicios.
-- Gestion de clientes.
-- Agenda diaria y semanal.
-- Creacion, reprogramacion y cancelacion de turnos.
-- Estados de turno: programado, confirmado, cancelado, completado y no-show.
-- Calculo de riesgo de no-show.
-- Visualizacion del riesgo en la agenda.
-- Recordatorios por email.
-- Historial basico de turnos y eventos.
-
-### Evoluciones futuras
-
-- Lista de espera para cubrir horarios liberados.
-- Sugerencias automaticas de clientes para ocupar huecos.
-- Recordatorios por WhatsApp.
-- Pagos o senas para confirmar turnos.
-- Dashboard avanzado de ocupacion, ausencias y cancelaciones.
-- Configuracion personalizada de umbrales de riesgo.
-
-## Stack tecnologico
-
-El proyecto se organiza como monorepo para separar frontend, backend y codigo compartido sin perder una estructura simple para el TP.
-
-### Frontend
-
-- Next.js
-- React
-- TypeScript
-- Material UI
-- CSS Modules
-- React Hook Form
-- Zod
-- TanStack Query
-- FullCalendar
-
-### Backend
-
-- Node.js
-- Express
-- TypeScript
-- Prisma ORM
-- Zod
-- API REST
-
-### Base de datos y autenticacion
-
-- PostgreSQL
-- Supabase
-- Supabase Auth
-
-### Inteligencia artificial
-
-- Gemini API
-
-La IA se usa como soporte explicativo y operativo. El score inicial de riesgo se basa en heuristicas auditables, y Gemini se utiliza para generar explicaciones y recomendaciones claras para el usuario.
-
-### Infraestructura
-
-- Docker
-- Docker Compose
-- GitHub Actions
-- Vercel para frontend
-- Azure App Service para backend
-- Azure Monitor / Application Insights para logs y monitoreo
-
-## Estructura del proyecto
-
-```text
-TurnoSmart/
-|-- apps/
-|   |-- frontend/        Aplicacion web Next.js
-|   `-- backend/         API REST Node.js + Express
-|-- packages/
-|   `-- shared/          Tipos y logica compartida
-|-- docs/                Documentacion funcional y tecnica
-|-- infra/               Docker, deploy y cloud
-|-- tests/               Pruebas de integracion y end-to-end
-|-- .env.example         Variables de entorno de referencia
-|-- .gitignore
-|-- package.json
-`-- README.md
+```sh
+npm ci
+npm run docker:dev
 ```
 
-## Arquitectura general
+Abrir `http://localhost:3000/login`. La cuenta de prueba es `admin@turnosmart.test`, con la contraseña local indicada en la [guía de infraestructura](infra/README.md) o la configurada con `TS_SEED_PASSWORD` al crear la cuenta. Docker levanta PostgreSQL y Supabase Auth locales, aplica las migraciones y carga los datos de prueba. Ambas apps corren en el host con recarga en desarrollo.
 
-```text
-Frontend
-Next.js + TypeScript + Material UI
-        |
-        | REST API
-        v
-Backend
-Node.js + Express + TypeScript
-        |
-        |-- Supabase PostgreSQL
-        |-- Supabase Auth
-        |-- Gemini API
-        |-- Email provider
+## Desarrollo con un proyecto de Supabase
+
+1. Ejecutar `npm ci` con Node.js 22 desde la raíz Git.
+2. Copiar [la plantilla raíz](.env.example) a `apps/backend/.env` y [la plantilla del frontend](apps/frontend/.env.example) a `apps/frontend/.env.local`. Usar el mismo proyecto Supabase en ambas apps.
+3. En el backend, completar `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `DATABASE_URL`, `DIRECT_URL` y `CORS_ORIGIN=http://localhost:3000`. Para Supabase Cloud, usar el pooler transaccional (6543, con `?pgbouncer=true`) para la API y conexión directa o pooler de sesión (5432) para migraciones. Codificar los caracteres especiales de la contraseña en las URLs.
+4. En el frontend, completar `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` con la URL y la clave pública del mismo proyecto. `next dev` usa la API en `http://localhost:4000`. Los builds requieren además los dos orígenes HTTPS públicos de la plantilla, incluso si uno está inactivo.
+5. Generar el cliente y aplicar las migraciones al entorno elegido:
+
+```sh
+npm run prisma:generate --workspace=apps/backend
+npm run prisma:migrate --workspace=apps/backend
 ```
 
-El frontend se despliega de forma independiente en Vercel. El backend expone una API REST desplegable en Azure App Service. Supabase centraliza la base de datos PostgreSQL y la autenticacion.
+6. Crear y confirmar un usuario desde Supabase Auth para completar el onboarding como OWNER. También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
+7. En terminales separadas, ejecutar `npm run dev:backend` y `npm run dev:frontend`. Ambos comandos compilan `packages/shared`.
 
-## Modelo de datos inicial
+Configurar `GEMINI_API_KEY` para habilitar las explicaciones. La [guía de operación](docs/operations.md#notificaciones-de-turnos) cubre los modos de correo, los enlaces firmados y el cron. Las claves privadas se configuran en el backend o en los almacenes de secretos del entorno.
 
-Entidades principales:
+| Ruta                                                     | Uso                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `/login`, `/onboarding`                                  | Acceso y alta inicial del negocio.                                              |
+| `/`, `/appointments/[id]`                                | Agenda y detalle de turno.                                                      |
+| `/customers`, `/services`, `/settings`, `/notifications` | Clientes, servicios y disponibilidad, configuración y centro de notificaciones. |
+| `/turno/gestionar`                                       | Página pública que requiere un enlace válido para operar sobre un turno.        |
+| API `/health`, `/ready`, `/metrics`                      | Estado del proceso, conectividad a PostgreSQL y métricas de la instancia.       |
 
-- `businesses`: negocios registrados en la plataforma.
-- `profiles`: usuarios asociados a un negocio.
-- `services`: servicios ofrecidos por el negocio.
-- `customers`: clientes finales.
-- `availability_rules`: reglas de disponibilidad horaria.
-- `appointments`: turnos agendados.
-- `appointment_events`: historial de cambios de cada turno.
-- `risk_scores`: resultado del analisis de riesgo de no-show.
-- `reminders`: recordatorios enviados.
+Si `/ready` devuelve 503, revisar la conexión de la API a PostgreSQL. Si el backend registra `P2021`, comprobar las migraciones. Si el navegador bloquea la API por CORS, comprobar el origen exacto en `CORS_ORIGIN`.
 
-## Riesgo de no-show
+## Pruebas y despliegue
 
-El score de riesgo se calcula con una primera version heuristica basada en:
+```sh
+npm run format:check
+npm run lint
+npm run typecheck
+npm test
+npm run test:config --workspace=apps/frontend
+```
 
-- historial de ausencias del cliente;
-- cancelaciones tardias;
-- anticipacion con la que se hizo la reserva;
-- dia y horario del turno;
-- primera visita del cliente;
-- cantidad de reprogramaciones recientes.
+GitHub Actions valida pushes a `dev` y `main` y PRs hacia ambas ramas. También valida el schema Prisma y compila las dos apps. Las pruebas de integración con PostgreSQL y las pruebas de navegador tienen comandos y requisitos propios. [Guía de pruebas](tests/README.md)
 
-Niveles previstos:
+Para configurar Preview o Production y comprobar el backend seleccionado, consultar [Vercel](infra/vercel/README.md) y [Render](infra/render/README.md). El procedimiento de Azure vive en su [guía de infraestructura](infra/azure/README.md).
 
-- Bajo: recordatorio estandar.
-- Medio: recordatorio anticipado y confirmacion sugerida.
-- Alto: recordatorio reforzado y preparacion de alternativa para cubrir el horario.
+## Documentación
 
-## Identidad visual
+- [Arquitectura](docs/architecture.md)
+- [Contratos generales de la API](docs/contracts.md) y [servicios, disponibilidad y slots](docs/api-services-availability.md)
+- [Operación y recorrido de demo](docs/operations.md)
+- [Notificaciones de turnos](docs/notifications-plan.md)
+- [Backlog](docs/backlog.md) y [costos](docs/costs.md)
+- [Backend](apps/backend/README.md), [frontend](apps/frontend/README.md) y [contratos compartidos](packages/shared/README.md)
+- [Registro de decisiones asistidas por IA](AI-DECISIONS.md) y [auditoría histórica](docs/repository-audit.md)
 
-La identidad visual propuesta es SaaS profesional, moderna y limpia, apta para rubros como estetica, salud, consultoria y servicios profesionales.
+## Contribución
 
-| Uso | Color | Hex |
-| --- | --- | --- |
-| Primario | Indigo | `#4F46E5` |
-| Primario hover | Indigo oscuro | `#4338CA` |
-| Secundario / IA | Violeta | `#8B5CF6` |
-| Exito / confirmado | Verde | `#22C55E` |
-| Advertencia / riesgo medio | Ambar | `#F59E0B` |
-| Error / riesgo alto | Rojo | `#EF4444` |
-| Fondo | Gris muy claro | `#F8FAFC` |
-| Cards | Blanco | `#FFFFFF` |
-| Texto principal | Slate | `#0F172A` |
-| Texto secundario | Slate gris | `#64748B` |
-| Bordes | Gris | `#E2E8F0` |
-
-## Plan de desarrollo
-
-El piloto se planifica en 8 semanas.
-
-### Sprint 0
-
-Setup tecnico, repositorio, CI basico, entornos, Supabase, arquitectura, diseno de datos y convenciones.
-
-### Sprint 1
-
-Autenticacion, onboarding de negocio, layout principal, perfiles y configuracion inicial.
-
-### Sprint 2
-
-CRUD de servicios, clientes y reglas de disponibilidad.
-
-### Sprint 3
-
-Agenda visual, creacion, reprogramacion, cancelacion de turnos y registro de eventos.
-
-### Sprint 4
-
-Calculo de riesgo de no-show, persistencia del score y visualizacion clara en la agenda.
-
-### Sprint 5
-
-Recordatorios por email segun riesgo, plantillas basicas y trazabilidad de envios.
-
-### Sprint 6
-
-Integracion con Gemini para explicacion del riesgo y recomendaciones de accion.
-
-### Sprint 7
-
-Pulido de UX, manejo de errores, metricas piloto, pruebas end-to-end, documentacion y despliegue.
-
-## Testing
-
-- Tests unitarios para calculo de riesgo, validaciones de turnos y reglas de estado.
-- Tests de integracion para endpoints principales de la API.
-- Tests end-to-end para flujos criticos: registro, creacion de servicio, alta de cliente, reserva de turno, cancelacion, envio de recordatorio y visualizacion de riesgo.
-- Pruebas manuales con escenarios de peluqueria, consultorio y servicio profesional.
-
-## Criterios de aceptacion del piloto
-
-- Un negocio puede operar una agenda real de punta a punta.
-- El personal puede crear servicios, clientes y turnos.
-- Cada turno muestra un nivel de riesgo de no-show.
-- Los turnos de riesgo medio o alto tienen recomendaciones accionables.
-- El sistema permite enviar recordatorios por email.
-- El frontend y el backend pueden desplegarse de forma independiente.
-
-## Estado del proyecto
-
-Proyecto en etapa de planificacion y preparacion tecnica para el desarrollo del piloto.
+Usar ramas `feat/<tema>`, `fix/<tema>` o `chore/<tema>` desde `dev` y abrir PR hacia `dev`. Integrar a `main` mediante PR para las entregas. Usar Conventional Commits. Husky ejecuta lint-staged en pre-commit, Commitlint en commit-msg y typecheck en pre-push.

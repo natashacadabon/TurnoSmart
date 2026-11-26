@@ -1,0 +1,40 @@
+# Solo construye/verifica un ZIP local. No es una imagen para desplegar ni publicar.
+FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates zip unzip \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /source
+ENV HUSKY=0
+# Allowlist: no contexto completo, .env, frontend, tests ni migraciones.
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json apps/backend/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN npm ci --include=dev --ignore-scripts --workspace=apps/backend --workspace=packages/shared
+COPY apps/backend/src/ apps/backend/src/
+COPY apps/backend/tsconfig*.json apps/backend/
+COPY apps/backend/scripts/ensure-prisma-client.mjs apps/backend/scripts/
+COPY apps/backend/prisma/schema.prisma apps/backend/prisma/schema.prisma
+COPY packages/shared/src/ packages/shared/src/
+COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
+# Variables ficticias, solo validacion/generacion: nunca se conecta ni migra.
+RUN DATABASE_URL=postgresql://build:build@127.0.0.1:1/build DIRECT_URL=postgresql://build:build@127.0.0.1:1/build \
+    ./node_modules/.bin/prisma validate --schema apps/backend/prisma/schema.prisma \
+    && ./node_modules/.bin/prisma generate --schema apps/backend/prisma/schema.prisma \
+    && npm run build:shared && npm run build --workspace=apps/backend
+
+FROM build AS production
+WORKDIR /production
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json apps/backend/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN npm ci --omit=dev --omit=peer --ignore-scripts --workspace=apps/backend --workspace=packages/shared
+COPY --from=build /source/node_modules/.prisma/client/ node_modules/.prisma/client/
+COPY --from=build /source/apps/backend/dist/ /artifact/dist/
+COPY --from=build /source/packages/shared/dist/ /artifact/node_modules/@turnosmart/shared/dist/
+COPY infra/azure/prepare-artifact.mjs infra/azure/verify-artifact.mjs /checks/
+RUN node /checks/prepare-artifact.mjs /source /production /artifact \
+    && cd /artifact && zip -q -r /backend.zip . \
+    && mkdir /extracted && unzip -q /backend.zip -d /extracted \
+    && node /checks/verify-artifact.mjs /extracted
+
+FROM scratch AS export
+COPY --from=production /backend.zip /backend.zip

@@ -12,6 +12,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!/.env.dev.example
 
 # Logs
 *.log
@@ -30,4 +31,26 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 prisma/dev.db
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+*.pem
+*.key
 
+
+.local/
+
+# Database backups and recovery staging (never migration SQL).
+**/backups/
+*.dump
+*.dump.*
+*.pgdump
+*.backup
+*.backup.json
+*.meta.enc
+*.backup-key
+.turnosmart-backup-*/

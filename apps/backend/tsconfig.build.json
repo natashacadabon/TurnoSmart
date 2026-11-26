@@ -1,0 +1,8 @@
+{
+  // Build de producción: sólo src, emitido en dist/ (dist/index.js).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

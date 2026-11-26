@@ -1,0 +1,98 @@
+/* Misma grilla y contenido que el dashboard de src/app/page.module.css. */
+.shell {
+  --sidebar-width: 248px;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  background: #f6f8fb;
+}
+
+.content {
+  width: 100%;
+  max-width: 1180px;
+  padding: 32px;
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+
+.content:has(> [data-agenda-dashboard]) {
+  max-width: 1540px;
+  padding: 20px clamp(14px, 2vw, 28px);
+}
+
+.loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f6f8fb;
+}
+
+.workspace {
+  min-width: 0;
+  padding-top: 48px;
+}
+
+.globalHeader {
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  min-height: 48px;
+  padding: 4px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  z-index: 1100;
+}
+
+@media (max-width: 1040px) {
+  .globalHeader {
+    left: 0;
+  }
+  .shell {
+    padding-top: 48px;
+  }
+  .workspace {
+    padding-top: 0;
+  }
+  .shell {
+    --sidebar-width: 248px;
+    grid-template-columns: 1fr;
+    /* El sidebar mide lo justo; el alto sobrante es del contenido, aunque la página sea corta. */
+    grid-template-rows: auto 1fr;
+  }
+
+  .content {
+    max-width: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .content {
+    padding: 20px;
+  }
+}
+
+/* Configuración usa el ancho disponible sin alterar la navegación global. */
+.content:has(> [data-settings-page]) {
+  max-width: 1540px;
+  padding: 20px;
+}
+
+@media (min-width: 1041px) {
+  .content:has(> [data-settings-page]) {
+    padding-block: 12px;
+  }
+
+  .content > [data-settings-page] {
+    gap: 8px;
+  }
+}
+
+.content:has(> [data-services-page]) {
+  max-width: none;
+  padding: 20px;
+}
