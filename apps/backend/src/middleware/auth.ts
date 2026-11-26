@@ -35,6 +35,10 @@ export function authenticate(verifier: TokenVerifier): RequestHandler {
 export function requireProfile(identity: IdentityRepository): RequestHandler {
   return async (req, _res, next) => {
     if (!req.user) throw new AppError('UNAUTHENTICATED', 'Falta el token de acceso');
+    const platformAdmin = await identity.findPlatformAdmin?.(req.user.id);
+    if (platformAdmin) {
+      throw new AppError('FORBIDDEN', 'ADMIN solo puede operar desde el panel global');
+    }
     const found = await identity.findProfileWithBusiness(req.user.id);
     if (!found)
       throw new AppError('PROFILE_REQUIRED', 'La cuenta todavía no tiene negocio asociado');
@@ -44,6 +48,7 @@ export function requireProfile(identity: IdentityRepository): RequestHandler {
       businessId: found.business.id,
       timezone: found.business.timezone,
       role: found.profile.role,
+      platformAdmin: false,
     };
     next();
   };
@@ -51,7 +56,8 @@ export function requireProfile(identity: IdentityRepository): RequestHandler {
 
 export function requirePermission(permission: Permission): RequestHandler {
   return (req, _res, next) => {
-    if (!req.auth) throw new AppError('UNAUTHENTICATED', 'Falta el token de acceso');
+    if (!req.auth || req.auth.platformAdmin)
+      throw new AppError('FORBIDDEN', 'ADMIN no tiene permisos operativos de negocio');
     if (!can(req.auth.role, permission))
       throw new AppError('FORBIDDEN', 'No tiene permisos para esta operación');
     next();

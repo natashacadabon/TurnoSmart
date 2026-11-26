@@ -30,9 +30,10 @@ function toMe(
   user: { id: string; email: string | null },
   found: ProfileWithBusiness | null,
 ): MeResponse {
-  if (!found) return { onboarded: false, user };
+  if (!found) return { onboarded: false, platformAdmin: false, user };
   return {
     onboarded: true,
+    platformAdmin: false,
     user,
     profile: { id: found.profile.id, fullName: found.profile.fullName, role: found.profile.role },
     business: toBusinessDto(found.business),
@@ -47,11 +48,28 @@ export function identityRouter(deps: {
   const auth = authenticate(deps.verifier);
 
   router.get('/me', auth, async (req, res) => {
+    const admin = await deps.identity.findPlatformAdmin?.(req.user!.id);
+    if (admin) {
+      res.json({
+        onboarded: false,
+        platformAdmin: true,
+        user: req.user!,
+        profile: { id: admin.id, fullName: admin.fullName, role: admin.role },
+        business: null,
+      });
+      return;
+    }
     const found = await deps.identity.findProfileWithBusiness(req.user!.id);
     res.json(toMe(req.user!, found));
   });
 
   router.post('/onboarding', auth, async (req, res) => {
+    if (await deps.identity.findPlatformAdmin?.(req.user!.id)) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Las cuentas ADMIN no pueden crear un negocio desde onboarding',
+      );
+    }
     const input = parse(onboardingSchema, req.body);
     if (!req.user!.email) {
       throw new AppError('VALIDATION_ERROR', 'La cuenta de Auth no tiene email');

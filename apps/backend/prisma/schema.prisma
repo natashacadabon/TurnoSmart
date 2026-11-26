@@ -116,13 +116,13 @@ model Business {
 model Profile {
   // Same UUID as auth.users.id. Creation is handled by trusted backend code.
   id                String             @id @db.Uuid
-  businessId        String             @map("business_id") @db.Uuid
+  businessId        String?            @map("business_id") @db.Uuid
   email             String
   fullName          String?            @map("full_name")
-  role              ProfileRole        @default(STAFF)
+  role              ProfileRole        @default(OWNER)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
-  business          Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business          Business?          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   notificationReads NotificationRead[]
 
   @@unique([id, businessId])
@@ -316,7 +316,7 @@ model NotificationRead {
   profileId      String       @map("profile_id") @db.Uuid
   readAt         DateTime     @default(now()) @map("read_at") @db.Timestamptz(3)
   notification   Notification @relation(fields: [notificationId, businessId], references: [id, businessId], onDelete: Cascade)
-  profile        Profile      @relation(fields: [profileId, businessId], references: [id, businessId], onDelete: Cascade)
+  profile        Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@id([notificationId, profileId])
   @@index([businessId, profileId, notificationId], map: "notification_reads_profile_idx")

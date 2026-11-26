@@ -173,13 +173,13 @@ describe('API de turnos - Fase 2', () => {
     expect(
       (await request(second.ctx.app).get(`/api/appointments/${id}`).set(second.auth)).status,
     ).toBe(404);
-    const staff = second.ctx.verifier.addUser();
-    second.ctx.identity.addMember(staff.id, second.businessId, 'STAFF');
+    const owner = second.ctx.verifier.addUser();
+    second.ctx.identity.addMember(owner.id, second.businessId, 'OWNER');
     expect(
       (
         await request(second.ctx.app)
           .post('/api/appointments')
-          .set({ Authorization: `Bearer ${staff.token}` })
+          .set({ Authorization: `Bearer ${owner.token}` })
           .send({
             customerId: second.customer.id,
             serviceId: second.service.id,
