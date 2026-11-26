@@ -93,6 +93,19 @@ reutilizando el build actual. Repetir el preflight contra la API y comprobar
 
 ### Migraciones y correo
 
+La API verifica el destino antes de crear Prisma. En ambos servicios cargar
+`EXPECTED_DEV_SUPABASE` y `EXPECTED_PRODUCTION_SUPABASE` con las URLs oficiales
+canonicas de los dos proyectos. Render proporciona `RENDER=true`, la rama y
+`RENDER_GIT_COMMIT`: dev selecciona Dev y main selecciona Production. Otra rama,
+proyectos iguales, DSN cruzadas o parametros que redirijan la conexion bloquean
+el arranque. `/health.version` prioriza el SHA real de Render sobre RELEASE_SHA.
+No cambiar estas variables automaticas ni copiar secretos entre servicios.
+
+Fuera de Render, para Cloud se exige `DEPLOY_TARGET=preview` o `production`,
+ademas de las mismas dos URLs esperadas. Esto incluye el backend Azure del
+checkpoint: configurar esas App Settings con target preview antes de iniciarlo.
+El camino Docker/loopback sigue funcionando sin configuracion cloud.
+
 Antes de publicar una versión que cambie el esquema, aplicar las migraciones desde un entorno con `DIRECT_URL` que apunte a la base del servicio. El Blueprint configura el build y el proceso de la API. El procesador de correo se activa desde Environment con la configuración de [notificaciones](../../docs/operations.md#notificaciones-de-turnos). Para envíos durante la suspensión de Render, el cron necesita el origen HTTPS de este servicio y el secreto compartido en Supabase Vault.
 
 ### CORS automático de Preview en Render Dev

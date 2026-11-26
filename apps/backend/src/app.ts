@@ -101,7 +101,7 @@ export function createApp(deps: AppDeps): Express {
     res.json({
       status: 'ok',
       service: 'turnosmart-backend',
-      version: process.env.RELEASE_SHA ?? 'dev',
+      version: process.env.RENDER_GIT_COMMIT ?? process.env.RELEASE_SHA ?? 'dev',
     });
   });
 

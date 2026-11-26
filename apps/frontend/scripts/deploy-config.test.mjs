@@ -16,6 +16,7 @@ import {
   verifyOutput,
   verifyStandaloneOutput,
   verifyPublished,
+  verifyProductionBackend,
 } from './deploy-config.mjs';
 import { assignPreviewAlias } from './preview-alias.mjs';
 
@@ -102,6 +103,7 @@ test('Production manual exige main y Render Dev conserva su configuración', () 
     'deploy-config.mjs output',
     'deploy --prebuilt',
     'deploy-config.mjs published',
+    'deploy-config.mjs backend',
     'promote "$DEPLOYMENT_URL"',
   ];
   let previous = -1;
@@ -618,8 +620,10 @@ for (const target of ['production', 'preview'])
         target === 'preview' ? env.NEXT_PUBLIC_API_URL_RENDER : 'https://dev-api.example',
       EXPECTED_DEV_SUPABASE:
         target === 'preview' ? env.NEXT_PUBLIC_SUPABASE_URL : 'https://dev-auth.example',
-      EXPECTED_PRODUCTION_API: env.NEXT_PUBLIC_API_URL_RENDER,
-      EXPECTED_PRODUCTION_SUPABASE: env.NEXT_PUBLIC_SUPABASE_URL,
+      EXPECTED_PRODUCTION_API:
+        target === 'production' ? env.NEXT_PUBLIC_API_URL_RENDER : 'https://prod-api.example',
+      EXPECTED_PRODUCTION_SUPABASE:
+        target === 'production' ? env.NEXT_PUBLIC_SUPABASE_URL : 'https://prod-auth.example',
     };
     assert.equal(prepareVercel(root, deployment), join('.vercel', filename));
     for (const path of ['.vercel', 'apps/frontend/.vercel']) {
@@ -648,6 +652,33 @@ for (const target of ['production', 'preview'])
       CHECKPOINT_AZURE_URL: env.NEXT_PUBLIC_API_URL_AZURE,
     };
     if (target === 'preview') {
+      for (const overrides of [
+        { EXPECTED_PRODUCTION_API: '' },
+        { EXPECTED_PRODUCTION_SUPABASE: '' },
+        { EXPECTED_PRODUCTION_API: deployment.EXPECTED_DEV_API },
+        { EXPECTED_PRODUCTION_SUPABASE: deployment.EXPECTED_DEV_SUPABASE },
+        { EXPECTED_PRODUCTION_API: 'https://127.0.0.1' },
+      ])
+        assert.throws(() => prepareVercel(root, { ...deployment, ...overrides }));
+      for (const checkpointOptions of [
+        { CHECKPOINT_AZURE_URL: deployment.EXPECTED_PRODUCTION_API },
+        { CHECKPOINT_RENDER_URL: deployment.EXPECTED_PRODUCTION_API },
+      ])
+        assert.throws(
+          () => prepareVercel(root, { ...checkpoint, ...checkpointOptions }),
+          /Production/,
+        );
+      for (const name of ['NEXT_PUBLIC_API_URL_RENDER', 'NEXT_PUBLIC_SUPABASE_URL']) {
+        const value =
+          name === 'NEXT_PUBLIC_API_URL_RENDER'
+            ? deployment.EXPECTED_PRODUCTION_API
+            : deployment.EXPECTED_PRODUCTION_SUPABASE;
+        write(`.vercel/${filename}`, pulled.replace(env[name], value));
+        assert.throws(() => prepareVercel(root, deployment), /Production/);
+        if (name === 'NEXT_PUBLIC_SUPABASE_URL')
+          assert.throws(() => prepareVercel(root, checkpoint), /Production|Dev/);
+      }
+      write(`.vercel/${filename}`, pulled);
       assert.throws(
         () => prepareVercel(root, { ...deployment, EXPECTED_DEV_API: '' }),
         /Faltan los origenes Dev/,
@@ -707,6 +738,83 @@ for (const target of ['production', 'preview'])
     write('.vercel/project.json', { ...project, projectId: 'wrong' });
     assert.throws(() => prepareVercel(root, deployment), /Proyecto/);
   });
+
+test('Production sólo promueve con backend operativo, sin redirecciones y del SHA candidato', async () => {
+  const sha = 'a'.repeat(40);
+  const config = {
+    DEPLOY_TARGET: 'production',
+    EXPECTED_DEV_API: 'https://dev.example',
+    EXPECTED_DEV_SUPABASE: 'https://dev-auth.example',
+    EXPECTED_PRODUCTION_API: 'https://prod.example',
+    EXPECTED_PRODUCTION_SUPABASE: 'https://prod-auth.example',
+  };
+  const success = async (url, options) => {
+    assert.equal(url.origin, config.EXPECTED_PRODUCTION_API);
+    assert.equal(options.redirect, 'error');
+    return Response.json(
+      url.pathname === '/health'
+        ? { status: 'ok', service: 'turnosmart-backend', version: sha }
+        : { status: 'ready' },
+    );
+  };
+  await verifyProductionBackend(config, sha, success);
+  for (const response of [
+    { status: 'ok', service: 'turnosmart-backend', version: 'b'.repeat(40) },
+    { status: 'ok', service: 'other', version: sha },
+    {},
+  ])
+    await assert.rejects(
+      verifyProductionBackend(config, sha, async () => Response.json(response)),
+      /SHA candidato/,
+    );
+  for (const status of [301, 401, 404, 500, 503])
+    await assert.rejects(
+      verifyProductionBackend(config, sha, async () => new Response(null, { status })),
+      /no operativo/,
+    );
+  await assert.rejects(
+    verifyProductionBackend(config, sha, async () => {
+      throw new Error('secret diagnostic');
+    }),
+    (error) => !error.message.includes('secret diagnostic'),
+  );
+  await assert.rejects(
+    verifyProductionBackend(config, sha, async () => new Response('not JSON')),
+    /no operativo/,
+  );
+  await assert.rejects(
+    verifyProductionBackend(config, sha, (url, opts) =>
+      url.pathname === '/ready' ? Response.json({ status: 'unavailable' }) : success(url, opts),
+    ),
+    /no preparado/,
+  );
+  await assert.rejects(
+    verifyProductionBackend(config, sha, (url, opts) =>
+      url.pathname === '/ready' ? new Response(null, { status: 503 }) : success(url, opts),
+    ),
+    /no operativo/,
+  );
+  await assert.rejects(verifyProductionBackend(config, 'dev', success), /SHA candidato/);
+  await assert.rejects(
+    verifyProductionBackend({ ...config, DEPLOY_TARGET: 'preview' }, sha, success),
+    /requiere Production/,
+  );
+  const workflow = yaml.load(
+    readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'),
+  );
+  const steps = workflow.jobs.deploy.steps;
+  const check = steps.find((s) => s.name === 'Verify Production backend before promotion');
+  assert.equal(check.if, "env.DEPLOY_TARGET == 'production'");
+  assert.equal(check.env.EXPECTED_PRODUCTION_API, '${{ vars.EXPECTED_PRODUCTION_API }}');
+  assert.equal(
+    workflow.jobs.deploy.environment,
+    "vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}",
+  );
+  assert(
+    steps.indexOf(check) <
+      steps.findIndex((s) => s.name === 'Check current Production branch before promotion'),
+  );
+});
 
 test('Artefacto y bundle publicado deben coincidir byte por byte', async (t) => {
   const { root, write } = fixture(t);

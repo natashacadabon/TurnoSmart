@@ -162,6 +162,15 @@ jobs:
           VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
         run: node apps/frontend/scripts/deploy-config.mjs published
 
+      - name: Verify Production backend before promotion
+        if: env.DEPLOY_TARGET == 'production'
+        env:
+          EXPECTED_DEV_API: ${{ vars.EXPECTED_DEV_API }}
+          EXPECTED_DEV_SUPABASE: ${{ vars.EXPECTED_DEV_SUPABASE }}
+          EXPECTED_PRODUCTION_API: ${{ vars.EXPECTED_PRODUCTION_API }}
+          EXPECTED_PRODUCTION_SUPABASE: ${{ vars.EXPECTED_PRODUCTION_SUPABASE }}
+        run: node apps/frontend/scripts/deploy-config.mjs backend
+
       - name: Check current Production branch before promotion
         if: env.DEPLOY_TARGET == 'production'
         uses: actions/github-script@v8

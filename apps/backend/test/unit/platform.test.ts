@@ -5,6 +5,16 @@ import { vercelPreviewCors } from '../../src/lib/vercel-preview-cors.js';
 import { buildTestApp } from '../fakes.js';
 
 describe('plataforma', () => {
+  it('/health prioriza el SHA real del proveedor Render', async () => {
+    vi.stubEnv('RENDER_GIT_COMMIT', 'a'.repeat(40));
+    vi.stubEnv('RELEASE_SHA', 'b'.repeat(40));
+    try {
+      const { app } = buildTestApp();
+      expect((await request(app).get('/health')).body.version).toBe('a'.repeat(40));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it('/health responde sin autenticación', async () => {
     const { app } = buildTestApp();
     const res = await request(app).get('/health');

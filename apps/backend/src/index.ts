@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
+import { assertSupabaseTarget } from './config/supabase-target.js';
 import { logger } from './lib/logger.js';
 import { SupabaseTokenVerifier } from './lib/supabase-verifier.js';
 import { vercelPreviewCors } from './lib/vercel-preview-cors.js';
@@ -26,6 +27,7 @@ import {
 } from './modules/notifications/email-provider.js';
 
 const env = loadEnv();
+assertSupabaseTarget(process.env);
 const prisma = new PrismaClient();
 const emailDispatcher =
   env.EMAIL_PROVIDER === 'disabled'

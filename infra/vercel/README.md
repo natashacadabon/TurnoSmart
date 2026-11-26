@@ -153,6 +153,14 @@ sigue su propio workflow.
 
 ## Activacion de CD y rollback
 
+Antes de desplegar estos controles, definir las cuatro variables publicas
+`EXPECTED_DEV_API`, `EXPECTED_DEV_SUPABASE`, `EXPECTED_PRODUCTION_API` y
+`EXPECTED_PRODUCTION_SUPABASE` en el repositorio GitHub, o con valores coherentes
+en **ambos** environments. Preview y el checkpoint tambien necesitan conocer los
+origenes Production para rechazarlos. Los origenes deben ser HTTPS canonicos,
+sin slash final, y distintos entre Dev y Production. No son secretos ni deben
+contener claves. Revisar overrides de environments antes de activar el cambio.
+
 La arquitectura utiliza un repositorio con `dev` como rama predeterminada y un
 unico proyecto Vercel: `dev` publica Preview y `main` publica Production. Cada
 entorno tiene su propio servicio Render y proyecto Supabase. Publicar Production
@@ -211,7 +219,11 @@ no requiere cambiar la rama predeterminada a `main`.
    El checkpoint Azure permanece separado como Preview desde `dev` y no
    requiere esa variable Production. Alinear Vercel y restringir el environment
    Production de GitHub a `main`. El dispatch requiere CI de push exitosa
-   para el SHA exacto. Si falta el deployment inicial, aplicar primero esa
+   para el SHA exacto. Antes de promover, consulta `/health` y `/ready` de la API
+   Production esperada sin seguir redirects; exige servicio correcto, SHA completo
+   igual al candidato y estado ready. Un fallo, timeout o SHA anterior bloquea
+   la promocion. El health tiene hasta 90 s para un cold start y ready hasta 15 s.
+   Despues vuelve a comprobar la rama vigente. Si falta el deployment inicial, aplicar primero esa
    configuracion y hacer el bootstrap manual desde `main`.
 5. Habilitar `VERCEL_CD_ENABLED=true` como variable del repositorio. Para
    validar el cambio, comprobar una PR interna en borrador, una externa,

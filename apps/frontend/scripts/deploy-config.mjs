@@ -11,7 +11,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseEnv } from 'node:util';
-import { validatePublicEnv } from './public-env.mjs';
+import { validatePublicEnv, validatePublicOrigin } from './public-env.mjs';
 
 const publicNames = [
   'NEXT_PUBLIC_USE_AZURE',
@@ -154,6 +154,31 @@ export async function assertCurrentRevision(github, context) {
   assert(data.object.sha === context.sha, 'Despliegue obsoleto: la rama cambio durante CI.');
 }
 
+function expectedOrigins(env) {
+  assert(env.EXPECTED_DEV_API && env.EXPECTED_DEV_SUPABASE, 'Faltan los origenes Dev esperados');
+  assert(
+    env.EXPECTED_PRODUCTION_API && env.EXPECTED_PRODUCTION_SUPABASE,
+    'Faltan los origenes Production esperados',
+  );
+  for (const name of [
+    'EXPECTED_DEV_API',
+    'EXPECTED_DEV_SUPABASE',
+    'EXPECTED_PRODUCTION_API',
+    'EXPECTED_PRODUCTION_SUPABASE',
+  ]) {
+    assert.equal(
+      validatePublicOrigin(env[name], name),
+      env[name],
+      'Los origenes esperados deben ser canonicos',
+    );
+  }
+  assert(
+    env.EXPECTED_DEV_API !== env.EXPECTED_PRODUCTION_API &&
+      env.EXPECTED_DEV_SUPABASE !== env.EXPECTED_PRODUCTION_SUPABASE,
+    'Production no puede usar destinos de Dev; Preview no puede usar destinos Production',
+  );
+}
+
 export function prepareVercel(root, env) {
   const target = env.DEPLOY_TARGET;
   assert(target === 'preview' || target === 'production', 'Entorno Vercel invalido');
@@ -188,36 +213,33 @@ export function prepareVercel(root, env) {
     );
   }
   validatePublicEnv(values);
-  if (!checkpoint) {
-    assert(env.EXPECTED_DEV_API && env.EXPECTED_DEV_SUPABASE, 'Faltan los origenes Dev esperados');
-    const apiOrigin = new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin;
-    const supabaseOrigin = new URL(values.NEXT_PUBLIC_SUPABASE_URL).origin;
-    if (target === 'production') {
-      assert(
-        env.EXPECTED_PRODUCTION_API && env.EXPECTED_PRODUCTION_SUPABASE,
-        'Faltan los origenes Production esperados',
-      );
-      assert(
-        [env.EXPECTED_DEV_API, env.EXPECTED_DEV_SUPABASE].every(
-          (value) => URL.canParse(value) && new URL(value).origin === value,
-        ),
-        'Los origenes Dev esperados deben ser canonicos',
-      );
-      assert(
-        apiOrigin !== env.EXPECTED_DEV_API && supabaseOrigin !== env.EXPECTED_DEV_SUPABASE,
-        'Production no puede usar Render o Supabase de Dev',
-      );
-      assert(
-        apiOrigin === env.EXPECTED_PRODUCTION_API &&
-          supabaseOrigin === env.EXPECTED_PRODUCTION_SUPABASE,
-        'Production requiere los origenes Render y Supabase esperados',
-      );
-    } else {
-      assert(
-        apiOrigin === env.EXPECTED_DEV_API && supabaseOrigin === env.EXPECTED_DEV_SUPABASE,
-        'Preview requiere los origenes Render y Supabase de Dev',
-      );
-    }
+  expectedOrigins(env);
+  const apiOrigin = new URL(values.NEXT_PUBLIC_API_URL_RENDER).origin;
+  const supabaseOrigin = new URL(values.NEXT_PUBLIC_SUPABASE_URL).origin;
+  if (target === 'production') {
+    assert(
+      apiOrigin !== env.EXPECTED_DEV_API && supabaseOrigin !== env.EXPECTED_DEV_SUPABASE,
+      'Production no puede usar Render o Supabase de Dev',
+    );
+    assert(
+      apiOrigin === env.EXPECTED_PRODUCTION_API &&
+        supabaseOrigin === env.EXPECTED_PRODUCTION_SUPABASE,
+      'Production requiere los origenes Render y Supabase esperados',
+    );
+  } else {
+    const production = new Set([env.EXPECTED_PRODUCTION_API, env.EXPECTED_PRODUCTION_SUPABASE]);
+    assert(
+      [
+        values.NEXT_PUBLIC_API_URL_RENDER,
+        values.NEXT_PUBLIC_API_URL_AZURE,
+        values.NEXT_PUBLIC_SUPABASE_URL,
+      ].every((value) => !production.has(new URL(value).origin)),
+      'Preview y checkpoint no pueden usar destinos Production',
+    );
+    assert(
+      apiOrigin === env.EXPECTED_DEV_API && supabaseOrigin === env.EXPECTED_DEV_SUPABASE,
+      'Preview requiere los origenes Render y Supabase de Dev',
+    );
   }
   const contents = publicNames
     .map((name) => {
@@ -231,6 +253,33 @@ export function prepareVercel(root, env) {
     writeFileSync(join(root, dir, filename), `${contents}\n`, { mode: 0o600 });
   }
   return join('.vercel', filename);
+}
+
+/** Sólo GET a los endpoints existentes; no sigue redirects ni registra sus cuerpos. */
+export async function verifyProductionBackend(env, sha, request = fetch) {
+  assert.equal(env.DEPLOY_TARGET, 'production', 'La comprobacion de backend requiere Production');
+  expectedOrigins(env);
+  assert(/^[a-f0-9]{40}$/.test(sha ?? ''), 'Falta el SHA candidato completo');
+  async function get(path, timeout) {
+    try {
+      const response = await request(new URL(path, env.EXPECTED_PRODUCTION_API), {
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeout),
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      assert.equal(response.status, 200);
+      return await response.json();
+    } catch {
+      throw new Error('Backend Production no operativo: ' + path);
+    }
+  }
+  const health = await get('/health', 90000);
+  assert(
+    health?.status === 'ok' && health?.service === 'turnosmart-backend' && health?.version === sha,
+    'El backend Production no coincide con el SHA candidato',
+  );
+  const ready = await get('/ready', 15000);
+  assert.equal(ready?.status, 'ready', 'Backend Production no preparado');
 }
 
 function javascriptFiles(dir, prefix = '') {
@@ -371,5 +420,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       fetch,
       process.env.VERCEL_AUTOMATION_BYPASS,
     );
+  else if (command === 'backend')
+    await verifyProductionBackend(process.env, process.env.GITHUB_SHA);
   else throw new Error('Comando de verificacion desconocido');
 }
