@@ -1,0 +1,111 @@
+name: Migraciones de base de datos
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Base de datos autorizada
+        type: choice
+        options: [dev, production]
+        default: dev
+        required: true
+      operation:
+        description: Consultar estado o aplicar migraciones existentes
+        type: choice
+        options: [status, deploy]
+        default: status
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Validar selección sin credenciales de base
+        env:
+          MIGRATION_ENVIRONMENT: ${{ inputs.environment }}
+          MIGRATION_OPERATION: ${{ inputs.operation }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          case "$MIGRATION_ENVIRONMENT:$GITHUB_REF" in
+            dev:refs/heads/dev|production:refs/heads/main) ;;
+            *) echo 'Entorno/rama no autorizado: Dev exige dev y Production exige main.'; exit 1 ;;
+          esac
+          case "$MIGRATION_OPERATION" in status|deploy) ;; *) exit 1 ;; esac
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Exigir CI de Production antes de solicitar acceso a la base
+        if: inputs.environment == 'production' && inputs.operation == 'deploy'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { assertSuccessfulCi } = await import(`${process.env.GITHUB_WORKSPACE}/apps/frontend/scripts/deploy-config.mjs`);
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'ci.yml', head_sha: context.sha, event: 'push', per_page: 100
+            });
+            assertSuccessfulCi(data.workflow_runs, context.sha);
+      - name: Registrar preflight
+        if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          OPERATION: ${{ inputs.operation }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          case "$ENVIRONMENT" in dev|production) ;; *) ENVIRONMENT=invalid ;; esac
+          case "$OPERATION" in status|deploy) ;; *) OPERATION=invalid ;; esac
+          printf 'Preflight · Entorno: %s · SHA: %s · Operación: %s · Resultado: %s\n' "$ENVIRONMENT" "$GITHUB_SHA" "$OPERATION" "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+
+  migrate:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    environment:
+      name: database-${{ inputs.environment }}
+      deployment: false
+    concurrency:
+      group: database-migrate-${{ inputs.environment }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar desde lockfile sin credenciales de base
+        run: npm ci --include=dev --workspace=apps/backend --workspace=packages/shared
+      - name: Consultar o aplicar y verificar migraciones
+        id: migration
+        env:
+          MIGRATION_ENVIRONMENT: ${{ inputs.environment }}
+          MIGRATION_OPERATION: ${{ inputs.operation }}
+          DEPLOY_TARGET: ${{ inputs.environment == 'production' && 'production' || 'preview' }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          EXPECTED_DEV_SUPABASE: ${{ vars.EXPECTED_DEV_SUPABASE }}
+          EXPECTED_PRODUCTION_SUPABASE: ${{ vars.EXPECTED_PRODUCTION_SUPABASE }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: npm run database:migrate
+      - name: Registrar resultado del job
+        if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          OPERATION: ${{ inputs.operation }}
+          OUTCOME: ${{ steps.migration.outcome }}
+        run: |
+          printf '\nEntorno: %s · SHA: %s · Operación: %s · Paso Prisma: %s\n' "$ENVIRONMENT" "$GITHUB_SHA" "$OPERATION" "${OUTCOME:-no ejecutado}" >> "$GITHUB_STEP_SUMMARY"

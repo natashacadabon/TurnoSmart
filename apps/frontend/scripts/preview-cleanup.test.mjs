@@ -136,8 +136,14 @@ test('cleanup and publication use the same queued PR lock and cleanup uses trust
     pull_request_target: { types: ['closed'], branches: ['dev', 'main'] },
   });
   const job = cleanup.jobs.cleanup;
-  assert.equal(job.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
-  assert.equal(job.environment, 'vercel-preview');
+  assert.equal(job.steps[0].with.ref, '${{ github.sha }}');
+  assert.equal(job.needs, 'preflight');
+  const preflight = cleanup.jobs.preflight;
+  assert.equal(preflight.environment, undefined);
+  assert.equal(preflight.steps[0].with.ref, '${{ github.sha }}');
+  assert(preflight.steps[1].with.script.includes('assertTrustedPreviewContext(context)'));
+  assert(!JSON.stringify(preflight).includes('secrets.'));
+  assert.deepEqual(job.environment, { name: 'vercel-preview', deployment: false });
   assert.equal(job.concurrency.queue, 'max');
   assert.equal(publish.jobs.deploy.concurrency.queue, 'max');
   assert.equal(

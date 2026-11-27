@@ -4,6 +4,10 @@ Un Web Service nativo Node 22 desde GitHub, con Supabase Cloud existente. Sin
 Render Postgres, discos, frontend ni servicios pagos.
 `render.yaml` en la raiz documenta el servicio; crear/sincronizar un Blueprint
 inicia el primer deploy, por lo que no hacerlo hasta autorizar la ventana.
+El servicio Dev existente se llama `TurnoSmart` y publica en
+`https://turnosmart.onrender.com`. El manifiesto no referencia el servicio antiguo.
+Antes de sincronizar un Blueprint, comprobar su asociación al servicio existente:
+el cambio de nombre declarativo no mueve ni elimina servicios remotos.
 
 ## Valores exactos en Render
 

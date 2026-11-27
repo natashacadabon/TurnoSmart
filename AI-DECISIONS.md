@@ -589,6 +589,64 @@ cancelación ni una versión esperada que detecte cambios concurrentes entre la
 
 ---
 
+## 2026-11-26 - Migraciones Prisma manuales y aisladas por entorno
+
+**Problema abordado**
+
+Consultar y aplicar migraciones en los dos Supabase sin preparar conexiones en
+PowerShell, mezclar destinos ni acoplar escrituras a cada deploy de Render.
+
+**Prompt / herramienta utilizada**
+
+Codex. El usuario pidió un workflow manual con status predeterminado, secrets
+por environment, Node 22, validación existente de destino, CI/SHA antes de escribir
+en Production y pruebas sin acceder a bases remotas. Autorizó rama, commit, push
+y PR hacia Dev, sin merge ni ejecución remota del workflow.
+
+**Código / arquitectura propuesta por IA**
+
+- `database-migrate.yml`, sólo `workflow_dispatch`, opciones dev/production y
+  status/deploy. Dev exige rama Dev; Production exclusivamente Main.
+- `database-dev` y `database-production` separan secrets `DATABASE_URL`/`DIRECT_URL`
+  y variable pública `SUPABASE_URL`. Las expectativas públicas son las existentes.
+- Reutilizar `assertSupabaseTarget` y el script npm `prisma:migrate`. Añadir
+  `prisma:status` y un coordinador acotado que valida, autoriza, consulta, aplica
+  sólo cuando se solicita y verifica el estado final.
+- Reutilizar el gate CI de los publicadores; comprobar el SHA vigente después de
+  esperar la cola y de nuevo inmediatamente antes de escribir. No usar permisos
+  de escritura de GitHub ni trasladar su token a Prisma.
+- Interpretar sólo el caso pendiente conocido de Prisma 6.12: exit 1 también
+  representa errores reales. Fallar cerrado ante salida desconocida. Omitir la
+  salida privada y resumir entorno, SHA, operación, fase y migraciones locales.
+- Serializar por base sin cancelar ejecuciones. No integrar migraciones en Render,
+  modificar SQL histórico, duplicar validadores ni introducir dependencias cloud.
+
+**Validación y corrección humana**
+
+El alcance y los límites fueron definidos por el usuario. Se inspeccionaron el
+validador, `prisma.config.ts`, los scripts npm, el gate CI y el CLI instalado.
+La revisión humana de la PR y la configuración de environments quedan pendientes;
+no se presentan los tests automatizados como aprobación humana ni prueba cloud.
+Las regresiones usan mocks y una conexión local inexistente; no Supabase real.
+Con Node 22.23.4 pasaron las nueve regresiones nuevas, las 62 de configuración
+frontend y `npm test` completo (14 instalación, 16 backup, 9 migraciones,
+4 Docker con dobles y 242 backend). También pasaron lint, typecheck,
+format:check, el parse YAML del workflow y `git diff --check`.
+
+**Resultado**
+
+Implementación versionada con pruebas integradas a `npm test` y procedimiento en
+`docs/database-migrations.md`. Requiere configurar los dos environments y aprobar
+la integración antes de usarla. No se ejecutó ninguna migración remota. La carrera
+entre GitHub y la base no puede eliminarse mediante una transacción compartida;
+los fallos SQL/runner requieren inspección y recuperación, no rollback automático.
+La consulta de configuración pública confirmó que ambos environments existen:
+Production sólo permite Main, pero Dev aún no restringe ramas. Queda pendiente
+limitar `database-dev` a Dev antes de usarlo; no se modificaron políticas remotas
+ni se inspeccionaron valores de secrets.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.
