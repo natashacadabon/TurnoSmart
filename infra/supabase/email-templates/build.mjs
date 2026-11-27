@@ -4,6 +4,7 @@
 // Las variables {{ .X }} las completa Supabase Auth (GoTrue) al enviar.
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { format, resolveConfig } from 'prettier';
 
 const dir = fileURLToPath(new URL('.', import.meta.url));
 
@@ -80,6 +81,9 @@ function render({ title, intro, body, action, expiry, ignore }) {
 }
 
 for (const [name, content] of Object.entries(templates)) {
-  writeFileSync(`${dir}${name}.html`, render(content));
+  const file = `${dir}${name}.html`;
+  // Mismo formato que exige `npm run format:check` en CI.
+  const options = { ...(await resolveConfig(file)), filepath: file };
+  writeFileSync(file, await format(render(content), options));
 }
 console.log(`Plantillas generadas: ${Object.keys(templates).join(', ')}`);
