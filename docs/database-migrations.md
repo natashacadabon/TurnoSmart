@@ -74,6 +74,27 @@ de migraciones ausente, interrupción o salida desconocida bloquea la operación
 No se muestra la salida cruda del CLI: puede contener conexiones o mensajes SQL.
 El resumen indica la fase para diagnosticar en un canal privado autorizado.
 
+Ante validaciones rechazadas, el resumen y el log incluyen **Variable**, **Tipo
+de error** (código estable) y **Diagnóstico**, además de la fase exacta. Por ejemplo,
+una conexión sintética sin TLS informa `DIRECT_URL / TLS_REQUIRED` en
+`validación del destino`, sin mostrar host, usuario, password ni el DSN. Una
+variable vacía informa `MISSING_VARIABLE`; formato inválido `INVALID_URL`;
+proyecto cruzado `PROJECT_MISMATCH`; pooler 6543 `TRANSACTION_POOLER`. Corregir
+únicamente el secret/variable indicado en el environment correspondiente y crear
+una ejecución nueva de `status` después de aprobar/integrar el cambio.
+
+El diagnóstico usa metadata estructurada del validador existente, nunca interpreta
+ni imprime `error.message`, stack, cause o salida SQL privada. Excepciones no
+reconocidas muestran `UNEXPECTED_ERROR`, sin inventar una variable responsable.
+
+Auditoría del fallo Dev/status [45921255276](https://github.com/natashacadabon/TurnoSmart/actions/runs/45921255276):
+preflight e instalación aprobaron; el fallo ocurrió antes de Prisma. Las cinco
+variables estaban presentes en logs, los DSN enmascarados y las URLs públicas
+eran canónicas y coherentes con Dev. El código anterior descartaba el motivo del
+validador. No se pudo atribuir retrospectivamente el fallo a un secret concreto;
+el contador de diez migraciones es informativo, no evidencia de un fallo SQL.
+La corrección mejora el diagnóstico sin debilitar validaciones ni modificar secrets.
+
 La clasificación está ligada a Prisma 6.12 fijado en el lockfile. Si se actualiza
 Prisma, comprobar el contrato de salida y las regresiones antes de publicar.
 No es una auditoría de drift, integridad de datos ni recuperación de Supabase Auth.

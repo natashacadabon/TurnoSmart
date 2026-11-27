@@ -4,10 +4,65 @@ import { appendFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
-import { assertSupabaseTarget } from '../apps/backend/src/config/supabase-target.ts';
+import {
+  assertSupabaseTarget,
+  SupabaseTargetError,
+} from '../apps/backend/src/config/supabase-target.ts';
 import { assertSuccessfulCi } from '../apps/frontend/scripts/deploy-config.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const destinationErrors = {
+  MISSING_VARIABLE: 'Variable obligatoria ausente o vacía.',
+  INVALID_URL: 'URL inválida: revisar formato, protocolo, espacios y origen canónico.',
+  INVALID_CREDENTIALS: 'Credenciales de conexión ausentes o con formato inválido.',
+  INVALID_ENDPOINT: 'Host o usuario Supabase no permitido.',
+  INVALID_DATABASE: 'Base o puerto no permitido.',
+  TRANSACTION_POOLER:
+    'DIRECT_URL requiere conexión directa o session pooler 5432, no transaction pooler.',
+  INVALID_PARAMETER: 'Parámetro de conexión no permitido o duplicado.',
+  TLS_REQUIRED: 'La conexión requiere sslmode=require, verify-ca o verify-full.',
+  TLS_CERTIFICATE_VALIDATION: 'No se permite omitir la validación del certificado TLS.',
+  INVALID_SCHEMA: 'Sólo se admite schema public.',
+  PROJECT_MISMATCH: 'El proyecto de la variable no coincide con el entorno seleccionado.',
+  SAME_PROJECTS: 'Las expectativas Dev y Production deben identificar proyectos distintos.',
+  INVALID_ENVIRONMENT: 'Configuración incompatible con el entorno seleccionado.',
+  BRANCH_NOT_ALLOWED: 'Rama no autorizada para el entorno.',
+  LOCAL_TARGET: 'El workflow exige un destino Supabase remoto identificado.',
+  INVALID_PUBLIC_KEY: 'La clave pública tiene tipo o proyecto incorrecto.',
+};
+const diagnosticVariables = new Set([
+  'SUPABASE_URL',
+  'DATABASE_URL',
+  'DIRECT_URL',
+  'EXPECTED_DEV_SUPABASE',
+  'EXPECTED_PRODUCTION_SUPABASE',
+  'DEPLOY_TARGET',
+  'RENDER_GIT_BRANCH',
+  'CORS_ENVIRONMENT',
+  'SUPABASE_ANON_KEY',
+]);
+
+// No interpretar ni imprimir error.message/stack/cause: sólo metadata y textos permitidos.
+export function migrationDiagnostic(error) {
+  if (
+    error instanceof SupabaseTargetError &&
+    typeof error.code === 'string' &&
+    Object.hasOwn(destinationErrors, error.code) &&
+    typeof error.variable === 'string' &&
+    error.variable.split(', ').every((name) => diagnosticVariables.has(name))
+  )
+    return {
+      variable: error.variable,
+      type: error.code,
+      description: destinationErrors[error.code],
+    };
+  return {
+    variable: 'no identificada',
+    type: 'UNEXPECTED_ERROR',
+    description: 'Error no clasificado; no se muestra información privada.',
+  };
+}
 
 export function validateMigrationContext(env) {
   assert(env.GITHUB_EVENT_NAME === 'workflow_dispatch', 'Sólo se admite workflow_dispatch');
@@ -117,6 +172,7 @@ export async function migrate(
   let result = 'fallido';
   let phase = 'validación del contexto';
   let pending = [];
+  let diagnostic;
   try {
     validateMigrationContext(env);
     assert(
@@ -124,10 +180,12 @@ export async function migrate(
       'Nombres de migración inválidos',
     );
     phase = 'validación del destino';
-    assert(
-      assertSupabaseTarget(env, true),
-      'Este workflow sólo admite Supabase remoto identificado',
-    );
+    if (!assertSupabaseTarget(env, true))
+      throw new SupabaseTargetError(
+        'SUPABASE_URL',
+        'LOCAL_TARGET',
+        'Este workflow sólo admite Supabase remoto identificado',
+      );
     phase = 'autorización GitHub';
     await authorize(env);
     phase = 'status inicial';
@@ -150,6 +208,9 @@ export async function migrate(
     const final = migrationStatus(run('status', env), migrations);
     assert(final.pending.length === 0, 'Quedan migraciones pendientes después de deploy');
     result = 'aplicado y verificado';
+  } catch (error) {
+    diagnostic = migrationDiagnostic(error);
+    throw error;
   } finally {
     // Sólo nombres locales validados; jamás stdout/stderr de Prisma, DSN ni mensajes SQL.
     const safeContext =
@@ -157,7 +218,7 @@ export async function migrate(
       ['dev', 'production'].includes(env.MIGRATION_ENVIRONMENT) &&
       ['status', 'deploy'].includes(env.MIGRATION_OPERATION);
     report(
-      `### Migraciones\n${safeContext ? `Entorno: ${env.MIGRATION_ENVIRONMENT}\nSHA: ${env.GITHUB_SHA}\nOperación: ${env.MIGRATION_OPERATION}` : 'Contexto inválido'}\nResultado: ${result}\nFase: ${phase}\nMigraciones locales: ${migrations.length}\nPendientes antes de operar: ${pending.length ? pending.join(', ') : 'ninguna identificada'}`,
+      `### Migraciones\n${safeContext ? `Entorno: ${env.MIGRATION_ENVIRONMENT}\nSHA: ${env.GITHUB_SHA}\nOperación: ${env.MIGRATION_OPERATION}` : 'Contexto inválido'}\nResultado: ${result}\nFase: ${phase}${diagnostic ? `\nVariable: ${diagnostic.variable}\nTipo de error: ${diagnostic.type}\nDiagnóstico: ${diagnostic.description}` : ''}\nMigraciones locales: ${migrations.length}\nPendientes antes de operar: ${pending.length ? pending.join(', ') : 'ninguna identificada'}`,
     );
   }
 }

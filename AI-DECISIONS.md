@@ -647,6 +647,45 @@ ni se inspeccionaron valores de secrets.
 
 ---
 
+## 2026-11-26 - Diagnóstico seguro de validación en migraciones
+
+**Problema abordado**
+
+El workflow Dev/status falló en validación del destino sin informar la variable
+ni el tipo de rechazo: el coordinador descartaba el motivo del validador.
+
+**Prompt / herramienta utilizada**
+
+Codex. El usuario solicitó auditar el fallo e informar variable, tipo y fase sin
+exponer secretos. Se inspeccionó la ejecución 45921255276 sin desocultar conexiones.
+
+**Código / arquitectura propuesta por IA**
+
+Agregar metadata tipada a los errores del validador existente, conservando sus
+mensajes y restricciones. El coordinador sólo presenta nombres y códigos
+permitidos con descripciones fijas; nunca error.message, stack, cause o DSN.
+Errores desconocidos permanecen sanitizados. No modificar secrets ni migraciones.
+
+**Validación y corrección humana**
+
+La solicitud del usuario define el alcance; no se afirma revisión humana de la PR.
+Los logs confirmaron variables presentes, URLs públicas coherentes con Dev y fallo
+antes de Prisma. Las conexiones enmascaradas y el mensaje anterior no permiten
+atribuir retrospectivamente el rechazo a un secret concreto. Las pruebas
+reproducen casos sintéticos, incluido Dev/status con diez migraciones y TLS inválido;
+ese ejemplo no se presenta como causa confirmada del fallo remoto.
+Con Node 22.23.4 pasaron 13 pruebas del coordinador, incluida la salida real del
+CLI a log/resumen con exit 1, y 242 unitarias del backend. Typecheck aprobado.
+Lint, format:check, build backend y git diff --check también aprobados.
+
+**Resultado**
+
+Diagnósticos estructurados por variable/tipo/fase, con regresiones de rechazo y
+redacción de secretos. Queda pendiente ejecutar un status nuevo después de integrar
+para conocer el rechazo concreto del entorno remoto. No se ejecutó contra Supabase.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.

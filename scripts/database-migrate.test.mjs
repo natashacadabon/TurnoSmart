@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 import {
   authorizeMigration,
   migrate,
   migrationStatus,
+  migrationDiagnostic,
   runPrisma,
   validateMigrationContext,
 } from './database-migrate.mjs';
+import { SupabaseTargetError } from '../apps/backend/src/config/supabase-target.ts';
 
 const dev = 'a'.repeat(20),
   production = 'b'.repeat(20);
@@ -41,6 +44,138 @@ const pending = {
 };
 const noop = async () => {};
 const options = { migrations: [migration], report: () => {}, authorize: noop };
+
+test('diagnóstico seguro identifica variable, tipo y fase de la validación sin exponer valores', async () => {
+  const cases = [
+    ...[
+      'SUPABASE_URL',
+      'DATABASE_URL',
+      'DIRECT_URL',
+      'EXPECTED_DEV_SUPABASE',
+      'EXPECTED_PRODUCTION_SUPABASE',
+    ].map((variable) => [variable, '', 'MISSING_VARIABLE']),
+    ['SUPABASE_URL', 'https://synthetic-secret.invalid', 'INVALID_URL'],
+    ['DATABASE_URL', 'synthetic-secret', 'INVALID_URL'],
+    ['DIRECT_URL', ' ' + env.DIRECT_URL, 'INVALID_URL'],
+    ['DATABASE_URL', dsn(dev), 'PROJECT_MISMATCH'],
+    ['DIRECT_URL', dsn(dev), 'PROJECT_MISMATCH'],
+    ['DATABASE_URL', dsn(production).replace(':synthetic-secret', ''), 'INVALID_CREDENTIALS'],
+    ['DATABASE_URL', dsn(production).replace('postgres:', 'other:'), 'INVALID_ENDPOINT'],
+    ['DATABASE_URL', dsn(production).replace('/postgres?', '/other?'), 'INVALID_DATABASE'],
+    ['DATABASE_URL', dsn(production) + '&host=synthetic-secret.invalid', 'INVALID_PARAMETER'],
+    ['DATABASE_URL', dsn(production).replace('require', 'disable'), 'TLS_REQUIRED'],
+    ['DIRECT_URL', dsn(production).replace('require', 'disable'), 'TLS_REQUIRED'],
+    [
+      'DIRECT_URL',
+      dsn(production) + '&sslaccept=accept_invalid_certs',
+      'TLS_CERTIFICATE_VALIDATION',
+    ],
+    ['DIRECT_URL', dsn(production) + '&schema=synthetic_secret', 'INVALID_SCHEMA'],
+    [
+      'DIRECT_URL',
+      `postgresql://postgres.${production}:synthetic-secret@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require`,
+      'TRANSACTION_POOLER',
+    ],
+  ];
+  for (const [variable, value, type] of cases) {
+    const reports = [];
+    await assert.rejects(
+      () =>
+        migrate(
+          { ...env, [variable]: value },
+          {
+            ...options,
+            run: () => assert.fail('No ejecutar Prisma'),
+            authorize: () => assert.fail('No consultar GitHub'),
+            report: (text) => reports.push(text),
+          },
+        ),
+      (error) =>
+        error instanceof SupabaseTargetError && error.variable === variable && error.code === type,
+    );
+    const summary = reports.join('\n');
+    assert.match(summary, /Fase: validación del destino/);
+    assert(summary.includes(`Variable: ${variable}\nTipo de error: ${type}`));
+    assert(!/synthetic-secret|postgresql:\/\/|supabase\.co|fixture-github-token/.test(summary));
+  }
+});
+
+test('Dev status reproduce el fallo con diez migraciones y muestra DIRECT_URL/TLS_REQUIRED', async () => {
+  const reports = [];
+  const source = {
+    ...env,
+    MIGRATION_ENVIRONMENT: 'dev',
+    MIGRATION_OPERATION: 'status',
+    GITHUB_REF: 'refs/heads/dev',
+    DEPLOY_TARGET: 'preview',
+    SUPABASE_URL: env.EXPECTED_DEV_SUPABASE,
+    DATABASE_URL: dsn(dev),
+    DIRECT_URL: dsn(dev).replace('sslmode=require', 'sslmode=disable'),
+  };
+  await assert.rejects(() =>
+    migrate(source, {
+      ...options,
+      migrations: Array.from({ length: 10 }, (_, i) => `2026111200020${i}_fixture`),
+      run: () => assert.fail('No ejecutar Prisma'),
+      report: (text) => reports.push(text),
+    }),
+  );
+  assert.match(reports.join(), /Migraciones locales: 10/);
+  assert.match(reports.join(), /Variable: DIRECT_URL\nTipo de error: TLS_REQUIRED/);
+  // Reproducción sintética: no demuestra que el secret remoto tenga este defecto.
+});
+
+test('CLI devuelve exit 1 y escribe el mismo diagnóstico seguro en log y resumen', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'turnosmart-migration-diagnostic-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const summaryFile = join(dir, 'summary.md');
+  const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/database-migrate.mjs'], {
+    env: {
+      ...process.env,
+      ...env,
+      DIRECT_URL: dsn(production).replace('sslmode=require', 'sslmode=disable'),
+      GITHUB_STEP_SUMMARY: summaryFile,
+    },
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1);
+  const summary = readFileSync(summaryFile, 'utf8');
+  assert.match(
+    summary,
+    /Fase: validación del destino\nVariable: DIRECT_URL\nTipo de error: TLS_REQUIRED/,
+  );
+  assert(result.stdout.includes(summary.trim()));
+  assert(
+    !/synthetic-secret|fixture-github-token|postgresql:\/\/|supabase\.co/.test(
+      summary + result.stdout + result.stderr,
+    ),
+  );
+});
+
+test('errores desconocidos o metadata manipulada nunca se convierten en mensajes/logs privados', async () => {
+  for (const error of [
+    new Error('postgresql://private:synthetic-secret@private.invalid'),
+    { variable: 'DATABASE_URL', code: 'TLS_REQUIRED', message: 'synthetic-secret' },
+    new SupabaseTargetError('synthetic-secret', 'TLS_REQUIRED', 'synthetic-secret'),
+  ]) {
+    assert.equal(migrationDiagnostic(error).type, 'UNEXPECTED_ERROR');
+    const reports = [];
+    await assert.rejects(() =>
+      migrate(env, {
+        ...options,
+        authorize: async () => {
+          throw error;
+        },
+        report: (text) => reports.push(text),
+      }),
+    );
+    assert.match(reports.join(), /Fase: autorización GitHub/);
+    assert.match(reports.join(), /Tipo de error: UNEXPECTED_ERROR/);
+    assert(!/synthetic-secret|private\.invalid|postgresql:/.test(reports.join()));
+  }
+});
 
 test('selección fail-closed: sólo dispatch, entorno/rama/target válidos y SHA completo', () => {
   assert.doesNotThrow(() => validateMigrationContext(env));
