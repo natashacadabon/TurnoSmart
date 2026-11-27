@@ -36,8 +36,7 @@ const headers = {
     'Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
 };
-async function setup(page: Page) {
-  const role = 'OWNER';
+async function setup(page: Page, role = 'OWNER') {
   let preferences = { ...initial };
   const writes: object[] = [];
   const user = {
@@ -77,9 +76,7 @@ async function setup(page: Page) {
     if (route.request().method() === 'OPTIONS') return respond(route, {});
     if (url.pathname === '/api/me')
       return respond(route, {
-        access: 'OWNER',
         onboarded: true,
-        platformAdmin: false,
         user,
         profile: { id: user.id, role, fullName: 'Operadora' },
         business: {
@@ -179,6 +176,18 @@ test('preserva dependencias, guardado y descarte', async ({ page }) => {
   await page.getByRole('button', { name: 'Descartar', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Email al reservar' })).toBeChecked();
 });
+test('OWNER conserva la vista previa con edición operativa', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await setup(page, 'OWNER');
+  expect(
+    (await page.getByRole('textbox', { name: 'Nombre', exact: true }).boundingBox())!.width,
+  ).toBeGreaterThan(200);
+  for (const control of await page.getByRole('switch').all()) await expect(control).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Guardar cambios', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Vista previa de emails' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
 for (const width of [1366, 375]) {
   test(`vista previa real con un único scroll a ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 768 });

@@ -83,8 +83,7 @@ async function openAgenda(
     rules?: AvailabilityRuleInput[];
     rejectFirstTransition?: boolean;
     failMetrics?: boolean;
-    /** Inicia sesión como ADMIN global de la plataforma en lugar de OWNER. */
-    platformAdmin?: boolean;
+    role?: 'OWNER' | 'ADMIN';
     initialNotifications?: CenterNotifications['items'];
   } = {},
 ) {
@@ -273,21 +272,10 @@ async function openAgenda(
       }
       switch (url.pathname) {
         case '/api/me':
-          if (options.platformAdmin)
-            return respond(route, {
-              access: 'ADMIN',
-              onboarded: false,
-              platformAdmin: true,
-              user: { id: user.id, email },
-              profile: { id: user.id, role: 'ADMIN', fullName: 'Admin Plataforma' },
-              business: null,
-            });
           return respond(route, {
-            access: 'OWNER',
             onboarded: true,
-            platformAdmin: false,
             user: { id: user.id, email },
-            profile: { id: user.id, role: 'OWNER', fullName: 'Operadora' },
+            profile: { id: user.id, role: options.role ?? 'OWNER', fullName: 'Operadora' },
             business: {
               id: id(4),
               name: 'Negocio de prueba',
@@ -368,15 +356,9 @@ async function openAgenda(
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByRole('textbox', { name: 'Contraseña', exact: true }).fill('ui-fixture-password');
   await page.getByRole('button', { name: 'Ingresar' }).click();
-  if (options.platformAdmin) {
-    await expect(page).toHaveURL(/\/admin$/, { timeout: 30_000 });
-  } else {
-    await expect(page).toHaveURL(/\/customers$/, { timeout: 30_000 });
-    await page.getByRole('link', { name: 'Agenda', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Nuevo turno' })).toBeVisible({
-      timeout: 30_000,
-    });
-  }
+  await expect(page).toHaveURL(/\/customers$/, { timeout: 30_000 });
+  await page.getByRole('link', { name: 'Agenda', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Nuevo turno' })).toBeVisible({ timeout: 30_000 });
   return {
     updateAppointment(updated: AppointmentDto) {
       const index = appointments.findIndex((item) => item.id === updated.id);
@@ -555,16 +537,24 @@ test('guarda configuración de correos y hasta tres recordatorios únicos en mó
   expect(await page.locator('html').evaluate((element) => element.scrollWidth)).toBe(390);
 });
 
-test('el ADMIN de la plataforma no accede a la agenda ni a la configuración del negocio', async ({
-  page,
-}) => {
-  await openAgenda(page, false, [], { platformAdmin: true });
-  await expect(page.getByTestId('platform-admin-home')).toBeVisible();
-  for (const target of ['/', '/settings', '/customers']) {
-    await page.goto(target);
-    await expect(page).toHaveURL(/\/admin$/);
-  }
-  await expect(page.getByRole('button', { name: 'Nuevo turno' })).toHaveCount(0);
+test('OWNER puede consultar y modificar la configuración operativa', async ({ page }) => {
+  const writes: object[] = [];
+  await page.route('**/api/business/notification-preferences', (route) => {
+    if (route.request().method() === 'PATCH') writes.push(route.request().postDataJSON());
+    return respond(route, notificationPreferences());
+  });
+  await openAgenda(page, false, [], { role: 'OWNER' });
+  await page
+    .getByRole('navigation', { name: 'Secciones principales' })
+    .getByRole('link', { name: 'Configuración', exact: true })
+    .click();
+  const settings = page.getByRole('region', { name: 'Notificaciones', exact: true });
+  await expect(
+    settings.getByText('Solo dueños y administradores pueden modificar estas preferencias.'),
+  ).toBeVisible();
+  await expect(settings.getByLabel('Email al reservar')).toBeDisabled();
+  await expect(settings.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
+  expect(writes).toEqual([]);
 });
 
 test('muestra la solicitud en agenda y permite rechazarla desde el detalle', async ({ page }) => {

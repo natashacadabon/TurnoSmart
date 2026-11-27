@@ -560,8 +560,8 @@ Claude Code. Se pidió implementar la parte de Yae del backlog final y, después
 **Código / arquitectura propuesta por IA**
 
 - Primera propuesta: tabla `platform_admins` separada, enum sólo con OWNER y acceso sólo por invitación.
-- Integración: se adoptó el modelo de Sofi (ADMIN en `profiles` con `business_id` NULL) y se sumaron `active`/`deactivated_at`, un CHECK que vincula rol y negocio, STAFF legado desactivado, y `/me` con `access` y `reason` además de `platformAdmin`.
-- Registro público con verificación de correo, onboarding, recuperación y enlaces vencidos, con Mailpit local.
+- Integración: se adoptó el modelo de Sofi (PRs #36 y #46): ADMIN en `profiles` con `business_id` NULL, `profiles.active`, `/me` con `platformAdmin` y `accountDisabled`, panel ADMIN e invitaciones por token. Se descartaron los equivalentes propios (`access`/`reason`, `ACCOUNT_DISABLED`, `/sin-acceso`) y se agregó sólo un índice de email único para ADMIN.
+- Cuenta del invitado con verificación de correo, recuperación de contraseña y enlaces vencidos, con Mailpit local.
 - Revocación total de la Data API para `anon`/`authenticated`, con RLS como segunda barrera.
 - Lista cerrada de factores hacia Gemini, filtro de salida, tope global, circuito y factor de confirmación.
 - Métricas protegidas por token, SHA en logs y `/health`, y redacción de campos sensibles.
@@ -569,7 +569,7 @@ Claude Code. Se pidió implementar la parte de Yae del backlog final y, después
 **Validación y corrección humana**
 
 - Yae eligió construir sobre el modelo de Sofi, que ya estaba en `dev` y es la base de FINAL-11; se descartó `platform_admins`.
-- Se mantuvo el registro público porque el backlog lo pide en FINAL-10; la invitación queda para el panel ADMIN.
+- El alta de negocios es sólo por invitación, como definió Sofi en #46; `/register` crea la cuenta del invitado, que después acepta el token en `/onboarding`.
 - Los ADMIN por negocio existentes quedan como ADMIN globales, tal como definió la migración de Sofi.
 - Se corrigió el seed para que `owner@turnosmart.test` tenga la contraseña local conocida.
 - Las suites unitarias e integración se ejecutaron sobre bases descartables para no borrar datos demo.
@@ -619,6 +619,147 @@ Implementado en el frontend con los contratos existentes. El backend conserva
 la validación definitiva del horario. La API actual no admite un motivo de
 cancelación ni una versión esperada que detecte cambios concurrentes entre la
 última lectura y la escritura.
+
+---
+
+## 2026-11-26 - Migraciones Prisma manuales y aisladas por entorno
+
+**Problema abordado**
+
+Consultar y aplicar migraciones en los dos Supabase sin preparar conexiones en
+PowerShell, mezclar destinos ni acoplar escrituras a cada deploy de Render.
+
+**Prompt / herramienta utilizada**
+
+Codex. El usuario pidió un workflow manual con status predeterminado, secrets
+por environment, Node 22, validación existente de destino, CI/SHA antes de escribir
+en Production y pruebas sin acceder a bases remotas. Autorizó rama, commit, push
+y PR hacia Dev, sin merge ni ejecución remota del workflow.
+
+**Código / arquitectura propuesta por IA**
+
+- `database-migrate.yml`, sólo `workflow_dispatch`, opciones dev/production y
+  status/deploy. Dev exige rama Dev; Production exclusivamente Main.
+- `database-dev` y `database-production` separan secrets `DATABASE_URL`/`DIRECT_URL`
+  y variable pública `SUPABASE_URL`. Las expectativas públicas son las existentes.
+- Reutilizar `assertSupabaseTarget` y el script npm `prisma:migrate`. Añadir
+  `prisma:status` y un coordinador acotado que valida, autoriza, consulta, aplica
+  sólo cuando se solicita y verifica el estado final.
+- Reutilizar el gate CI de los publicadores; comprobar el SHA vigente después de
+  esperar la cola y de nuevo inmediatamente antes de escribir. No usar permisos
+  de escritura de GitHub ni trasladar su token a Prisma.
+- Interpretar sólo el caso pendiente conocido de Prisma 6.12: exit 1 también
+  representa errores reales. Fallar cerrado ante salida desconocida. Omitir la
+  salida privada y resumir entorno, SHA, operación, fase y migraciones locales.
+- Serializar por base sin cancelar ejecuciones. No integrar migraciones en Render,
+  modificar SQL histórico, duplicar validadores ni introducir dependencias cloud.
+
+**Validación y corrección humana**
+
+El alcance y los límites fueron definidos por el usuario. Se inspeccionaron el
+validador, `prisma.config.ts`, los scripts npm, el gate CI y el CLI instalado.
+La revisión humana de la PR y la configuración de environments quedan pendientes;
+no se presentan los tests automatizados como aprobación humana ni prueba cloud.
+Las regresiones usan mocks y una conexión local inexistente; no Supabase real.
+Con Node 22.23.4 pasaron las nueve regresiones nuevas, las 62 de configuración
+frontend y `npm test` completo (14 instalación, 16 backup, 9 migraciones,
+4 Docker con dobles y 242 backend). También pasaron lint, typecheck,
+format:check, el parse YAML del workflow y `git diff --check`.
+
+**Resultado**
+
+Implementación versionada con pruebas integradas a `npm test` y procedimiento en
+`docs/database-migrations.md`. Requiere configurar los dos environments y aprobar
+la integración antes de usarla. No se ejecutó ninguna migración remota. La carrera
+entre GitHub y la base no puede eliminarse mediante una transacción compartida;
+los fallos SQL/runner requieren inspección y recuperación, no rollback automático.
+La consulta de configuración pública confirmó que ambos environments existen:
+Production sólo permite Main, pero Dev aún no restringe ramas. Queda pendiente
+limitar `database-dev` a Dev antes de usarlo; no se modificaron políticas remotas
+ni se inspeccionaron valores de secrets.
+
+---
+
+## 2026-11-26 - Diagnóstico seguro de validación en migraciones
+
+**Problema abordado**
+
+El workflow Dev/status falló en validación del destino sin informar la variable
+ni el tipo de rechazo: el coordinador descartaba el motivo del validador.
+
+**Prompt / herramienta utilizada**
+
+Codex. El usuario solicitó auditar el fallo e informar variable, tipo y fase sin
+exponer secretos. Se inspeccionó la ejecución 45921255276 sin desocultar conexiones.
+
+**Código / arquitectura propuesta por IA**
+
+Agregar metadata tipada a los errores del validador existente, conservando sus
+mensajes y restricciones. El coordinador sólo presenta nombres y códigos
+permitidos con descripciones fijas; nunca error.message, stack, cause o DSN.
+Errores desconocidos permanecen sanitizados. No modificar secrets ni migraciones.
+
+**Validación y corrección humana**
+
+La solicitud del usuario define el alcance; no se afirma revisión humana de la PR.
+Los logs confirmaron variables presentes, URLs públicas coherentes con Dev y fallo
+antes de Prisma. Las conexiones enmascaradas y el mensaje anterior no permiten
+atribuir retrospectivamente el rechazo a un secret concreto. Las pruebas
+reproducen casos sintéticos, incluido Dev/status con diez migraciones y TLS inválido;
+ese ejemplo no se presenta como causa confirmada del fallo remoto.
+Con Node 22.23.4 pasaron 13 pruebas del coordinador, incluida la salida real del
+CLI a log/resumen con exit 1, y 242 unitarias del backend. Typecheck aprobado.
+Lint, format:check, build backend y git diff --check también aprobados.
+
+**Resultado**
+
+Diagnósticos estructurados por variable/tipo/fase, con regresiones de rechazo y
+redacción de secretos. Queda pendiente ejecutar un status nuevo después de integrar
+para conocer el rechazo concreto del entorno remoto. No se ejecutó contra Supabase.
+
+---
+
+## 2026-11-26 - Clasificar resultados del subproceso Prisma sin ocultar códigos
+
+**Problema abordado**
+
+Dev/status del SHA a48ad0c falló en status inicial con UNEXPECTED_ERROR después
+de superar la validación del destino. La captura privada se descartaba sin
+preservar códigos Prisma ni distinguir historial, conexión o fallos del proceso.
+
+**Prompt / herramienta utilizada**
+
+Codex. El usuario solicitó auditar wrapper/config/workflow y reproducir Prisma
+real con Node 22, sin modificar secrets ni el validador ni ejecutar migraciones
+remotas. Autorizó rama, commit, push y PR.
+
+**Código / arquitectura propuesta por IA**
+
+Clasificar errores por marcadores conocidos y códigos Prisma, conservar exit code,
+señal, error de ejecución y tamaños de stdout/stderr, sin imprimir el contenido
+privado. Pendientes requieren el bloque positivo de Prisma con nombres locales;
+ningún exit 1 genérico habilita deploy. Conservar los gates de destino, CI y SHA.
+Añadir una prueba específica con PostgreSQL efímero local e historial sintético.
+
+**Validación y corrección humana**
+
+Se verificaron cwd raíz, npm workspace backend, variables del subprocess y carga
+de prisma.config.ts. Prisma 6.12 real devuelve 0 actualizado y 1 pendiente; ambos
+casos ya eran reconocidos por el parser previo. No se atribuye el fallo remoto
+a pendientes: el error original perdió su salida. Se reprodujeron además auth,
+conexión, TLS, divergencia y migraciones fallidas sin modificar bases existentes.
+En Windows auth/conexión/TLS devolvieron sólo Schema engine error; los códigos
+P1000/P1001/P1011 se prueban con dobles y sólo se reportan cuando Prisma los emite.
+
+**Resultado**
+
+Errores Prisma y del proceso dejan de convertirse en UNEXPECTED_ERROR genérico.
+El contenedor de prueba se eliminó verificando su identidad. No se alteraron
+secrets, validador, migraciones históricas, workflow ni configuración Prisma.
+La causa concreta del rechazo remoto requiere un status nuevo tras integrar;
+no se presenta la validación local como una ejecución cloud exitosa.
+Con Node 22.23.4 aprobaron 16 pruebas del wrapper y la integración Prisma/PostgreSQL
+con siete escenarios, además de lint, typecheck, format:check y git diff --check.
 
 ---
 

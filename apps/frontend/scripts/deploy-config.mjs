@@ -21,6 +21,203 @@ const publicNames = [
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
 ];
 
+// workflow_run y pull_request_target se ejecutan desde la rama predeterminada,
+// no desde la rama candidata. Fallar antes de solicitar el environment Preview.
+export function assertTrustedPreviewContext(context) {
+  assert(
+    ['workflow_run', 'pull_request_target'].includes(context.eventName) &&
+      context.payload.repository?.default_branch === 'dev' &&
+      context.ref === 'refs/heads/dev' &&
+      /^[a-f0-9]{40}$/.test(context.sha),
+    'Preview requiere dev como default branch y referencia confiable; revisar las restricciones de vercel-preview.',
+  );
+}
+
+export function previewOutcome(sha, results, url, alias) {
+  const required = ['select', 'settings', 'build', 'deploy'];
+  if (required.some((job) => !Object.hasOwn(results, job)))
+    return { status: 'fallido', message: 'Preview no publicado: informe de jobs incompleto.' };
+  if (Object.values(results).some((value) => ['failure', 'cancelled'].includes(value)))
+    return {
+      status: 'fallido',
+      message: 'Preview no publicado: revisar el job fallido o cancelado.',
+    };
+  if (!sha && required.slice(1).some((job) => results[job] !== 'skipped'))
+    return {
+      status: 'fallido',
+      message: 'Preview no publicado: jobs ejecutados sin una revisión seleccionada.',
+    };
+  if (!sha)
+    return {
+      status: 'omitido',
+      message:
+        'Sin revisión elegible: CD, evento, rama, origen, cambios o vigencia no cumplen los filtros.',
+    };
+  const validUrl = (value) => /^https:\/\/[a-z0-9-]+\.vercel\.app\/?$/i.test(value ?? '');
+  if (
+    !/^[a-f0-9]{40}$/.test(sha) ||
+    Object.values(results).some((value) => value !== 'success') ||
+    !validUrl(alias) ||
+    (url && !validUrl(url))
+  )
+    return {
+      status: 'fallido',
+      message: 'Preview no publicado: faltan jobs aprobados o un alias verificado.',
+    };
+  return {
+    status: 'publicado',
+    message: url
+      ? 'Nuevo Preview publicado con alias verificado.'
+      : 'Preview existente verificado y reutilizado; no se creó otro deployment.',
+  };
+}
+
+// Alcance de proyecto: no consultar /teams ni /user, que pueden devolver 403/404
+// con un token válido para este proyecto. La CLI de promoción sí hace esas consultas.
+function vercelApi(env, request) {
+  assert(env.VERCEL_TOKEN, 'Falta VERCEL_TOKEN');
+  assert(/^team_[a-z0-9]+$/i.test(env.VERCEL_ORG_ID), 'VERCEL_ORG_ID debe ser un ID team_...');
+  assert(
+    /^prj_[a-z0-9]+$/i.test(env.VERCEL_PROJECT_ID),
+    'VERCEL_PROJECT_ID debe ser un ID prj_...',
+  );
+  return async (path, method = 'GET') => {
+    const url = new URL(path, 'https://api.vercel.com');
+    url.searchParams.set('teamId', env.VERCEL_ORG_ID);
+    let response;
+    try {
+      response = await request(url, {
+        method,
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
+        headers: {
+          Authorization: `Bearer ${env.VERCEL_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      });
+    } catch {
+      throw new Error(`Vercel: fallo de red/timeout en ${method}; no se reintentó la operación.`);
+    }
+    assert(
+      response.ok,
+      `Vercel: ${method} rechazado (HTTP ${response.status}). Revisar acceso al proyecto, sin ampliar permisos automáticamente.`,
+    );
+    if (method === 'POST') return;
+    try {
+      return await response.json();
+    } catch {
+      throw new Error('Vercel: respuesta JSON inválida');
+    }
+  };
+}
+function assertProject(project, env) {
+  assert(
+    project?.id === env.VERCEL_PROJECT_ID && project.accountId === env.VERCEL_ORG_ID,
+    'El proyecto Vercel no corresponde al equipo esperado',
+  );
+}
+export async function verifyVercelAccess(env, request = fetch) {
+  assert(['preview', 'production'].includes(env.DEPLOY_TARGET), 'DEPLOY_TARGET inválido');
+  const api = vercelApi(env, request);
+  const project = await api(`/v9/projects/${env.VERCEL_PROJECT_ID}`);
+  assertProject(project, env);
+  return { teamId: project.accountId, projectId: project.id };
+}
+
+// Misma operación que requestPromote de CLI 65.9.0, sin consultar identidad global.
+// Sólo el workflow controlado llama a esta función después de CI/bundle/backend/SHA.
+export async function promoteProduction(
+  env,
+  request = fetch,
+  pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+) {
+  assert(
+    env.DEPLOY_TARGET === 'production' && env.GITHUB_REF === 'refs/heads/main',
+    'Promoción permitida sólo desde main a Production',
+  );
+  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA), 'SHA candidato inválido');
+  assert(
+    /^https:\/\/[a-z0-9-]+\.vercel\.app\/?$/i.test(env.DEPLOYMENT_URL ?? ''),
+    'URL inmutable inválida',
+  );
+  const host = new URL(env.DEPLOYMENT_URL).hostname;
+  const api = vercelApi(env, request);
+  const projectPath = `/v9/projects/${env.VERCEL_PROJECT_ID}?rollbackInfo=true`;
+  const project = await api(projectPath);
+  assertProject(project, env);
+  assert(!project.rollingRelease, 'No se admite promoción parcial mediante rolling release');
+  const deployment = await api(`/v13/deployments/${host}`);
+  assert(
+    deployment?.projectId === env.VERCEL_PROJECT_ID &&
+      deployment.ownerId === env.VERCEL_ORG_ID &&
+      deployment.url === host &&
+      deployment.target === 'production' &&
+      deployment.readyState === 'READY' &&
+      deployment.meta?.turnosmartMergeSha === env.GITHUB_SHA &&
+      /^dpl_[a-z0-9]+$/i.test(deployment.id),
+    'El deployment no es Production READY del proyecto y SHA candidatos',
+  );
+  const previousRequest = project.lastAliasRequest?.requestedAt ?? 0;
+  assert(
+    Number.isSafeInteger(previousRequest) && previousRequest >= 0,
+    'Estado previo de promoción inválido',
+  );
+  const startedAt = Date.now();
+  // No repetir POST: un timeout podría haber ocurrido después de aceptar la promoción.
+  await api(`/v10/projects/${env.VERCEL_PROJECT_ID}/promote/${deployment.id}`, 'POST');
+  const deadline = Date.now() + 180_000;
+  for (let attempt = 0; attempt < 36 && Date.now() < deadline; attempt++) {
+    const current = await api(projectPath);
+    assertProject(current, env);
+    const job = current.lastAliasRequest;
+    if (
+      Number.isSafeInteger(job?.requestedAt) &&
+      job.requestedAt > previousRequest &&
+      job.requestedAt >= startedAt - 5000 &&
+      job.requestedAt <= Date.now() + 5000
+    ) {
+      assert(
+        job.type === 'promote' && job.toDeploymentId === deployment.id,
+        'Otra operación sustituyó la promoción candidata',
+      );
+      assert(!['failed', 'skipped'].includes(job.jobStatus), 'Vercel no completó la promoción');
+      if (job.jobStatus === 'succeeded' && !current.rollingRelease) {
+        const assigned = await api(`/v13/deployments/${deployment.id}`);
+        const checks = {
+          id: assigned?.id === deployment.id,
+          projectId: assigned?.projectId === env.VERCEL_PROJECT_ID,
+          ownerId: assigned?.ownerId === env.VERCEL_ORG_ID,
+          url: assigned?.url === host,
+          target: assigned?.target === 'production',
+          readyState: assigned?.readyState === 'READY',
+          'meta.turnosmartMergeSha': assigned?.meta?.turnosmartMergeSha === env.GITHUB_SHA,
+          aliasAssigned: assigned?.aliasAssigned === true,
+          aliasError: !assigned?.aliasError,
+          alias:
+            Array.isArray(assigned?.alias) &&
+            assigned.alias.length > 0 &&
+            assigned.alias.every(
+              (name) => typeof name === 'string' && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(name),
+            ),
+        };
+        const failed = Object.keys(checks).filter((key) => !checks[key]);
+        assert(
+          failed.length === 0,
+          'La promoción no confirmó los dominios Production del deployment candidato; ' +
+            `fase=verificación posterior; campos inválidos=${failed.join(', ')}. ` +
+            'Vercel informó job succeeded; consultar el estado antes de reintentar.',
+        );
+        return `https://${assigned.alias[0]}`;
+      }
+    }
+    if (attempt < 35) await pause(5000);
+  }
+  throw new Error(
+    'Promoción pendiente: timeout sin acreditar publicación; no reintentar sin consultar su estado',
+  );
+}
+
 // No filtrar por conclusion: un exito anterior no debe ocultar un run nuevo fallido/en curso.
 export function assertSuccessfulCi(runs, sha) {
   const latest = runs
@@ -422,5 +619,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     );
   else if (command === 'backend')
     await verifyProductionBackend(process.env, process.env.GITHUB_SHA);
-  else throw new Error('Comando de verificacion desconocido');
+  else if (command === 'promote') console.log(await promoteProduction(process.env));
+  else if (command === 'vercel-access') {
+    await verifyVercelAccess(process.env);
+    console.log(
+      'Equipo y proyecto Vercel verificados por lectura; no se verificó una promoción real.',
+    );
+  } else throw new Error('Comando de verificacion desconocido');
 }

@@ -27,9 +27,8 @@ Fuente de verdad en código: [`packages/shared/src`](../packages/shared/src). Es
 | HTTP | code                               | Cuándo                                                        |
 | ---- | ---------------------------------- | ------------------------------------------------------------- |
 | 401  | `UNAUTHENTICATED`, `TOKEN_INVALID` | Falta token de sesión / sesión inválida o vencida             |
-| 403  | `PROFILE_REQUIRED`                 | Cuenta autenticada sin perfil OWNER ni ADMIN asignado         |
-| 403  | `ACCOUNT_DISABLED`                 | OWNER o ADMIN desactivado por el administrador                |
-| 403  | `FORBIDDEN`                        | Rol sin permiso (p. ej. ADMIN en rutas del negocio) o CORS    |
+| 403  | `PROFILE_REQUIRED`                 | Cuenta autenticada sin OWNER asociado                         |
+| 403  | `FORBIDDEN`                        | Rol sin permiso, u origen CORS no permitido                   |
 | 404  | `NOT_FOUND`                        | Recurso inexistente **o de otro negocio** (no se distingue)   |
 | 404  | `RISK_NOT_AVAILABLE`               | Turno sin score calculado                                     |
 | 409  | `CONFLICT`                         | Conflictos de negocio (reservas: C)                           |
@@ -59,15 +58,20 @@ Sólo un OWNER activo opera las rutas del negocio. El ADMIN global (perfil `ADMI
 
 ## Identidad
 
-- `GET /api/me` (`Cache-Control: no-store`) →
-  - `{ access: 'OWNER', onboarded: true, platformAdmin: false, user, profile, business }`
-  - `{ access: 'ADMIN', onboarded: false, platformAdmin: true, user, profile, business: null }`
-  - `{ access: 'NONE', onboarded: false, platformAdmin: false, user, reason: 'NO_PROFILE' | 'DISABLED' }`
-- `POST /api/onboarding` `{ businessName, timezone?, fullName? }` → 201 la primera vez; 200 con el mismo negocio si se
-  repite (también ante requests concurrentes). Sólo para una cuenta verificada sin perfil: ADMIN recibe 403
-  `FORBIDDEN` y un perfil desactivado o STAFF 403 `ACCOUNT_DISABLED`. El ADMIN también puede crear negocios e invitar
-  OWNERs desde su panel (FINAL-11).
+- `GET /api/me` → ADMIN global `{ onboarded: false, platformAdmin: true, profile, business: null }`, cuenta sin perfil `{ onboarded: false, platformAdmin: false, user }` u OWNER `{ onboarded: true, platformAdmin: false, profile, business }`.
+- `POST /api/onboarding` ya no crea negocios: responde `403`. El OWNER se crea mediante `POST /api/admin/owner-invitations/accept` con un token emitido por ADMIN.
 - `PATCH /api/business` `{ name?, timezone? }` → `BusinessDto`. Solo OWNER. Un cambio de zona que deje turnos vigentes fuera de disponibilidad devuelve `409 AVAILABILITY_CONFLICT`.
+
+## Administración global
+
+- `GET /api/admin/businesses` → listado global de negocios. Solo ADMIN.
+- `POST /api/admin/businesses` `{ name, timezone? }` → crea un negocio sin acceso operativo para ADMIN.
+- `PATCH /api/admin/businesses/:id` `{ name?, timezone?, active? }` → actualiza o activa/desactiva un negocio.
+- `PATCH /api/admin/businesses/:id/owners/:ownerId` `{ fullName?, active? }` → edita o desactiva un OWNER; nunca permite dejar al negocio sin OWNER activo.
+- `GET /api/admin/businesses/:id/invitations` → listado de invitaciones.
+- `POST /api/admin/businesses/:id/invitations` `{ email, fullName? }` → genera una invitación de OWNER y devuelve su token una única vez.
+- `POST /api/admin/businesses/:id/invitations/:invitationId/resend` y `DELETE .../:invitationId` → reenvía o revoca una invitación.
+- `POST /api/admin/owner-invitations/accept` `{ token, fullName? }` → acepta una invitación y crea el perfil OWNER asociado al negocio.
 
 ## Clientes
 
@@ -105,7 +109,7 @@ Un turno activo usa `operationalStatus: SCHEDULED`. Su `confirmationStatus` pued
 
 - `GET /api/business/notification-preferences` devuelve las preferencias del negocio de la sesión. `PATCH` admite un objeto parcial solo para OWNER. Los booleanos de email son `bookingEmailEnabled`, `confirmationEmailEnabled`, `cancellationEmailEnabled` y `rescheduleEmailEnabled`. Los negocios nuevos reciben correo de reserva y confirmación activados; cancelación y reprogramación comienzan desactivados. Las tres acciones públicas comienzan habilitadas y los mínimos de cancelación/reprogramación son 0 horas. Las preferencias anteriores de correo y recordatorios se conservan al migrar; la confirmación inicial de negocios existentes se copia de su preferencia previa de reserva.
 - `remindersEnabled` y `reminderHours` configuran hasta tres anticipaciones distintas entre 2, 6, 12, 24, 48 y 72 horas. En negocios nuevos comienzan habilitados con 48 y 24 horas. Guardar recordatorios habilitados sin ninguna anticipación devuelve `422 VALIDATION_ERROR` en `reminderHours`; con recordatorios deshabilitados se permite conservar la selección o guardar una lista vacía. Los campos históricos `reminder24hEnabled` y `reminder48hEnabled` mantienen compatibilidad y se sincronizan con la configuración de anticipaciones. Cambiar estos campos de recordatorios reconcilia trabajos pendientes de reservas futuras y conserva los envíos procesados. Los demás booleanos de correo se comprueban al reclamar cada envío.
-- `customerConfirmationEnabled`, `customerCancellationEnabled` y `customerRescheduleEnabled` regulan las acciones públicas. `cancellationMinimumHours` y `rescheduleMinimumHours` admiten enteros de 0 a 720. Para un enlace vigente y un turno activo futuro, preview devuelve `allowed: false` si la acción se deshabilita o no cumple su anticipación mínima. Ejecutar confirmación o solicitud deshabilitadas devuelve `403 FORBIDDEN`. Cancelación conserva `409 APPOINTMENT_CANCELLATION_NOT_ALLOWED`. La consulta pública de slots también verifica la política. El personal conserva sus permisos internos.
+- `customerConfirmationEnabled`, `customerCancellationEnabled` y `customerRescheduleEnabled` regulan las acciones públicas. `cancellationMinimumHours` y `rescheduleMinimumHours` admiten enteros de 0 a 720. Para un enlace vigente y un turno activo futuro, preview devuelve `allowed: false` si la acción se deshabilita o no cumple su anticipación mínima. Ejecutar confirmación o solicitud deshabilitadas devuelve `403 FORBIDDEN`. Cancelación conserva `409 APPOINTMENT_CANCELLATION_NOT_ALLOWED`. La consulta pública de slots también verifica la política. Solo OWNER tiene permisos internos.
 - Crear una reserva encola el correo de forma atómica cuando la preferencia está habilitada y el cliente tiene un email válido; el procesamiento se solicita de forma asíncrona después de completar la respuesta HTTP. Los fallos mantienen la reserva y el trabajo para su reintento.
 - `POST /api/appointments/:id/action-links` requiere `appointments:write` y recibe `{ action }` con `CONFIRM`, `CANCEL` o `REQUEST_RESCHEDULE`. Devuelve `{ token, expiresAt }` para un turno futuro y un cliente con email. Configurar `APPOINTMENT_ACTION_SECRET` con 32 bytes aleatorios en hexadecimal para habilitar la emisión. Sin esta clave la emisión devuelve `503 APPOINTMENT_ACTIONS_UNAVAILABLE`. Cambiar el secreto invalida enlaces emitidos con el anterior.
 - `POST /api/public/appointment-actions/preview` recibe `{ token }` y devuelve `{ businessName, serviceName, startsAt, timezone, action, allowed, alreadySubmitted? }`. `alreadySubmitted: true` identifica una solicitud de reprogramación ya enviada. `POST /api/public/appointment-actions` requiere `{ token, confirmed: true }`, admite `message` de hasta 500 caracteres para una solicitud de cambio y devuelve `204`. Un enlace vencido, inválido, de un horario anterior o cuyo destinatario ya no coincide con el email actual del cliente devuelve `404`. Una cancelación bloqueada por la política devuelve `409 APPOINTMENT_CANCELLATION_NOT_ALLOWED`.

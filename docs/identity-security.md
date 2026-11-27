@@ -4,63 +4,51 @@ Bloques FINAL-10, FINAL-02, FINAL-05B y FINAL-08 (Yae). Describe el comportamien
 
 ## Modelo de roles
 
-Base: modelo de Sofi (PR #36, migración `20261126000100_global_platform_admin`). Los roles viven en `profiles` y no comparten permisos.
+El modelo es el de Sofi (FINAL-11, PRs #36 y #46). Los roles viven en `profiles` y no comparten permisos.
 
-| Rol   | En `profiles`                      | Alcance                                                                                                                                                                                    |
-| ----- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ADMIN | `role = ADMIN`, `business_id` NULL | Administrador global. Alta y estado de negocios, invitación y gestión de propietarios. No pertenece a un negocio y no opera clientes, servicios, agenda, turnos, riesgo ni notificaciones. |
-| OWNER | `role = OWNER`, `business_id` fijo | Operación diaria de su negocio. No crea otros OWNER, no desactiva propietarios ni accede al panel de la plataforma.                                                                        |
-| STAFF | Legado                             | Sin permisos. La migración `20261126000200_profile_access_rules` lo deja desactivado.                                                                                                      |
+| Rol   | En `profiles`                      | Alcance                                                                                                                                           |
+| ----- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADMIN | `role = ADMIN`, `business_id` NULL | Administrador global: alta y estado de negocios, invitación y activación de propietarios. No opera clientes, servicios, agenda, turnos ni riesgo. |
+| OWNER | `role = OWNER`, `business_id` fijo | Operación diaria de su negocio. No crea otros OWNER ni accede al panel de la plataforma.                                                          |
 
-- `20261126000100` (Sofi) hace `business_id` opcional y desliga del negocio a los ADMIN existentes: pasan a ser ADMIN globales.
-- `20261126000200` (Yae) agrega `active`/`deactivated_at` (un CHECK exige la fecha cuando el perfil está inactivo), desactiva los STAFF y fija en la base la regla `(role = 'ADMIN') = (business_id IS NULL)`.
+- `20261126000100_global_platform_admin` hace `business_id` opcional y desliga del negocio a los ADMIN existentes.
+- `20261126000200_platform_roles_and_owner_invitations` deja el enum en OWNER/ADMIN (los STAFF pasan a OWNER), exige `(ADMIN ⇔ business_id NULL)`, agrega `profiles.active`, `businesses.active` y la tabla `owner_invitations`.
+- `20261127000100_unique_platform_admin_email` (Yae) impide dos ADMIN globales con el mismo email; el índice de negocio y email no cubre `business_id` NULL.
 - Cuentas demo: `admin@turnosmart.test` es el ADMIN global y `owner@turnosmart.test` el OWNER del negocio 1; ambas usan la contraseña local del seed. `owner2@turnosmart.test` es OWNER del negocio 2.
 
 ### Matriz de permisos
 
-Fuente única: `PERMISSIONS` en `packages/shared/src/identity.ts`.
-
-| Permiso                                                                                                          | ADMIN | OWNER |
-| ---------------------------------------------------------------------------------------------------------------- | :---: | :---: |
-| `business:update`, `services:*`, `availability:*`, `slots:read`, `customers:*`, `appointments:*`, `risk:explain` |   —   |   ✓   |
-| `platform:businesses`, `platform:owners` (panel de la plataforma, FINAL-11)                                      |   ✓   |   —   |
+Fuente única: `PERMISSIONS` en `packages/shared/src/identity.ts`. Todos los permisos operativos son de OWNER; el panel de la plataforma usa `requirePlatformAdmin`.
 
 ### Resolución en la API
 
-| Middleware             | Acepta       | Rechaza                                                                                         |
-| ---------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
-| `authenticate`         | Token válido | 401 `UNAUTHENTICATED` / `TOKEN_INVALID`                                                         |
-| `requireProfile`       | OWNER activo | 403 `FORBIDDEN` (ADMIN), 403 `ACCOUNT_DISABLED` (inactivo), 403 `PROFILE_REQUIRED` (sin perfil) |
-| `requirePlatformAdmin` | ADMIN activo | 403 `FORBIDDEN` (OWNER), 403 `ACCOUNT_DISABLED`, 403 `PROFILE_REQUIRED`                         |
+| Middleware             | Acepta       | Rechaza                                                                            |
+| ---------------------- | ------------ | ---------------------------------------------------------------------------------- |
+| `authenticate`         | Token válido | 401 `UNAUTHENTICATED` / `TOKEN_INVALID`                                            |
+| `requireProfile`       | OWNER activo | 403 `FORBIDDEN` (ADMIN global), 403 `PROFILE_REQUIRED` (sin negocio o desactivado) |
+| `requirePlatformAdmin` | ADMIN global | 403 `FORBIDDEN`                                                                    |
 
-El negocio siempre sale de `profiles`; `role` o `businessId` enviados en el body se ignoran.
+`GET /api/me` informa `platformAdmin` y `accountDisabled`; `onboarded` es `true` sólo para un OWNER activo. El negocio siempre sale de `profiles`; `role` o `businessId` enviados en el body se ignoran.
 
-`GET /api/me` responde `access: 'OWNER' | 'ADMIN' | 'NONE'` (con `reason: 'NO_PROFILE' | 'DISABLED'`) y conserva los campos de Sofi: `platformAdmin` y `business: null` para el ADMIN. `onboarded` sigue siendo `true` sólo para un OWNER activo.
+## Cuenta, invitación y recuperación (FINAL-10)
 
-## Registro, invitación y recuperación (FINAL-10)
+No hay alta pública de negocios: `POST /api/onboarding` responde 403. Un OWNER llega a su negocio así:
 
-Como pide el backlog, hay dos formas de que un OWNER llegue a su negocio: el registro público (cuenta nueva, verificación de correo y onboarding) y la invitación de un ADMIN (FINAL-11).
+1. El ADMIN crea el negocio e invita al OWNER desde `/admin`; recibe un token y se lo pasa al invitado.
+2. El invitado crea su cuenta en `/register` **con el mismo email** de la invitación y la verifica con el enlace del correo.
+3. Al abrir el enlace llega a `/onboarding`, pega el token y queda como OWNER (`POST /api/admin/owner-invitations/accept`).
 
-| Ruta               | Uso                                                                                                                         |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `/login`           | Ingreso. Redirige por rol: OWNER → `/customers`, ADMIN → `/admin`, sin perfil → `/onboarding`, desactivado → `/sin-acceso`. |
-| `/register`        | Registro público con contraseña (≥ 10, letras y números) y correo de verificación a `/auth/callback?flow=verify`.           |
-| `/onboarding`      | Alta del negocio por una cuenta verificada sin perfil; ADMIN y cuentas desactivadas son redirigidas.                        |
-| `/forgot-password` | Pide el correo de recuperación. Siempre muestra el mismo mensaje para no revelar si la cuenta existe.                       |
-| `/auth/callback`   | Destino de los enlaces de correo. Lee `?flow=` y errores de Supabase (`otp_expired`, `access_denied`).                      |
-| `/reset-password`  | Nueva contraseña (≥ 10 caracteres, letras y números). `?flow=invite` muestra "Creá tu contraseña".                          |
-| `/sin-acceso`      | Cuenta desactivada o STAFF legado.                                                                                          |
-| `/admin`           | Entrada del ADMIN. El panel completo es FINAL-11.                                                                           |
+| Ruta               | Uso                                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `/login`           | Ingreso. ADMIN → `/admin`; sin negocio o desactivado → `/onboarding`; OWNER activo → `/customers`.          |
+| `/register`        | Cuenta nueva (≥ 10 caracteres, letras y números) con correo de verificación a `/auth/callback?flow=verify`. |
+| `/onboarding`      | Aceptación del token de invitación, o aviso de cuenta desactivada.                                          |
+| `/forgot-password` | Pide el correo de recuperación. Siempre muestra el mismo mensaje para no revelar si la cuenta existe.       |
+| `/auth/callback`   | Destino de los enlaces de correo. Lee `?flow=` y errores de Supabase (`otp_expired`, `access_denied`).      |
+| `/reset-password`  | Nueva contraseña para la sesión abierta por el enlace de recuperación.                                      |
+| `/admin`           | Panel del ADMIN global (FINAL-11).                                                                          |
 
-Enlace vencido o ya usado: `/auth/callback` muestra "El enlace venció" o "no es válido". En recuperación ofrece pedir otro; en invitación indica pedir el reenvío al ADMIN. Sin sesión válida, `/reset-password` no permite cambiar la contraseña.
-
-### Contrato con FINAL-11 (invitaciones, Sofi)
-
-1. El backend del panel crea el negocio y el perfil `OWNER` (`active = true`) con el mismo `id` que devuelve Auth.
-2. La invitación usa `auth.admin.inviteUserByEmail(email, { redirectTo: '<frontend>/auth/callback?flow=invite' })`. Reenviar = volver a invitar; revocar = borrar el usuario de Auth si nunca aceptó, o desactivar el perfil.
-3. Aceptar la invitación verifica el correo; el OWNER define su contraseña en `/reset-password?flow=invite` y entra a su negocio.
-4. Las rutas del panel usan `authenticate` + `requirePlatformAdmin` y los permisos `platform:*`. Hace falta la clave de servicio de Supabase en el backend sólo para invitar.
-5. Desactivar un OWNER: `active = false` y `deactivated_at = now()`. La API lo rechaza en el siguiente request. Para cortar también la sesión de Auth, revocarla con la API admin.
+Enlace vencido o ya usado: `/auth/callback` muestra "El enlace venció" o "no es válido" y ofrece pedir otro. Sin sesión válida, `/reset-password` no permite cambiar la contraseña.
 
 ### Configuración de Auth (Nati)
 
@@ -68,7 +56,7 @@ En cada proyecto de Supabase (Dev y Production):
 
 - Site URL: el origen HTTPS del frontend de ese entorno.
 - Redirect URLs: `<origen>/auth/callback` (y el patrón de Preview de Vercel en Dev).
-- Email signups habilitados con confirmación de correo obligatoria; vencimiento OTP de 3600 s; contraseña mínima de 10.
+- Email signups habilitados con confirmación de correo obligatoria (el invitado crea su cuenta); vencimiento OTP de 3600 s; contraseña mínima de 10.
 - SMTP propio (Resend) para que invitaciones y recuperación no dependan del límite del SMTP de prueba de Supabase.
 
 En local, `npm run docker:dev` levanta Mailpit: los correos de Auth se ven en `http://localhost:54327` y nunca salen de la máquina.
@@ -92,9 +80,9 @@ Los correos de turnos (reserva, confirmación, recordatorios) no cambian: los ge
 
 ## Data API y RLS (FINAL-02)
 
-El frontend usa Supabase sólo para Auth; los datos pasan por Express, que conecta con el rol dueño de las tablas. La migración `20261126000300_close_data_api_access`:
+El frontend usa Supabase sólo para Auth; los datos pasan por Express, que conecta con el rol dueño de las tablas. Nati cerró las 9 tablas originales y `_prisma_migrations` (`20260922000300/400`, incluidos los permisos por columna). La migración `20261126000300_close_data_api_access` (Yae) lo extiende a todo `public`:
 
-- Revoca todos los privilegios de `anon`, `authenticated` y `PUBLIC` sobre tablas, secuencias y funciones de `public`, y los privilegios por defecto para objetos futuros.
+- Revoca todos los privilegios de `anon`, `authenticated` y `PUBLIC` sobre tablas (también por columna), secuencias y funciones, y los privilegios por defecto para objetos futuros. Así quedan cerradas también las tablas nuevas, como `notifications` y `owner_invitations`.
 - Habilita RLS en todas las tablas como segunda barrera.
 - Elimina las políticas "business members ..." que suponían acceso directo por PostgREST.
 

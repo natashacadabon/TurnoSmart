@@ -1,7 +1,8 @@
-# Crear/sincronizar este Blueprint inicia el primer despliegue: hacerlo solo con autorizacion.
+# Sólo describe Render Dev existente (https://turnosmart.onrender.com).
+# No sincronizar Blueprint sin revisar la asociación al servicio existente: puede crear recursos.
 services:
   - type: web
-    name: turnosmart-backend-demo
+    name: TurnoSmart
     runtime: node
     plan: free
     branch: dev

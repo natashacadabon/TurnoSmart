@@ -4,14 +4,14 @@ Aplicación Next.js con App Router, React, Material UI y FullCalendar. Usa Supab
 
 | Ruta                                                    | Funcionalidad                                                                                                                                  |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/login`, `/register`, `/onboarding`                    | Inicio de sesión, registro público con verificación de correo y alta del negocio para una cuenta verificada.                                   |
-| `/forgot-password`, `/reset-password`, `/auth/callback` | Recuperación de contraseña, primer acceso por invitación y enlaces de correo.                                                                  |
-| `/admin`, `/sin-acceso`                                 | Entrada del ADMIN de la plataforma y aviso para cuentas sin acceso.                                                                            |
+| `/login`, `/onboarding`                                 | Inicio de sesión y aceptación de invitaciones de OWNER.                                                                                        |
+| `/register`                                             | Cuenta nueva para la persona invitada, con verificación de correo antes de aceptar el token.                                                   |
+| `/forgot-password`, `/reset-password`, `/auth/callback` | Recuperación de contraseña y destino de los enlaces de correo, con aviso de enlace vencido o inválido.                                         |
 | `/`                                                     | Agenda de día, semana y mes en la zona del negocio, alta de turnos, indicadores diarios y evaluación de riesgo bajo demanda.                   |
 | `/appointments/[id]`                                    | Detalle, notas, historial, acciones del personal, solicitudes de cambio y explicación con Gemini.                                              |
 | `/customers`                                            | Búsqueda, alta y edición. La baja requiere OWNER y que el cliente carezca de turnos.                                                           |
-| `/services`                                             | Servicios, franjas semanales y consulta de slots.                                                                                              |
-| `/settings`                                             | Configuración del negocio y de sus notificaciones, con vistas previas de correo. Sólo OWNER edita.                                             |
+| `/services`                                             | Servicios, franjas semanales y consulta de slots. Solo OWNER tiene acceso operativo.                                                           |
+| `/settings`                                             | Configuración del negocio y de sus notificaciones, con vistas previas de correo. Solo OWNER puede editar.                                      |
 | `/notifications`                                        | Historial interno, filtro de avisos sin leer y lecturas por usuario.                                                                           |
 | `/turno/gestionar`                                      | Página pública que recibe un token en el fragmento de URL. Permite confirmar, cancelar según la política vigente o pedir un cambio de horario. |
 

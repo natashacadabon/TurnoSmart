@@ -1,36 +1,29 @@
 'use client';
 
+import KeyRoundedIcon from '@mui/icons-material/KeyRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
-import PublicRoundedIcon from '@mui/icons-material/PublicRounded';
-import { Box, Button, Stack, TextField, Typography } from '@mui/material';
-import type { MeResponse, OnboardingRequest } from '@turnosmart/shared';
+import { Alert, Button, Stack, TextField, Typography } from '@mui/material';
+import type { MeResponse } from '@turnosmart/shared';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
 import { AuthErrorAlert } from '@/components/AuthErrorAlert';
 import { useAuth } from '@/components/AuthProvider';
 import { softDangerButtonSx } from '@/components/ui';
-import { accountHome } from '@/lib/account-home';
 import { api, errorMessage, fieldErrors } from '@/lib/api';
-import { DEFAULT_TIMEZONE, detectTimezone, timezoneLabel } from '@/lib/timezones';
-
-const subscribeNoop = () => () => {};
 
 export default function OnboardingPage() {
   const { status, me, refreshMe, signOut } = useAuth();
   const router = useRouter();
-  const [form, setForm] = useState({ businessName: '', fullName: '' });
-  // Se detecta en el cliente; en el prerender del servidor se usa la de Argentina.
-  const timezone = useSyncExternalStore(subscribeNoop, detectTimezone, () => DEFAULT_TIMEZONE);
+  const [form, setForm] = useState({ token: '', fullName: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (status === 'signedOut') router.replace('/login');
-    // Sólo una cuenta verificada sin perfil hace el alta; el resto va a su pantalla.
-    else if (me && !(me.access === 'NONE' && me.reason === 'NO_PROFILE'))
-      router.replace(accountHome(me));
+    if (me?.platformAdmin) router.replace('/admin');
+    if (me?.onboarded) router.replace('/customers');
   }, [status, me, router]);
 
   async function onSubmit(e: FormEvent) {
@@ -39,12 +32,10 @@ export default function OnboardingPage() {
     setErrors({});
     setError(null);
     try {
-      const body: OnboardingRequest = {
-        businessName: form.businessName,
-        timezone,
-        ...(form.fullName.trim() ? { fullName: form.fullName } : {}),
-      };
-      await api<MeResponse>('/api/onboarding', { method: 'POST', body });
+      await api<MeResponse>('/api/admin/owner-invitations/accept', {
+        method: 'POST',
+        body: { token: form.token, ...(form.fullName.trim() ? { fullName: form.fullName } : {}) },
+      });
       await refreshMe();
       router.replace('/customers');
     } catch (err) {
@@ -57,58 +48,74 @@ export default function OnboardingPage() {
 
   return (
     <AuthLayout>
-      <Stack component="form" spacing={2.5} onSubmit={onSubmit}>
-        <div>
-          <Typography variant="overline" color="primary">
-            Último paso
-          </Typography>
-          <Typography variant="h1">Configurá tu negocio</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Tu cuenta todavía no tiene un negocio asociado. Vas a quedar como dueño/a.
-          </Typography>
-        </div>
-        {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
-        <TextField
-          label="Nombre del negocio"
-          placeholder="Ej.: Peluquería Sol"
-          required
-          autoFocus
-          value={form.businessName}
-          error={!!errors.businessName}
-          helperText={errors.businessName}
-          onChange={(e) => setForm({ ...form, businessName: e.target.value })}
-        />
-        <TextField
-          label="Tu nombre (opcional)"
-          value={form.fullName}
-          onChange={(e) => setForm({ ...form, fullName: e.target.value })}
-        />
-        <Stack
-          direction="row"
-          spacing={1.5}
-          sx={{ alignItems: 'flex-start', p: 1.5, borderRadius: 2.5, bgcolor: 'action.hover' }}
-        >
-          <PublicRoundedIcon fontSize="small" sx={{ color: 'text.secondary', mt: 0.25 }} />
-          <Typography variant="body2" color="text.secondary">
-            Horarios en{' '}
-            <Box component="strong" sx={{ color: 'text.primary' }}>
-              {timezoneLabel(timezone)}
-            </Box>
-            , según tu dispositivo. Podés cambiarlo después en Negocio.
-          </Typography>
+      {me?.accountDisabled ? (
+        <Stack spacing={2.5}>
+          <div>
+            <Typography variant="overline" color="error">
+              Cuenta desactivada
+            </Typography>
+            <Typography variant="h1">Acceso temporalmente bloqueado</Typography>
+            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+              Tu acceso al negocio {me.business.name} está desactivado. Contactá al administrador de
+              la plataforma para volver a habilitarlo.
+            </Typography>
+          </div>
+          <Alert severity="warning">
+            No podés aceptar otra invitación mientras tu cuenta actual siga desactivada.
+          </Alert>
+          <Button
+            onClick={signOut}
+            variant="outlined"
+            startIcon={<LogoutRoundedIcon />}
+            sx={softDangerButtonSx}
+          >
+            Salir
+          </Button>
         </Stack>
-        <Button type="submit" variant="contained" disabled={submitting}>
-          {submitting ? 'Creando…' : 'Crear negocio'}
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<LogoutRoundedIcon />}
-          onClick={signOut}
-          sx={softDangerButtonSx}
-        >
-          Salir y usar otra cuenta
-        </Button>
-      </Stack>
+      ) : (
+        <Stack component="form" spacing={2.5} onSubmit={onSubmit}>
+          <div>
+            <Typography variant="overline" color="primary">
+              Invitación de OWNER
+            </Typography>
+            <Typography variant="h1">Unirte a un negocio</Typography>
+            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+              Ingresá el token que te entregó el administrador de la plataforma. El negocio y tu rol
+              OWNER ya están definidos por esa invitación.
+            </Typography>
+          </div>
+          {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
+          <TextField
+            label="Token de invitación"
+            placeholder="Pegá el token recibido"
+            required
+            autoFocus
+            value={form.token}
+            error={!!errors.token}
+            helperText={errors.token}
+            onChange={(e) => setForm({ ...form, token: e.target.value })}
+            slotProps={{
+              input: { startAdornment: <KeyRoundedIcon sx={{ mr: 1, color: 'text.secondary' }} /> },
+            }}
+          />
+          <TextField
+            label="Tu nombre (opcional)"
+            value={form.fullName}
+            onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+          />
+          <Button type="submit" variant="contained" disabled={submitting}>
+            {submitting ? 'Validando…' : 'Aceptar invitación'}
+          </Button>
+          <Button
+            onClick={signOut}
+            variant="outlined"
+            startIcon={<LogoutRoundedIcon />}
+            sx={softDangerButtonSx}
+          >
+            Salir y usar otra cuenta
+          </Button>
+        </Stack>
+      )}
     </AuthLayout>
   );
 }

@@ -4,7 +4,7 @@ import { validatePublicEnv } from './public-env.mjs';
 import { selectBackendUrl } from '../src/lib/backend-url.mjs';
 
 const valid = {
-  NEXT_PUBLIC_API_URL_RENDER: 'https://turnosmart-backend-demo.onrender.com',
+  NEXT_PUBLIC_API_URL_RENDER: 'https://render.example.com',
   NEXT_PUBLIC_API_URL_AZURE: 'https://turnosmart-api.azurewebsites.net',
   NEXT_PUBLIC_SUPABASE_URL: 'https://demo.supabase.co',
   NEXT_PUBLIC_SUPABASE_ANON_KEY: 'sb_publishable_build_fixture',

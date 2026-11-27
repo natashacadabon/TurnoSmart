@@ -47,102 +47,53 @@ const app = createApp({
 });
 
 const createdBusinesses: string[] = [];
-const createdAdmins: string[] = [];
 let ownerA: { Authorization: string };
 let businessA: string;
 let ownerB: { Authorization: string };
 
-/** Negocio + OWNER creados directamente en la base; el alta por API se prueba con `onboard`. */
-async function createOwner(name: string) {
-  const user = verifier.addUser();
-  const auth = { Authorization: `Bearer ${user.token}` };
-  const business = await prisma.business.create({ data: { name } });
-  createdBusinesses.push(business.id);
-  await prisma.profile.create({
-    data: { id: user.id, businessId: business.id, email: `${user.id}@test.local`, role: 'OWNER' },
-  });
-  return { auth, userId: user.id, businessId: business.id };
-}
-
-/** OWNER adicional de un negocio existente; `active: false` lo deja desactivado. */
-async function addOwner(businessId: string, active = true) {
-  const user = verifier.addUser();
-  await prisma.profile.create({
-    data: {
-      id: user.id,
-      businessId,
-      email: `${user.id}@test.local`,
-      role: 'OWNER',
-      active,
-      deactivatedAt: active ? null : new Date(),
-    },
-  });
-  return { auth: { Authorization: `Bearer ${user.token}` }, userId: user.id };
-}
-
-/** ADMIN global: perfil con role ADMIN y business_id NULL. */
-async function createPlatformAdmin(id = verifier.addUser().id, active = true) {
-  await prisma.profile.create({
-    data: {
-      id,
-      businessId: null,
-      email: `${id}@admin.test.local`,
-      role: 'ADMIN',
-      active,
-      deactivatedAt: active ? null : new Date(),
-    },
-  });
-  createdAdmins.push(id);
-  return { Authorization: `Bearer token-${id}` };
-}
-
-/** Perfil STAFF legado: conserva su negocio pero queda desactivado, como deja la migración. */
-async function addLegacyStaff(businessId: string) {
-  const user = verifier.addUser();
-  await prisma.profile.create({
-    data: {
-      id: user.id,
-      businessId,
-      email: `${user.id}@test.local`,
-      role: 'STAFF',
-      active: false,
-      deactivatedAt: new Date(),
-    },
-  });
-  return { auth: { Authorization: `Bearer ${user.token}` }, userId: user.id };
-}
-
-/** Alta pública por API: una cuenta verificada sin perfil crea su negocio como OWNER. */
+/**
+ * Negocio con su OWNER. El alta pública está cerrada (POST /api/onboarding responde 403): en
+ * producción el negocio lo crea el ADMIN y el OWNER acepta una invitación; acá se crea directo.
+ */
 async function onboard(name: string) {
   const user = verifier.addUser();
   const auth = { Authorization: `Bearer ${user.token}` };
-  const res = await request(app).post('/api/onboarding').set(auth).send({ businessName: name });
-  expect(res.status).toBe(201);
-  createdBusinesses.push(res.body.business.id);
-  return { auth, userId: user.id, businessId: res.body.business.id as string, body: res.body };
+  const business = await prisma.business.create({ data: { name } });
+  await prisma.profile.create({
+    data: { id: user.id, businessId: business.id, email: `${user.id}@example.com`, role: 'OWNER' },
+  });
+  createdBusinesses.push(business.id);
+  return { auth, userId: user.id, businessId: business.id };
 }
 
 beforeAll(async () => {
   await prisma.$queryRaw`SELECT 1`;
-  const a = await createOwner(`Test A ${Date.now()}`);
+  const a = await onboard(`Test A ${Date.now()}`);
   ownerA = a.auth;
   businessA = a.businessId;
-  ownerB = (await createOwner(`Test B ${Date.now()}`)).auth;
+  ownerB = (await onboard(`Test B ${Date.now()}`)).auth;
 });
 
 afterAll(async () => {
-  // Cascade elimina perfiles, clientes y turnos de prueba. Los ADMIN no dependen de un negocio.
+  // Cascade elimina perfiles, clientes y turnos de prueba.
   await prisma.business.deleteMany({ where: { id: { in: createdBusinesses } } });
-  await prisma.profile.deleteMany({ where: { id: { in: createdAdmins } } });
   await prisma.$disconnect();
 });
 
 describe('centro de notificaciones', () => {
   it('persiste avisos únicos y lecturas individuales, pagina y aísla los negocios', async () => {
-    const member = await createOwner('Notificaciones A');
-    const stranger = await createOwner('Notificaciones B');
-    // Segundo OWNER del mismo negocio: comparte avisos pero tiene lecturas propias.
-    const coOwnerAuth = (await addOwner(member.businessId)).auth;
+    const member = await onboard('Notificaciones A');
+    const stranger = await onboard('Notificaciones B');
+    const staff = verifier.addUser();
+    await prisma.profile.create({
+      data: {
+        id: staff.id,
+        businessId: member.businessId,
+        email: 'staff@example.test',
+        role: 'OWNER',
+      },
+    });
+    const staffAuth = { Authorization: `Bearer ${staff.token}` };
     const path = '/api/notifications';
     const now = Date.now();
 
@@ -172,7 +123,7 @@ describe('centro de notificaciones', () => {
       unreadCount: 0,
     });
     const synced = await Promise.all(
-      [member.auth, coOwnerAuth, member.auth].map((auth) =>
+      [member.auth, staffAuth, member.auth].map((auth) =>
         request(app)
           .post(path + '/sync-upcoming')
           .set(auth),
@@ -228,7 +179,7 @@ describe('centro de notificaciones', () => {
     expect(reads.map((response) => response.status)).toEqual([200, 200]);
     expect(reads[0]!.body).toEqual(reads[1]!.body);
     expect(reads[0]!.body.unreadCount).toBe(1);
-    expect((await request(app).get(path).set(coOwnerAuth)).body.unreadCount).toBe(2);
+    expect((await request(app).get(path).set(staffAuth)).body.unreadCount).toBe(2);
     expect(
       (
         await request(app)
@@ -250,7 +201,7 @@ describe('centro de notificaciones', () => {
           .set(member.auth)
       ).body,
     ).toMatchObject({ items: [], unreadCount: 0 });
-    expect((await request(app).get(path).set(coOwnerAuth)).body.unreadCount).toBe(2);
+    expect((await request(app).get(path).set(staffAuth)).body.unreadCount).toBe(2);
     expect((await request(app).get(path).set(stranger.auth)).body.unreadCount).toBe(1);
     expect(
       (await request(app).post(`/api/appointments/${near.id}/cancel`).set(member.auth)).status,
@@ -289,158 +240,19 @@ describe('integración API-DB: identidad', () => {
     expect((await request(app).get('/ready')).status).toBe(200);
   });
 
-  it('el onboarding crea negocio y OWNER activo; repetirlo devuelve el mismo negocio', async () => {
-    const created = await onboard('Alta pública');
-    expect(created.body).toMatchObject({
-      access: 'OWNER',
-      onboarded: true,
-      platformAdmin: false,
-      profile: { id: created.userId, role: 'OWNER' },
-      business: { name: 'Alta pública' },
-    });
-    expect(await prisma.profile.findUnique({ where: { id: created.userId } })).toMatchObject({
-      businessId: created.businessId,
-      role: 'OWNER',
-      active: true,
-      deactivatedAt: null,
-    });
-    const again = await request(app)
-      .post('/api/onboarding')
-      .set(created.auth)
-      .send({ businessName: 'Otro nombre' });
-    expect(again.status).toBe(200);
-    expect(again.body.business.id).toBe(created.businessId);
-    expect((await request(app).get('/api/customers').set(created.auth)).status).toBe(200);
-  });
-
-  it('onboarding concurrente crea un único negocio', async () => {
+  it('el alta pública está cerrada: onboarding concurrente no crea negocios ni perfiles', async () => {
+    // El OWNER sólo se crea al aceptar una invitación del ADMIN (FINAL-11).
     const user = verifier.addUser();
     const auth = { Authorization: `Bearer ${user.token}` };
-    const before = await prisma.business.count({ where: { name: 'Carrera' } });
+    const before = await prisma.business.count();
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
         request(app).post('/api/onboarding').set(auth).send({ businessName: 'Carrera' }),
       ),
     );
-    const ids = new Set(results.map((r) => r.body.business?.id));
-    createdBusinesses.push(...[...ids].filter(Boolean));
-    expect(ids.size).toBe(1);
-    expect(results.filter((r) => r.status === 201)).toHaveLength(1);
-    expect(results.filter((r) => r.status === 200)).toHaveLength(4);
-    expect(await prisma.profile.count({ where: { id: user.id } })).toBe(1);
-    // Las transacciones perdedoras hacen rollback de su negocio.
-    expect(await prisma.business.count({ where: { name: 'Carrera' } })).toBe(before + 1);
-  });
-
-  it('el onboarding rechaza ADMIN (FORBIDDEN) y OWNER desactivado o STAFF (ACCOUNT_DISABLED)', async () => {
-    const send = (auth: { Authorization: string }) =>
-      request(app).post('/api/onboarding').set(auth).send({ businessName: 'No debe existir' });
-    const admin = await send(await createPlatformAdmin());
-    expect(admin.status).toBe(403);
-    expect(admin.body.error.code).toBe('FORBIDDEN');
-    for (const auth of [
-      (await addOwner(businessA, false)).auth,
-      (await addLegacyStaff(businessA)).auth,
-    ]) {
-      const res = await send(auth);
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('ACCOUNT_DISABLED');
-    }
-    expect(await prisma.business.count({ where: { name: 'No debe existir' } })).toBe(0);
-  });
-
-  it('/me resuelve OWNER, ADMIN, OWNER desactivado y cuenta sin perfil', async () => {
-    const me = (auth: { Authorization: string }) => request(app).get('/api/me').set(auth);
-    const owner = await me(ownerA);
-    expect(owner.headers['cache-control']).toBe('no-store');
-    expect(owner.body).toMatchObject({
-      access: 'OWNER',
-      onboarded: true,
-      profile: { role: 'OWNER' },
-      business: { id: businessA },
-    });
-    const admin = await me(await createPlatformAdmin());
-    expect(admin.headers['cache-control']).toBe('no-store');
-    expect(admin.body).toMatchObject({
-      access: 'ADMIN',
-      onboarded: false,
-      platformAdmin: true,
-      profile: { role: 'ADMIN' },
-      business: null,
-    });
-    expect((await me((await addLegacyStaff(businessA)).auth)).body).toMatchObject({
-      access: 'NONE',
-      platformAdmin: false,
-      reason: 'DISABLED',
-    });
-    expect((await me(await createPlatformAdmin(undefined, false))).body).toMatchObject({
-      access: 'NONE',
-      reason: 'DISABLED',
-    });
-    expect((await me((await addOwner(businessA, false)).auth)).body).toMatchObject({
-      access: 'NONE',
-      onboarded: false,
-      reason: 'DISABLED',
-    });
-    const stranger = verifier.addUser();
-    expect((await me({ Authorization: `Bearer ${stranger.token}` })).body).toMatchObject({
-      access: 'NONE',
-      reason: 'NO_PROFILE',
-    });
-  });
-
-  it('el ADMIN de plataforma recibe 403 FORBIDDEN en rutas de negocio', async () => {
-    const auth = await createPlatformAdmin();
-    for (const res of await Promise.all([
-      request(app).get('/api/customers').set(auth),
-      request(app).post('/api/customers').set(auth).send({ fullName: 'No debe existir' }),
-      request(app).get('/api/services').set(auth),
-      request(app).get('/api/appointments').set(auth),
-      request(app).get('/api/notifications').set(auth),
-      request(app).patch('/api/business').set(auth).send({ name: 'No debe cambiar' }),
-    ])) {
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('FORBIDDEN');
-    }
-    expect(await prisma.customer.count({ where: { fullName: 'No debe existir' } })).toBe(0);
-    expect((await prisma.business.findUnique({ where: { id: businessA } }))?.name).not.toBe(
-      'No debe cambiar',
-    );
-  });
-
-  it('la base exige que sólo el ADMIN no tenga negocio', async () => {
-    const profile = (role: 'ADMIN' | 'OWNER' | 'STAFF', businessId: string | null) =>
-      prisma.profile.create({
-        data: { id: randomUUID(), businessId, email: `${randomUUID()}@test.local`, role },
-      });
-    // ADMIN con negocio, OWNER sin negocio y STAFF sin negocio violan profiles_role_business_check.
-    await expect(profile('ADMIN', businessA)).rejects.toThrow(/profiles_role_business_check/);
-    await expect(profile('OWNER', null)).rejects.toThrow(/profiles_role_business_check/);
-    await expect(profile('STAFF', null)).rejects.toThrow(/profiles_role_business_check/);
-  });
-
-  it('un OWNER desactivado o un STAFF legado recibe 403 ACCOUNT_DISABLED y la base exige fecha de baja', async () => {
-    const disabled = await addOwner(businessA, false);
-    const staff = await addLegacyStaff(businessA);
-    for (const res of await Promise.all(
-      [disabled.auth, staff.auth].flatMap((auth) => [
-        request(app).get('/api/customers').set(auth),
-        request(app).patch('/api/business').set(auth).send({ name: 'No debe cambiar' }),
-      ]),
-    )) {
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('ACCOUNT_DISABLED');
-    }
-    await expect(
-      prisma.profile.create({
-        data: {
-          id: randomUUID(),
-          businessId: businessA,
-          email: `${randomUUID()}@test.local`,
-          active: false,
-        },
-      }),
-    ).rejects.toThrow();
+    expect(results.map((r) => r.status)).toEqual([403, 403, 403, 403, 403]);
+    expect(await prisma.business.count()).toBe(before);
+    expect(await prisma.profile.count({ where: { id: user.id } })).toBe(0);
   });
 });
 

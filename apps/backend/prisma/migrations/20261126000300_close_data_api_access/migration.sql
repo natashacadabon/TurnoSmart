@@ -19,13 +19,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC, anon
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
 
--- 4. RLS en todas las tablas del dominio (algunas ya lo tenían; es idempotente).
+-- 4. RLS en todas las tablas del dominio (algunas ya lo tenían; es idempotente) y revocación de
+-- permisos por columna, que REVOKE ALL ON TABLE no quita. 20260922000400 lo hace para las tablas
+-- originales; acá se extiende a las nuevas (notificaciones, invitaciones de OWNER, etc.).
 DO $$
 DECLARE
   t record;
+  columns text;
 BEGIN
   FOR t IN
-    SELECT c.relname
+    SELECT c.oid, c.relname
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'public'
@@ -33,6 +36,14 @@ BEGIN
       AND c.relname <> '_prisma_migrations'
   LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.relname);
+    SELECT string_agg(quote_ident(attname), ', ' ORDER BY attnum)
+      INTO columns
+      FROM pg_attribute
+      WHERE attrelid = t.oid AND attnum > 0 AND NOT attisdropped;
+    EXECUTE format(
+      'REVOKE ALL PRIVILEGES (%s) ON TABLE public.%I FROM PUBLIC, anon, authenticated',
+      columns, t.relname
+    );
   END LOOP;
 END
 $$;

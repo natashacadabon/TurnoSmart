@@ -51,15 +51,16 @@ npm run prisma:generate --workspace=apps/backend
 npm run prisma:migrate --workspace=apps/backend
 ```
 
-6. Los negocios y sus OWNER los crea un ADMIN de la plataforma por invitación (ver [identidad y seguridad](docs/identity-security.md)). También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
+6. Iniciar sesión con ADMIN para crear un negocio e invitar a su OWNER desde el panel global. El OWNER acepta el token desde `/onboarding`. También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
 7. En terminales separadas, ejecutar `npm run dev:backend` y `npm run dev:frontend`. Ambos comandos compilan `packages/shared`.
 
 Configurar `GEMINI_API_KEY` para habilitar las explicaciones. La [guía de operación](docs/operations.md#notificaciones-de-turnos) cubre los modos de correo, los enlaces firmados y el cron. Las claves privadas se configuran en el backend o en los almacenes de secretos del entorno.
 
 | Ruta                                                     | Uso                                                                             |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `/login`, `/forgot-password`, `/reset-password`          | Acceso, recuperación y nueva contraseña (también primer acceso por invitación). |
-| `/auth/callback`, `/sin-acceso`, `/admin`                | Enlaces de correo, cuentas sin acceso y entrada del ADMIN de la plataforma.     |
+| `/login`, `/onboarding`                                  | Acceso y aceptación de invitaciones de OWNER.                                   |
+| `/register`, `/forgot-password`, `/reset-password`       | Cuenta para el invitado, verificación de correo y recuperación de contraseña.   |
+| `/auth/callback`                                         | Destino de los enlaces de correo de Supabase Auth (vencidos o inválidos).       |
 | `/`, `/appointments/[id]`                                | Agenda y detalle de turno.                                                      |
 | `/customers`, `/services`, `/settings`, `/notifications` | Clientes, servicios y disponibilidad, configuración y centro de notificaciones. |
 | `/turno/gestionar`                                       | Página pública que requiere un enlace válido para operar sobre un turno.        |

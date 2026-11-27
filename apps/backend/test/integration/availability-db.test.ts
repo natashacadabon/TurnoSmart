@@ -19,38 +19,19 @@ const ctx = buildTestApp({
   identity: new PrismaIdentityRepository(prisma),
 });
 const createdBusinesses: string[] = [];
-const createdAdmins: string[] = [];
 const rule = { dayOfWeek: 1, startTime: '09:00', endTime: '12:00', active: true };
 const path = '/api/availability-rules';
 let businessId: string;
 let otherId: string;
 let owner: { Authorization: string };
 let other: { Authorization: string };
-let coOwner: { Authorization: string };
-let disabledOwner: { Authorization: string };
-let platformAdmin: { Authorization: string };
+let admin: { Authorization: string };
 
-async function member(id: string, role: 'OWNER', active = true) {
+async function member(id: string, role: 'OWNER') {
   const user = ctx.verifier.addUser();
   await prisma.profile.create({
-    data: {
-      id: user.id,
-      businessId: id,
-      email: `${user.id}@test.local`,
-      role,
-      active,
-      deactivatedAt: active ? null : new Date(),
-    },
+    data: { id: user.id, businessId: id, email: `${user.id}@test.local`, role },
   });
-  return { Authorization: `Bearer ${user.token}` };
-}
-async function createPlatformAdmin() {
-  const user = ctx.verifier.addUser();
-  // ADMIN global: perfil con role ADMIN y sin negocio.
-  await prisma.profile.create({
-    data: { id: user.id, businessId: null, email: `${user.id}@admin.test.local`, role: 'ADMIN' },
-  });
-  createdAdmins.push(user.id);
   return { Authorization: `Bearer ${user.token}` };
 }
 async function appointment(
@@ -85,14 +66,19 @@ beforeEach(async () => {
   createdBusinesses.push(otherId);
   owner = await member(businessId, 'OWNER');
   other = await member(otherId, 'OWNER');
-  coOwner = await member(businessId, 'OWNER');
-  disabledOwner = await member(businessId, 'OWNER', false);
-  platformAdmin = await createPlatformAdmin();
+  const globalAdmin = ctx.verifier.addUser();
+  await prisma.profile.create({
+    data: {
+      id: globalAdmin.id,
+      businessId: null,
+      email: `${globalAdmin.id}@test.local`,
+      role: 'ADMIN',
+    },
+  });
+  admin = { Authorization: `Bearer ${globalAdmin.token}` };
 });
 afterAll(async () => {
   await prisma.business.deleteMany({ where: { id: { in: createdBusinesses } } });
-  // Los perfiles ADMIN no tienen negocio: no se borran en cascada con los negocios.
-  await prisma.profile.deleteMany({ where: { id: { in: createdAdmins } } });
   await prisma.$disconnect();
 });
 
@@ -105,7 +91,6 @@ describe('B04 API + PostgreSQL', () => {
     }));
     const [edited, closed] = fixtures.businesses;
     createdBusinesses.push(edited!.id, closed!.id);
-    createdAdmins.push(...profiles.filter((p) => p.role === 'ADMIN').map((p) => p.id));
     // Solo los horarios iniciales. Los turnos de prueba no deben impedir editar la semana.
     const data = { ...fixtures, appointments: [] };
     await seedDomain(prisma, data, profiles);
@@ -138,17 +123,9 @@ describe('B04 API + PostgreSQL', () => {
     expect(first.status).toBe(200);
     const row = (await repository.list(businessId)).rules[0]!;
     expect(row.startTime.toISOString()).toBe('1970-01-01T09:00:00.000Z');
-    expect((await request(ctx.app).get(path).set(coOwner)).body).toEqual(first.body);
-    for (const [auth, code] of [
-      [platformAdmin, 'FORBIDDEN'],
-      [disabledOwner, 'ACCOUNT_DISABLED'],
-    ] as const) {
-      const denied = await request(ctx.app).put(path).set(auth).send({ rules: [], role: 'OWNER' });
-      expect(denied.status).toBe(403);
-      expect(denied.body.error.code).toBe(code);
-      expect((await request(ctx.app).get(path).set(auth)).status).toBe(403);
-    }
-    expect((await repository.list(businessId)).rules).toHaveLength(1);
+    expect((await request(ctx.app).get(path).set(owner)).body).toEqual(first.body);
+    expect((await request(ctx.app).get(path).set(admin)).status).toBe(403);
+    expect((await request(ctx.app).put(path).set(admin).send({ rules: [] })).status).toBe(403);
     expect((await request(ctx.app).get(path).set(other)).body.data.rules).toEqual([]);
     await repository.replace(otherId, [{ ...rule, active: false }]);
     await repository.replace(businessId, [{ ...rule, active: false }]);

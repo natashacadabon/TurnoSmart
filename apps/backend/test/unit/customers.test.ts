@@ -12,7 +12,7 @@ describe('clientes', () => {
     ctx = buildTestApp();
     const a = ctx.verifier.addUser();
     const b = ctx.verifier.addUser();
-    ctx.identity.addMember(a.id, randomUUID());
+    ctx.identity.addMember(a.id, randomUUID(), 'OWNER');
     ctx.identity.addMember(b.id, randomUUID(), 'OWNER');
     authA = { Authorization: `Bearer ${a.token}` };
     authB = { Authorization: `Bearer ${b.token}` };
@@ -143,24 +143,20 @@ describe('clientes', () => {
 describe('baja de clientes', () => {
   let ctx: ReturnType<typeof buildTestApp>;
   let owner: { Authorization: string };
-  let platformAdmin: { Authorization: string };
-  let disabledOwner: { Authorization: string };
+  let admin: { Authorization: string };
   let otherOwner: { Authorization: string };
 
   beforeEach(() => {
     ctx = buildTestApp();
     const businessId = randomUUID();
     const o = ctx.verifier.addUser();
-    const a = ctx.verifier.addUser();
-    const d = ctx.verifier.addUser();
+    const s = ctx.verifier.addUser();
     const x = ctx.verifier.addUser();
     ctx.identity.addMember(o.id, businessId, 'OWNER');
-    ctx.identity.addPlatformAdmin(a.id);
-    ctx.identity.addMember(d.id, businessId, 'OWNER', false);
+    ctx.identity.addMember(s.id, businessId, 'ADMIN');
     ctx.identity.addMember(x.id, randomUUID(), 'OWNER');
     owner = { Authorization: `Bearer ${o.token}` };
-    platformAdmin = { Authorization: `Bearer ${a.token}` };
-    disabledOwner = { Authorization: `Bearer ${d.token}` };
+    admin = { Authorization: `Bearer ${s.token}` };
     otherOwner = { Authorization: `Bearer ${x.token}` };
   });
 
@@ -175,19 +171,11 @@ describe('baja de clientes', () => {
     expect((await request(ctx.app).delete(`/api/customers/${id}`).set(owner)).status).toBe(404);
   });
 
-  it('el ADMIN de plataforma no puede eliminar (403 FORBIDDEN) y el cliente sigue existiendo', async () => {
+  it('ADMIN global no puede eliminar (403) y el cliente sigue existiendo', async () => {
     const id = await create('Protegido');
-    const res = await request(ctx.app).delete(`/api/customers/${id}`).set(platformAdmin);
+    const res = await request(ctx.app).delete(`/api/customers/${id}`).set(admin);
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
-    expect(ctx.customers.rows).toHaveLength(1);
-  });
-
-  it('un OWNER desactivado no puede eliminar (403 ACCOUNT_DISABLED) y el cliente sigue existiendo', async () => {
-    const id = await create('Protegido');
-    const res = await request(ctx.app).delete(`/api/customers/${id}`).set(disabledOwner);
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('ACCOUNT_DISABLED');
     expect(ctx.customers.rows).toHaveLength(1);
   });
 

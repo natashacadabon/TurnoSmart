@@ -19,7 +19,7 @@ const templates = {
   confirmation: {
     title: 'Confirmá tu correo',
     intro: 'Recibimos el registro de <strong>{{ .Email }}</strong> en TurnoSmart.',
-    body: 'Confirmá tu correo para activar la cuenta. Después vas a configurar tu negocio y empezar a gestionar tus turnos.',
+    body: 'Confirmá tu correo para activar la cuenta. Después vas a ingresar el token de invitación que te dio el administrador de la plataforma.',
     action: 'Confirmar correo',
     expiry: 'El enlace vence en 1 hora y se puede usar una sola vez.',
     ignore: 'Si no creaste una cuenta, ignorá este correo: no se va a activar nada.',

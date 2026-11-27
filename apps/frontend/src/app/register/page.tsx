@@ -11,8 +11,9 @@ import { accountHome } from '@/lib/account-home';
 import { PASSWORD_MIN_LENGTH, newPasswordProblem } from '@/lib/auth-flow.mjs';
 
 /**
- * Registro público (FINAL-10). Crea la cuenta en Supabase Auth y envía el correo de verificación;
- * al abrir el enlace, la cuenta sin perfil completa el alta del negocio en /onboarding.
+ * Creación de cuenta (FINAL-10). Crea la cuenta en Supabase Auth y envía el correo de verificación;
+ * al abrir el enlace, la cuenta sin perfil va a /onboarding y acepta su invitación de OWNER con el
+ * token que le dio el ADMIN (FINAL-11). Sin invitación, la cuenta no accede a ningún negocio.
  */
 export default function RegisterPage() {
   const { status, me, signUp } = useAuth();
@@ -53,9 +54,10 @@ export default function RegisterPage() {
     <AuthLayout>
       <Stack component="form" spacing={2.5} onSubmit={onSubmit}>
         <div>
-          <Typography variant="h1">Registrá tu negocio</Typography>
+          <Typography variant="h1">Creá tu cuenta</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Creá tu cuenta de dueño/a. Después de verificar el correo vas a configurar tu negocio.
+            Usá el email al que te llegó la invitación. Después de verificar el correo vas a
+            ingresar el token que te dio el administrador de la plataforma.
           </Typography>
         </div>
         {sent ? (

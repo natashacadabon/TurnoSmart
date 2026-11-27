@@ -1,12 +1,12 @@
 import type { MeResponse } from '@turnosmart/shared';
 
 /**
- * Pantalla inicial según el acceso de la cuenta: el OWNER opera su negocio, el ADMIN global va al
- * panel de la plataforma, una cuenta verificada sin perfil completa el alta del negocio y una
- * cuenta desactivada (o STAFF legado) ve el aviso.
+ * Pantalla inicial según la cuenta (misma regla que el login de FINAL-11): el ADMIN global va al
+ * panel de la plataforma; una cuenta sin negocio o desactivada va a /onboarding, donde acepta su
+ * invitación o ve el aviso de bloqueo; el OWNER activo opera su negocio.
  */
 export function accountHome(me: MeResponse): string {
-  if (me.access === 'OWNER') return '/customers';
-  if (me.access === 'ADMIN') return '/admin';
-  return me.reason === 'NO_PROFILE' ? '/onboarding' : '/sin-acceso';
+  if (me.platformAdmin) return '/admin';
+  if (me.accountDisabled || !me.onboarded) return '/onboarding';
+  return '/customers';
 }

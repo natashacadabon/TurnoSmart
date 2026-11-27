@@ -108,8 +108,8 @@ export default function LoginPage() {
           <AuthLink href="/forgot-password">¿Olvidaste tu contraseña?</AuthLink>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-          ¿No tenés cuenta? <AuthLink href="/register">Registrá tu negocio</AuthLink> o pedile una
-          invitación al administrador de la plataforma.
+          ¿Te invitaron a TurnoSmart? <AuthLink href="/register">Creá tu cuenta</AuthLink> con el
+          email de la invitación.
         </Typography>
       </Stack>
     </AuthLayout>

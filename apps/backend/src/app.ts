@@ -31,12 +31,15 @@ import { getMetrics, recordReadyFailure } from './lib/metrics.js';
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import { releaseInfo, type ReleaseInfo } from './lib/release.js';
+import type { AdminRepository } from './modules/admin/repository.js';
+import { adminRouter } from './modules/admin/routes.js';
 
 export interface AppDeps {
   corsOrigins: string[];
   corsPreviewOrigin?: ((origin: string) => Promise<boolean>) | undefined;
   verifier: TokenVerifier;
   identity: IdentityRepository;
+  admin?: AdminRepository;
   customers: CustomerRepository;
   services: ServiceRepository;
   availability: AvailabilityRepository;
@@ -173,6 +176,11 @@ export function createApp(deps: AppDeps): Express {
   const explanations = new ExplanationCache();
 
   app.use('/api', identityRouter(deps));
+  if (deps.admin)
+    app.use(
+      '/api/admin',
+      adminRouter({ verifier: deps.verifier, identity: deps.identity, admin: deps.admin }),
+    );
   if (deps.appointmentActionLinks) {
     app.use(
       '/api/public/appointment-actions',

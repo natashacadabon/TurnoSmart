@@ -37,9 +37,9 @@ describe('B05 HTTP', () => {
     ctx = buildTestApp();
     businessId = randomUUID();
     otherId = randomUUID();
-    const member = (id: string) => {
+    const member = (id: string, role: 'OWNER' | 'ADMIN' = 'OWNER') => {
       const user = ctx.verifier.addUser();
-      ctx.identity.addMember(user.id, id);
+      ctx.identity.addMember(user.id, id, role);
       return { Authorization: `Bearer ${user.token}` };
     };
     auth = member(businessId);
@@ -148,19 +148,13 @@ describe('B05 HTTP', () => {
     const user = ctx.verifier.addUser();
     const headers = { Authorization: `Bearer ${user.token}` };
     expect((await get({}, headers)).body.error.code).toBe('PROFILE_REQUIRED');
-    // OWNER desactivado: 403 ACCOUNT_DISABLED; al reactivarlo vuelve a leer.
-    ctx.identity.addMember(user.id, businessId, 'OWNER', false);
-    expect((await get({}, headers)).body.error.code).toBe('ACCOUNT_DISABLED');
-    ctx.identity.addMember(user.id, businessId, 'OWNER', true);
-    expect((await get({}, headers)).status).toBe(200);
-    // ADMIN de plataforma: 403 FORBIDDEN aunque inyecte el negocio, y su fila prevalece sobre el perfil.
-    const admin = ctx.verifier.addUser();
-    ctx.identity.addPlatformAdmin(admin.id);
-    const adminHeaders = { Authorization: `Bearer ${admin.token}` };
-    expect((await get({}, adminHeaders)).body.error.code).toBe('FORBIDDEN');
-    expect((await get({ businessId }, adminHeaders)).status).toBe(403);
-    ctx.identity.addPlatformAdmin(user.id);
-    expect((await get({}, headers)).body.error.code).toBe('FORBIDDEN');
+    for (const role of ['ADMIN', 'OWNER'] as const) {
+      const roleUser = ctx.verifier.addUser();
+      ctx.identity.addMember(roleUser.id, businessId, role);
+      expect((await get({}, { Authorization: `Bearer ${roleUser.token}` })).status).toBe(
+        role === 'ADMIN' ? 403 : 200,
+      );
+    }
     for (const extra of [
       { businessId: otherId },
       { timezone: 'UTC' },

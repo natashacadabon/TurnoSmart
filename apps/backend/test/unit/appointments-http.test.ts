@@ -174,7 +174,7 @@ describe('API de turnos - Fase 2', () => {
       (await request(second.ctx.app).get(`/api/appointments/${id}`).set(second.auth)).status,
     ).toBe(404);
     const coOwner = second.ctx.verifier.addUser();
-    second.ctx.identity.addMember(coOwner.id, second.businessId);
+    second.ctx.identity.addMember(coOwner.id, second.businessId, 'OWNER');
     expect(
       (
         await request(second.ctx.app)
@@ -188,7 +188,7 @@ describe('API de turnos - Fase 2', () => {
       ).status,
     ).toBe(201);
     const admin = second.ctx.verifier.addUser();
-    second.ctx.identity.addPlatformAdmin(admin.id);
+    second.ctx.identity.addMember(admin.id, second.businessId, 'ADMIN');
     const denied = await request(second.ctx.app)
       .post('/api/appointments')
       .set({ Authorization: `Bearer ${admin.token}` })

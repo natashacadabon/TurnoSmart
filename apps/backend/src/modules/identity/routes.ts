@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import {
-  onboardingSchema,
   businessNotificationPreferencesSchema,
   updateBusinessNotificationPreferencesSchema,
   updateBusinessSchema,
@@ -16,12 +15,7 @@ import {
 } from '../../middleware/auth.js';
 import { AppError } from '../../lib/errors.js';
 import { omitUndefined, parse } from '../../lib/http.js';
-import {
-  resolveAccess,
-  type AccountAccess,
-  type BusinessRecord,
-  type IdentityRepository,
-} from './repository.js';
+import type { BusinessRecord, IdentityRepository, ProfileWithBusiness } from './repository.js';
 import { renderAppointmentEmail } from '../notifications/email-templates.js';
 
 const toBusinessDto = (b: BusinessRecord): BusinessDto => ({
@@ -31,67 +25,65 @@ const toBusinessDto = (b: BusinessRecord): BusinessDto => ({
   createdAt: b.createdAt.toISOString(),
 });
 
-function toMe(user: { id: string; email: string | null }, access: AccountAccess): MeResponse {
-  if (access.kind === 'NONE')
-    return { access: 'NONE', onboarded: false, platformAdmin: false, user, reason: access.reason };
-  if (access.kind === 'ADMIN')
-    return {
-      access: 'ADMIN',
-      onboarded: false,
-      platformAdmin: true,
-      user,
-      profile: { id: access.admin.id, fullName: access.admin.fullName, role: 'ADMIN' },
-      business: null,
-    };
-  const { profile, business } = access.found;
+function toMe(
+  user: { id: string; email: string | null },
+  found: ProfileWithBusiness | null,
+): MeResponse {
+  if (!found) return { onboarded: false, platformAdmin: false, accountDisabled: false, user };
   return {
-    access: 'OWNER',
     onboarded: true,
     platformAdmin: false,
+    accountDisabled: false,
     user,
-    profile: { id: profile.id, fullName: profile.fullName, role: 'OWNER' },
-    business: toBusinessDto(business),
+    profile: { id: found.profile.id, fullName: found.profile.fullName, role: found.profile.role },
+    business: toBusinessDto(found.business),
   };
 }
 
-/** Negocio del OWNER ya validado por requireProfile. */
-async function ownerBusiness(identity: IdentityRepository, userId: string) {
-  const found = await identity.findProfileWithBusiness(userId);
-  if (!found) throw new AppError('PROFILE_REQUIRED', 'La cuenta no tiene acceso asignado');
-  return found.business;
-}
-
-/**
- * Identidad de la cuenta autenticada. Un negocio se crea por alta pública (onboarding de una cuenta
- * verificada sin perfil) o desde el panel del ADMIN global (FINAL-11).
- */
 export function identityRouter(deps: {
   verifier: TokenVerifier;
   identity: IdentityRepository;
 }): Router {
   const router = Router();
   const auth = authenticate(deps.verifier);
-  const owner = requireProfile(deps.identity);
 
   router.get('/me', auth, async (req, res) => {
-    const access = await resolveAccess(deps.identity, req.user!.id);
-    res.set('Cache-Control', 'no-store').json(toMe(req.user!, access));
+    const admin = await deps.identity.findPlatformAdmin(req.user!.id);
+    if (admin) {
+      res.json({
+        onboarded: false,
+        platformAdmin: true,
+        accountDisabled: false,
+        user: req.user!,
+        profile: { id: admin.id, fullName: admin.fullName, role: admin.role },
+        business: null,
+      });
+      return;
+    }
+    const found = await deps.identity.findProfileWithBusiness(req.user!.id);
+    if (!found) {
+      const account = await deps.identity.findOwnerAccount(req.user!.id);
+      if (account) {
+        res.json({
+          onboarded: false,
+          platformAdmin: false,
+          accountDisabled: true,
+          user: req.user!,
+          profile: {
+            id: account.profile.id,
+            fullName: account.profile.fullName,
+            role: account.profile.role,
+          },
+          business: toBusinessDto(account.business),
+        });
+        return;
+      }
+    }
+    res.json(toMe(req.user!, found));
   });
 
-  router.post('/onboarding', auth, async (req, res) => {
-    const input = parse(onboardingSchema, req.body);
-    if (!req.user!.email) {
-      throw new AppError('VALIDATION_ERROR', 'La cuenta de Auth no tiene email');
-    }
-    // El repositorio rechaza ADMIN global (403 FORBIDDEN) y perfiles desactivados o STAFF.
-    const result = await deps.identity.onboard({
-      userId: req.user!.id,
-      email: req.user!.email,
-      businessName: input.businessName,
-      timezone: input.timezone,
-      fullName: input.fullName ?? null,
-    });
-    res.status(result.created ? 201 : 200).json(toMe(req.user!, { kind: 'OWNER', found: result }));
+  router.post('/onboarding', auth, async (_req, _res) => {
+    throw new AppError('FORBIDDEN', 'El alta de OWNER requiere una invitación emitida por ADMIN');
   });
 
   router.patch(
@@ -109,11 +101,14 @@ export function identityRouter(deps: {
     },
   );
 
-  router.get('/business/notification-preferences', auth, owner, async (req, res) => {
-    const business = await ownerBusiness(deps.identity, req.user!.id);
+  router.get('/business/notification-preferences', auth, async (req, res) => {
+    const found = await deps.identity.findProfileWithBusiness(req.user!.id);
+    if (!found) {
+      throw new AppError('PROFILE_REQUIRED', 'La cuenta todavía no tiene negocio asociado');
+    }
     res
       .set('Cache-Control', 'no-store')
-      .json(businessNotificationPreferencesSchema.strip().parse(business));
+      .json(businessNotificationPreferencesSchema.strip().parse(found.business));
   });
 
   router.patch(
@@ -133,11 +128,12 @@ export function identityRouter(deps: {
     },
   );
 
-  router.get('/business/notification-preferences/preview/:kind', auth, owner, async (req, res) => {
+  router.get('/business/notification-preferences/preview/:kind', auth, async (req, res) => {
     const kind = parse(emailPreviewKindSchema, req.params.kind);
-    const business = await ownerBusiness(deps.identity, req.user!.id);
-    const found = { business };
-    const { name, timezone } = business;
+    const found = await deps.identity.findProfileWithBusiness(req.user!.id);
+    if (!found)
+      throw new AppError('PROFILE_REQUIRED', 'La cuenta todavía no tiene negocio asociado');
+    const { name, timezone } = found.business;
     const startsAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
     const links =
       kind === 'CANCELLED'
