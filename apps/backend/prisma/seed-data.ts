@@ -1,7 +1,10 @@
 import { AppointmentStatus, ProfileRole } from '@prisma/client';
+import { calculateNoShowRisk } from '../src/modules/ai/risk-calculator.js';
 
 export const SEED_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+/** ADMIN global de la plataforma (business_id NULL). */
 export const SEED_ADMIN_EMAIL = 'admin@turnosmart.test';
+/** OWNER del negocio demo 1; comparte la contraseña del seed para iniciar sesión en local. */
 export const SEED_OWNER_EMAIL = 'owner@turnosmart.test';
 export const seedId = (kind: number, business: number, index = 0) =>
   `d${kind}000000-0000-4000-8000-${String(business * 100 + index).padStart(12, '0')}`;
@@ -161,7 +164,7 @@ export function buildSeedData(now = new Date()) {
         id: seedId(4, i + 1, n + 1),
         businessId: b.id,
         serviceId: seedId(2, i + 1, a.service),
-        customerId: seedId(3, i + 1, (n % 4) + 1),
+        customerId: seedId(3, i + 1, SEED_CUSTOMER_BY_APPOINTMENT[n]!),
         startsAt,
         endsAt: new Date(startsAt.getTime() + a.duration * 60_000),
         status: a.status,
@@ -174,6 +177,38 @@ export function buildSeedData(now = new Date()) {
 }
 export type SeedData = ReturnType<typeof buildSeedData>;
 
+/**
+ * Cliente (1-4) de cada turno demo y horas de anticipación con que se reservó. Los turnos futuros
+ * quedan asignados a clientes con historial para que el score y la explicación de IA usen
+ * factores reales: el cliente 4 faltó antes y reservó con poca anticipación; el 3 asistió y
+ * ya confirmó; el 1 no tiene historial.
+ */
+export const SEED_CUSTOMER_BY_APPOINTMENT = [4, 3, 3, 4, 1] as const;
+export const SEED_BOOKING_LEAD_HOURS = [20, 96, 120, 120, 120] as const;
+
+/** Score real del turno demo con el mismo calculador que usa la API al reservar. */
+export function seedRiskScore(data: SeedData, appointment: SeedData['appointments'][number]) {
+  const index = Number(appointment.id.slice(-2)) - 1;
+  const leadHours = SEED_BOOKING_LEAD_HOURS[index] ?? 120;
+  const past = data.appointments.filter(
+    (other) =>
+      other.businessId === appointment.businessId &&
+      other.customerId === appointment.customerId &&
+      other.startsAt < appointment.startsAt &&
+      other.status !== AppointmentStatus.SCHEDULED,
+  );
+  return calculateNoShowRisk({
+    startsAt: appointment.startsAt,
+    now: new Date(appointment.startsAt.getTime() - leadHours * 3_600_000),
+    history: {
+      total: past.length,
+      completed: past.filter((a) => a.status === AppointmentStatus.COMPLETED).length,
+      noShows: past.filter((a) => a.status === AppointmentStatus.NO_SHOW).length,
+      cancelled: past.filter((a) => a.status === AppointmentStatus.CANCELLED).length,
+    },
+    confirmed: appointment.confirmationStatus === 'CONFIRMED',
+  });
+}
 type Interval = { businessId: string; startsAt: Date; endsAt: Date; status: AppointmentStatus };
 export function assertNoActiveOverlaps(rows: Interval[]) {
   const active = rows.filter((a) => a.status === 'SCHEDULED');

@@ -52,10 +52,9 @@ interface AuthContext {
 }
 ```
 
-`ADMIN` se informa en `GET /api/me` como `platformAdmin: true`, con `business: null`; no atraviesa las rutas operativas ni recibe un `AuthContext` de negocio.
-
-Matriz de permisos (`PERMISSIONS` en shared): ADMIN es global y no tiene acceso operativo a un negocio. OWNER
-configura el negocio, gestiona clientes y turnos y pide explicaciones. Todas las rutas de negocio requieren OWNER.
+Sólo un OWNER activo opera las rutas del negocio. El ADMIN global (perfil `ADMIN` con `business_id` NULL,
+`AdminContext`) usa únicamente las rutas del panel de la plataforma (`requirePlatformAdmin`). Matriz completa en
+[identidad y seguridad](identity-security.md#matriz-de-permisos).
 
 ## Identidad
 
@@ -88,9 +87,12 @@ configura el negocio, gestiona clientes y turnos y pide explicaciones. Todas las
 
 - `GET /api/appointments/:id/events` → `AppointmentEventDto[]` en orden cronológico:
   `{ id, appointmentId, type, metadata, createdAt }`. `type` pertenece por defecto a `APPOINTMENT_EVENT_TYPES` del contrato compartido. `includeRequests=true` agrega `RESCHEDULE_REQUESTED` y `RESCHEDULE_REQUEST_DISMISSED`. El turno y el evento se escriben atómicamente. Los metadatos pueden incluir la transición, el actor o la referencia a una solicitud, según el evento.
-- `POST /api/appointments/:id/risk/explanation` →
-  `RiskExplanationResponse { risk, explanation: { summary, recommendations[] }, model, generatedAt, disclaimer }`.
-- El score se calcula y persiste al crear o reprogramar. Gemini recibe el score, nivel y los factores `{ code, label, impact, value? }` saneados.
+- `POST /api/appointments/:id/risk/explanation[?refresh=true]` →
+  `RiskExplanationResponse { risk, explanation: { summary, recommendations[] }, model, generatedAt, disclaimer, cached }`.
+  La explicación de cada versión del score queda en memoria del servidor: repetir el pedido devuelve `cached: true`
+  sin llamar a Gemini ni consumir el límite por usuario. `refresh=true` fuerza una nueva y sí consume el límite.
+- El score se calcula y persiste al crear o reprogramar, y la confirmación le suma su factor. Gemini recibe el score, nivel
+  y sólo los factores permitidos con etiqueta y significado fijos.
 
 ## Turnos
 

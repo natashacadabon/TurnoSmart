@@ -173,13 +173,13 @@ describe('API de turnos - Fase 2', () => {
     expect(
       (await request(second.ctx.app).get(`/api/appointments/${id}`).set(second.auth)).status,
     ).toBe(404);
-    const owner = second.ctx.verifier.addUser();
-    second.ctx.identity.addMember(owner.id, second.businessId, 'OWNER');
+    const coOwner = second.ctx.verifier.addUser();
+    second.ctx.identity.addMember(coOwner.id, second.businessId, 'OWNER');
     expect(
       (
         await request(second.ctx.app)
           .post('/api/appointments')
-          .set({ Authorization: `Bearer ${owner.token}` })
+          .set({ Authorization: `Bearer ${coOwner.token}` })
           .send({
             customerId: second.customer.id,
             serviceId: second.service.id,
@@ -187,6 +187,19 @@ describe('API de turnos - Fase 2', () => {
           })
       ).status,
     ).toBe(201);
+    const admin = second.ctx.verifier.addUser();
+    second.ctx.identity.addMember(admin.id, second.businessId, 'ADMIN');
+    const denied = await request(second.ctx.app)
+      .post('/api/appointments')
+      .set({ Authorization: `Bearer ${admin.token}` })
+      .send({
+        customerId: second.customer.id,
+        serviceId: second.service.id,
+        startsAt: '2099-01-05T16:00:00.000Z',
+        businessId: second.businessId,
+      });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('FORBIDDEN');
   });
 
   it('rechaza una de dos reservas simultaneas para el mismo horario', async () => {

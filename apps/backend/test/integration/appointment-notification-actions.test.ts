@@ -62,7 +62,13 @@ async function fixture() {
   async function member(role: 'OWNER' | 'ADMIN', tenant = businessId) {
     const user = verifier.addUser();
     await prisma.profile.create({
-      data: { id: user.id, businessId: tenant, email: `${user.id}@example.com`, role },
+      data: {
+        id: user.id,
+        // profiles_role_business_consistency: el ADMIN global no tiene negocio.
+        businessId: role === 'ADMIN' ? null : tenant,
+        email: `${user.id}@example.com`,
+        role,
+      },
     });
     return { Authorization: `Bearer ${user.token}` };
   }
@@ -146,7 +152,7 @@ it('guarda preferencias por negocio y aplica roles y límites de configuración'
 it('reconcilia anticipaciones, conserva enviados y cancela los pendientes al deshabilitar', async () => {
   const f = await fixture();
   const path = '/api/business/notification-preferences';
-  const update = (body: object) => f.api.patch(path).set(f.admin).send(body);
+  const update = (body: object) => f.api.patch(path).set(f.owner).send(body);
   expect((await update({ remindersEnabled: true, reminderHours: [72, 12, 2] })).status).toBe(200);
   const jobs = await prisma.reminder.findMany({
     where: { appointmentId: f.row.id },
@@ -239,15 +245,15 @@ it('exige confirmación explícita y vuelve a evaluar la política de cancelaci�
   const preview = () => f.api.post(`${f.publicPath}/preview`).send({ token });
   expect((await f.api.post(f.publicPath).send({ token })).status).toBe(422);
   expect((await preview()).body.allowed).toBe(true);
-  await f.api.patch(preferences).set(f.admin).send({ cancellationMinimumHours: 25 });
+  await f.api.patch(preferences).set(f.owner).send({ cancellationMinimumHours: 25 });
   expect((await f.execute(token)).body.error.code).toBe('APPOINTMENT_CANCELLATION_NOT_ALLOWED');
   await f.api
     .patch(preferences)
-    .set(f.admin)
+    .set(f.owner)
     .send({ cancellationMinimumHours: 24, customerCancellationEnabled: false });
   expect((await f.execute(token)).status).toBe(409);
   expect((await f.current()).status).toBe('SCHEDULED');
-  await f.api.patch(preferences).set(f.admin).send({ customerCancellationEnabled: true });
+  await f.api.patch(preferences).set(f.owner).send({ customerCancellationEnabled: true });
   expect((await f.execute(token)).status).toBe(204);
   expect((await f.execute(token)).status).toBe(204);
   expect((await preview()).status).toBe(404);
@@ -278,7 +284,7 @@ it('rechaza acciones deshabilitadas incluso con enlaces emitidos y respeta el pl
   const preferences = '/api/business/notification-preferences';
   expect(
     (
-      await f.api.patch(preferences).set(f.admin).send({
+      await f.api.patch(preferences).set(f.owner).send({
         customerConfirmationEnabled: false,
         customerCancellationEnabled: false,
         customerRescheduleEnabled: false,
@@ -299,12 +305,12 @@ it('rechaza acciones deshabilitadas incluso con enlaces emitidos y respeta el pl
   ).toBe(403);
   expect((await f.current()).events).toHaveLength(0);
   expect((await f.current()).startsAt).toEqual(f.row.startsAt);
-  await f.api.patch(preferences).set(f.admin).send({
+  await f.api.patch(preferences).set(f.owner).send({
     customerRescheduleEnabled: true,
     rescheduleMinimumHours: 25,
   });
   expect((await f.execute(reschedule)).status).toBe(403);
-  await f.api.patch(preferences).set(f.admin).send({ rescheduleMinimumHours: 24 });
+  await f.api.patch(preferences).set(f.owner).send({ rescheduleMinimumHours: 24 });
   expect((await f.execute(reschedule)).status).toBe(204);
   expect((await f.current()).startsAt).toEqual(f.row.startsAt);
   expect((await f.current()).events.map((event) => event.type)).toEqual(['RESCHEDULE_REQUESTED']);

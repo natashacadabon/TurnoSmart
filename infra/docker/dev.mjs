@@ -130,7 +130,9 @@ Object.assign(env, {
   SUPABASE_SECRET_KEY: '',
   SUPABASE_SERVICE_ROLE_KEY: env.TS_SERVICE_KEY,
   SEED_ADMIN_PASSWORD: env.TS_SEED_PASSWORD,
-  GEMINI_API_KEY: '',
+  // Gemini is opt-in: only read from the git-ignored .env.dev, never from the terminal.
+  GEMINI_API_KEY: local.GEMINI_API_KEY ?? '',
+  ...(local.GEMINI_MODEL ? { GEMINI_MODEL: local.GEMINI_MODEL } : {}),
   NEXT_PUBLIC_API_URL: `http://localhost:${env.TS_BACKEND_PORT}`,
   NEXT_PUBLIC_SUPABASE_URL: `http://127.0.0.1:${env.TS_AUTH_PORT}`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: env.TS_ANON_KEY,
@@ -220,10 +222,20 @@ if (command === 'up') {
       server.close();
     }
   }
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(socket, resolve);
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socket, resolve);
+    });
+  } catch (error) {
+    if (error?.code !== 'EADDRINUSE') throw error;
+    console.error(
+      'Ya hay un entorno local de TurnoSmart corriendo (npm run docker:dev).\n' +
+        // localhost, no 127.0.0.1: Auth y la API sólo aceptan ese origen por CORS.
+        `Usalo en http://localhost:${env.TS_FRONTEND_PORT} o detenelo con: npm run docker:down`,
+    );
+    process.exit(1);
+  }
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   try {

@@ -14,6 +14,7 @@ import type { RiskRepository } from './modules/ai/risk-repository.js';
 import type { RiskExplainer } from './modules/ai/risk-explainer.js';
 import { FixedWindowRateLimiter } from './modules/ai/rate-limiter.js';
 import { aiRouter } from './modules/ai/routes.js';
+import { ExplanationCache } from './modules/ai/explanation-cache.js';
 import type { ServiceRepository } from './modules/services/repository.js';
 import { servicesRouter } from './modules/services/routes.js';
 import type { AvailabilityRepository } from './modules/availability/repository.js';
@@ -26,7 +27,10 @@ import type { AppointmentActionLinks } from './modules/appointments/action-links
 import { publicAppointmentActionsRouter } from './modules/appointments/public-routes.js';
 import type { PrismaNotificationRepository } from './modules/notifications/repository.js';
 import { notificationsRouter } from './modules/notifications/routes.js';
-import { getMetrics } from './lib/metrics.js';
+import { getMetrics, recordReadyFailure } from './lib/metrics.js';
+import { AppError } from './lib/errors.js';
+import { logger } from './lib/logger.js';
+import { releaseInfo, type ReleaseInfo } from './lib/release.js';
 import type { AdminRepository } from './modules/admin/repository.js';
 import { adminRouter } from './modules/admin/routes.js';
 
@@ -52,6 +56,19 @@ export interface AppDeps {
   aiRateLimit: { limit: number; windowMs: number };
   /** Comprobación de dependencias para /ready (p. ej. SELECT 1). */
   checkReady: () => Promise<boolean>;
+  /** Versión desplegada para /health. Por defecto se lee del entorno. */
+  release?: ReleaseInfo;
+  /**
+   * Acceso a /metrics. Con `token`, exige `Authorization: Bearer <token>`. Sin token, sólo queda
+   * abierto si `publicWithoutToken` (desarrollo y test); si no, responde 404.
+   */
+  metrics?: { token?: string | undefined; publicWithoutToken: boolean };
+}
+
+function bearerMatches(header: string | undefined, token: string): boolean {
+  const supplied = Buffer.from(header ?? '');
+  const expected = Buffer.from(`Bearer ${token}`);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
 /** Construye la app sin escuchar puertos, para poder probarla con supertest. */
@@ -100,30 +117,52 @@ export function createApp(deps: AppDeps): Express {
     });
   }
 
+  const release = deps.release ?? releaseInfo();
   app.get('/health', (_req, res) => {
-    res.json({
+    res.set('Cache-Control', 'no-store').json({
       status: 'ok',
       service: 'turnosmart-backend',
-      version: process.env.RENDER_GIT_COMMIT ?? process.env.RELEASE_SHA ?? 'dev',
+      version: release.sha,
     });
   });
 
-  app.get('/ready', async (_req, res) => {
+  app.get('/ready', async (req, res) => {
+    const started = performance.now();
     const ok = await deps.checkReady().catch(() => false);
-    res.status(ok ? 200 : 503).json({ status: ok ? 'ready' : 'unavailable' });
+    if (!ok) {
+      recordReadyFailure();
+      // Señal de alerta: la API sigue viva pero no llega a PostgreSQL.
+      logger.error('dependency_unavailable', {
+        requestId: req.requestId,
+        dependency: 'postgresql',
+        durationMs: Math.round(performance.now() - started),
+      });
+    }
+    res
+      .status(ok ? 200 : 503)
+      .set('Cache-Control', 'no-store')
+      .json({ status: ok ? 'ready' : 'unavailable' });
   });
 
-  app.get('/metrics', (_req, res) => {
-    res.json(getMetrics());
+  const metricsAccess = deps.metrics ?? { publicWithoutToken: true };
+  app.get('/metrics', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (metricsAccess.token) {
+      if (!bearerMatches(req.header('authorization'), metricsAccess.token)) {
+        res.sendStatus(401);
+        return;
+      }
+    } else if (!metricsAccess.publicWithoutToken) {
+      throw new AppError('NOT_FOUND', 'Ruta no encontrada');
+    }
+    res.json({ ...getMetrics(), version: release.sha });
   });
 
   const emailCron = deps.emailCron;
   if (emailCron) {
-    const expected = Buffer.from(`Bearer ${emailCron.secret}`);
     app.post('/internal/email-jobs', (req, res) => {
-      const supplied = Buffer.from(req.header('authorization') ?? '');
       res.set('Cache-Control', 'no-store');
-      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+      if (!bearerMatches(req.header('authorization'), emailCron.secret)) {
         res.sendStatus(401);
         return;
       }
@@ -134,6 +173,7 @@ export function createApp(deps: AppDeps): Express {
 
   const authed = [authenticate(deps.verifier), requireProfile(deps.identity)];
   const limiter = new FixedWindowRateLimiter(deps.aiRateLimit.limit, deps.aiRateLimit.windowMs);
+  const explanations = new ExplanationCache();
 
   app.use('/api', identityRouter(deps));
   if (deps.admin)
@@ -166,7 +206,7 @@ export function createApp(deps: AppDeps): Express {
   app.use(
     '/api/appointments',
     ...authed,
-    aiRouter({ risk: deps.risk, explainer: deps.explainer, limiter }),
+    aiRouter({ risk: deps.risk, explainer: deps.explainer, limiter, cache: explanations }),
   );
 
   app.use(notFoundHandler);

@@ -1,7 +1,7 @@
 import { databaseProject as readDatabaseProject } from '../src/config/supabase-target.js';
 import { randomBytes } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { SEED_ADMIN_EMAIL, type SeedData } from './seed-data.js';
+import { SEED_ADMIN_EMAIL, SEED_OWNER_EMAIL } from './seed-data.js';
 import { ALLOWED_REMOTE_SEED_PROJECT_REFS } from './seed-targets.js';
 
 import { SeedError, seedStep } from './seed-diagnostics.js';
@@ -139,10 +139,12 @@ export async function findSeedUser(admin: Admin, email: string) {
   });
 }
 
-/** Reutiliza cuentas sin actualizar password ni metadatos del usuario existente. */
-export async function ensureSeedUsers(
+/** Reutiliza cuentas sin actualizar password ni metadatos del usuario existente.
+ * Sólo el ADMIN global y el OWNER demo reciben la contraseña conocida del seed. */
+const KNOWN_PASSWORD_EMAILS = new Set([SEED_ADMIN_EMAIL, SEED_OWNER_EMAIL]);
+export async function ensureSeedUsers<T extends { email: string }>(
   admin: Admin,
-  accounts: SeedData['accounts'],
+  accounts: T[],
   password: string,
 ) {
   const profiles = [];
@@ -152,8 +154,9 @@ export async function ensureSeedUsers(
       user = await seedStep('user_creation', async () => {
         const result = await admin.createUser({
           email: account.email,
-          password:
-            account.email === SEED_ADMIN_EMAIL ? password : randomBytes(32).toString('base64url'),
+          password: KNOWN_PASSWORD_EMAILS.has(account.email)
+            ? password
+            : randomBytes(32).toString('base64url'),
           email_confirm: true,
           user_metadata: { source: 'turnosmart-development-seed' },
         });

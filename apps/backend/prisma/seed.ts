@@ -2,7 +2,12 @@ import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'node:url';
-import { buildSeedData, SEED_ADMIN_EMAIL, validateSeedData } from './seed-data.js';
+import {
+  buildSeedData,
+  SEED_ADMIN_EMAIL,
+  SEED_OWNER_EMAIL,
+  validateSeedData,
+} from './seed-data.js';
 import { ensureSeedUsers, readSeedConfig, SeedError, verifyAdminLogin } from './seed-auth.js';
 import { seedDomain } from './seed-runner.js';
 import { checkSeedSchema } from './seed-checks.js';
@@ -67,6 +72,7 @@ async function main() {
       });
       console.info('Seed completado. Login Auth y perfil ADMIN global verificados.');
       console.info(`ADMIN global: ${SEED_ADMIN_EMAIL}`);
+      console.info(`OWNER del negocio demo: ${SEED_OWNER_EMAIL}`);
       console.info(JSON.stringify(counts));
     },
     () => prisma.$disconnect(),

@@ -242,4 +242,6 @@ export interface RiskExplanationResponse {
   model: string;
   generatedAt: string;
   disclaimer: string;
+  /** true si se reutilizó la explicación ya generada para esta versión del score. */
+  cached: boolean;
 }

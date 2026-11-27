@@ -51,13 +51,19 @@ let ownerA: { Authorization: string };
 let businessA: string;
 let ownerB: { Authorization: string };
 
+/**
+ * Negocio con su OWNER. El alta pública está cerrada (POST /api/onboarding responde 403): en
+ * producción el negocio lo crea el ADMIN y el OWNER acepta una invitación; acá se crea directo.
+ */
 async function onboard(name: string) {
   const user = verifier.addUser();
   const auth = { Authorization: `Bearer ${user.token}` };
-  const res = await request(app).post('/api/onboarding').set(auth).send({ businessName: name });
-  expect(res.status).toBe(201);
-  createdBusinesses.push(res.body.business.id);
-  return { auth, userId: user.id, businessId: res.body.business.id as string };
+  const business = await prisma.business.create({ data: { name } });
+  await prisma.profile.create({
+    data: { id: user.id, businessId: business.id, email: `${user.id}@example.com`, role: 'OWNER' },
+  });
+  createdBusinesses.push(business.id);
+  return { auth, userId: user.id, businessId: business.id };
 }
 
 beforeAll(async () => {
@@ -234,19 +240,19 @@ describe('integración API-DB: identidad', () => {
     expect((await request(app).get('/ready')).status).toBe(200);
   });
 
-  it('onboarding concurrente crea un único negocio', async () => {
+  it('el alta pública está cerrada: onboarding concurrente no crea negocios ni perfiles', async () => {
+    // El OWNER sólo se crea al aceptar una invitación del ADMIN (FINAL-11).
     const user = verifier.addUser();
     const auth = { Authorization: `Bearer ${user.token}` };
+    const before = await prisma.business.count();
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
         request(app).post('/api/onboarding').set(auth).send({ businessName: 'Carrera' }),
       ),
     );
-    const ids = new Set(results.map((r) => r.body.business?.id));
-    expect(ids.size).toBe(1);
-    expect(results.filter((r) => r.status === 201)).toHaveLength(1);
-    createdBusinesses.push([...ids][0]);
-    expect(await prisma.profile.count({ where: { id: user.id } })).toBe(1);
+    expect(results.map((r) => r.status)).toEqual([403, 403, 403, 403, 403]);
+    expect(await prisma.business.count()).toBe(before);
+    expect(await prisma.profile.count({ where: { id: user.id } })).toBe(0);
   });
 });
 

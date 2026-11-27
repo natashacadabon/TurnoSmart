@@ -8,6 +8,7 @@ import {
   validateSeedData,
   assertNoActiveOverlaps,
   SEED_ADMIN_EMAIL,
+  SEED_OWNER_EMAIL,
 } from '../../prisma/seed-data.js';
 import { readSeedConfig, ensureSeedUsers, verifyAdminLogin } from '../../prisma/seed-auth.js';
 import { seedDomain } from '../../prisma/seed-runner.js';
@@ -250,6 +251,28 @@ describe('seed: destinos y datos', () => {
       expect(data.businesses).toHaveLength(2);
       expect(data.accounts).toHaveLength(3);
       expect(new Set(data.accounts.map((a) => a.role))).toEqual(new Set(['OWNER', 'ADMIN']));
+      // ADMIN global sin negocio y un OWNER por negocio, igual que la restriccion de profiles.
+      expect(data.accounts).toEqual([
+        {
+          email: SEED_ADMIN_EMAIL,
+          role: 'ADMIN',
+          businessId: null,
+          fullName: expect.any(String),
+        },
+        {
+          email: SEED_OWNER_EMAIL,
+          role: 'OWNER',
+          businessId: data.businesses[0]!.id,
+          fullName: expect.any(String),
+        },
+        {
+          email: 'owner2@turnosmart.test',
+          role: 'OWNER',
+          businessId: data.businesses[1]!.id,
+          fullName: expect.any(String),
+        },
+      ]);
+      expect(data.accounts.some((a) => (a.role as string) === 'STAFF')).toBe(false);
       expect(data.customers).toHaveLength(8);
       expect(data.services).toHaveLength(8);
       expect(data.rules).toHaveLength(20);
@@ -283,18 +306,41 @@ describe('seed: destinos y datos', () => {
     first.customerId = data.customers[4]!.id;
     expect(() => validateSeedData(data)).toThrow(/Relacion/);
   });
+  it('rechaza un email repetido entre OWNER y ADMIN de plataforma', () => {
+    const data = buildSeedData(now);
+    data.accounts[0] = { ...data.accounts[0]!, email: SEED_OWNER_EMAIL };
+    expect(() => validateSeedData(data)).toThrow(/duplicados/);
+  });
+  it('rechaza un ADMIN con negocio y un OWNER sin negocio', () => {
+    type Account = ReturnType<typeof buildSeedData>['accounts'][number];
+    // Cuentas inválidas a propósito: el tipo de los fixtures ya impide estas combinaciones.
+    const admin = buildSeedData(now);
+    admin.accounts[0] = {
+      ...admin.accounts[0]!,
+      businessId: admin.businesses[0]!.id,
+    } as unknown as Account;
+    expect(() => validateSeedData(admin)).toThrow(/ADMIN/);
+    const owner = buildSeedData(now);
+    owner.accounts[1] = { ...owner.accounts[1]!, businessId: null } as unknown as Account;
+    expect(() => validateSeedData(owner)).toThrow(/OWNER/);
+  });
 });
 
 function fakeAdmin() {
-  type User = { id: string; email: string; email_confirmed_at: string };
+  type User = {
+    id: string;
+    email: string;
+    email_confirmed_at: string;
+    password?: string | undefined;
+  };
   const users: User[] = [];
   const api = {
     listUsers: vi.fn(async ({ page, perPage }: { page: number; perPage: number }) => ({
       data: { users: users.slice((page - 1) * perPage, page * perPage) },
       error: null,
     })),
-    createUser: vi.fn(async ({ email }: { email: string }) => {
-      const user = { id: randomUUID(), email, email_confirmed_at: now.toISOString() };
+    createUser: vi.fn(async ({ email, password }: { email: string; password?: string }) => {
+      const user = { id: randomUUID(), email, password, email_confirmed_at: now.toISOString() };
       users.push(user);
       return { data: { user }, error: null };
     }),
@@ -317,6 +363,47 @@ describe('seed: Supabase Auth con dobles, sin red', () => {
       ),
     ).toBe(true);
     expect(first.find((p) => p.email === SEED_ADMIN_EMAIL)?.role).toBe('ADMIN');
+  });
+  it('crea el ADMIN global y los OWNER por separado; solo admin@ y owner@ reciben la password conocida', async () => {
+    const { users, api, admin } = fakeAdmin();
+    const data = buildSeedData(now);
+    const seedPassword = password();
+    // Igual que seed.ts: primero el ADMIN global, luego los OWNER.
+    const platform = await ensureSeedUsers(
+      admin,
+      data.accounts.filter((a) => a.email === SEED_ADMIN_EMAIL),
+      seedPassword,
+    );
+    const owners = await ensureSeedUsers(
+      admin,
+      data.accounts.filter((a) => a.email !== SEED_ADMIN_EMAIL),
+      seedPassword,
+    );
+    expect(platform).toEqual([
+      {
+        id: expect.any(String),
+        email: SEED_ADMIN_EMAIL,
+        role: 'ADMIN',
+        businessId: null,
+        fullName: data.accounts[0]!.fullName,
+      },
+    ]);
+    expect(owners.map((o) => o.role)).toEqual(['OWNER', 'OWNER']);
+    expect(owners.some((o) => o.id === platform[0]!.id)).toBe(false);
+    expect(api.createUser).toHaveBeenCalledTimes(3);
+    const known = users.filter((u) => u.password === seedPassword).map((u) => u.email);
+    expect(known.sort()).toEqual([SEED_ADMIN_EMAIL, SEED_OWNER_EMAIL].sort());
+    expect(users.find((u) => u.email === 'owner2@turnosmart.test')!.password).not.toBe(
+      seedPassword,
+    );
+    expect(
+      await ensureSeedUsers(
+        admin,
+        data.accounts.filter((a) => a.email === SEED_ADMIN_EMAIL),
+        password(),
+      ),
+    ).toEqual(platform);
+    expect(api.createUser).toHaveBeenCalledTimes(3);
   });
   it('pagina usuarios existentes sin depender de la primera pagina', async () => {
     const { users, admin, api } = fakeAdmin();
@@ -482,6 +569,12 @@ describe('seed: repeticion y aislamiento del runner con dobles', () => {
     });
     expect(rows().business!.get(untouched.id)).toEqual(untouched);
     expect(rows().business!.size).toBe(3);
+    const seeded = [...rows().profile!.values()];
+    expect(seeded.filter((p) => p.role === 'ADMIN')).toEqual([
+      expect.objectContaining({ email: SEED_ADMIN_EMAIL, businessId: null }),
+    ]);
+    for (const p of seeded.filter((p) => p.role === 'OWNER'))
+      expect(rows().business!.has(p.businessId as string)).toBe(true);
     for (const a of rows().appointment!.values()) {
       expect(rows().service!.get(a.serviceId as string)?.businessId).toBe(a.businessId);
       expect(rows().customer!.get(a.customerId as string)?.businessId).toBe(a.businessId);
@@ -502,5 +595,36 @@ describe('seed: repeticion y aislamiento del runner con dobles', () => {
     await expect(seedDomain(prisma, data, profiles)).rejects.toThrow(/superpuestos/);
     expect(rows().business!.size).toBe(0);
     expect(rows().appointment!.size).toBe(1);
+  });
+  it('rechaza una cuenta que sea ADMIN de plataforma y OWNER a la vez, sin escribir nada', async () => {
+    const data = buildSeedData(now);
+    const profiles = data.accounts.map((a) => ({ ...a, id: randomUUID() }));
+    const [admin, owner] = profiles;
+    // Se cancela en la etapa de perfiles, antes de crear negocios o perfiles.
+    const conflict = { diagnostic: { stage: 'profiles', type: 'SeedError' } };
+
+    // El ADMIN del seed ya tiene un perfil OWNER de negocio en la base.
+    let db = memoryPrisma();
+    db.rows().profile!.set(admin!.id, {
+      id: admin!.id,
+      email: admin!.email,
+      businessId: data.businesses[0]!.id,
+      role: 'OWNER',
+    });
+    await expect(seedDomain(db.prisma, data, profiles)).rejects.toMatchObject(conflict);
+    expect(db.rows().business!.size).toBe(0);
+    expect(db.rows().profile!.size).toBe(1);
+
+    // Un OWNER del seed ya es ADMIN global en la base.
+    db = memoryPrisma();
+    db.rows().profile!.set(owner!.id, {
+      id: owner!.id,
+      email: owner!.email,
+      businessId: null,
+      role: 'ADMIN',
+    });
+    await expect(seedDomain(db.prisma, data, profiles)).rejects.toMatchObject(conflict);
+    expect(db.rows().business!.size).toBe(0);
+    expect(db.rows().profile!.size).toBe(1);
   });
 });

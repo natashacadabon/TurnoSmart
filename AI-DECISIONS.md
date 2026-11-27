@@ -547,6 +547,39 @@ D08 sigue pendiente para accesos directos a Supabase. Sin commit ni push.
 
 ---
 
+## 2026-11-26 - Integración de roles ADMIN global/OWNER, acceso y endurecimiento (Yae)
+
+**Problema abordado**
+
+El equipo redefinió los roles: un ADMIN global administra negocios y propietarios, y el OWNER opera su negocio. Yae debía cerrar FINAL-10 (registro, verificación y recuperación), FINAL-02, FINAL-05B y FINAL-08 sobre ese modelo, que Sofi implementó en paralelo (PR #36).
+
+**Prompt / herramienta utilizada**
+
+Claude Code. Se pidió implementar la parte de Yae del backlog final y, después de traer `dev`, integrar el trabajo con el modelo de roles de Sofi.
+
+**Código / arquitectura propuesta por IA**
+
+- Primera propuesta: tabla `platform_admins` separada, enum sólo con OWNER y acceso sólo por invitación.
+- Integración: se adoptó el modelo de Sofi (PRs #36 y #46): ADMIN en `profiles` con `business_id` NULL, `profiles.active`, `/me` con `platformAdmin` y `accountDisabled`, panel ADMIN e invitaciones por token. Se descartaron los equivalentes propios (`access`/`reason`, `ACCOUNT_DISABLED`, `/sin-acceso`) y se agregó sólo un índice de email único para ADMIN.
+- Cuenta del invitado con verificación de correo, recuperación de contraseña y enlaces vencidos, con Mailpit local.
+- Revocación total de la Data API para `anon`/`authenticated`, con RLS como segunda barrera.
+- Lista cerrada de factores hacia Gemini, filtro de salida, tope global, circuito y factor de confirmación.
+- Métricas protegidas por token, SHA en logs y `/health`, y redacción de campos sensibles.
+
+**Validación y corrección humana**
+
+- Yae eligió construir sobre el modelo de Sofi, que ya estaba en `dev` y es la base de FINAL-11; se descartó `platform_admins`.
+- El alta de negocios es sólo por invitación, como definió Sofi en #46; `/register` crea la cuenta del invitado, que después acepta el token en `/onboarding`.
+- Los ADMIN por negocio existentes quedan como ADMIN globales, tal como definió la migración de Sofi.
+- Se corrigió el seed para que `owner@turnosmart.test` tenga la contraseña local conocida.
+- Las suites unitarias e integración se ejecutaron sobre bases descartables para no borrar datos demo.
+
+**Resultado**
+
+Código y pruebas en la rama `feat/final-yae-identidad-seguridad-ia`; detalle en [identidad y seguridad](docs/identity-security.md). Falta la evidencia en entornos publicados listada en ese documento.
+
+---
+
 ## 2026-11-11 - Detalle operativo y reprogramación de turnos
 
 **Problema abordado**

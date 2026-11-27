@@ -59,6 +59,8 @@ Configurar `GEMINI_API_KEY` para habilitar las explicaciones. La [guía de opera
 | Ruta                                                     | Uso                                                                             |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `/login`, `/onboarding`                                  | Acceso y aceptación de invitaciones de OWNER.                                   |
+| `/register`, `/forgot-password`, `/reset-password`       | Cuenta para el invitado, verificación de correo y recuperación de contraseña.   |
+| `/auth/callback`                                         | Destino de los enlaces de correo de Supabase Auth (vencidos o inválidos).       |
 | `/`, `/appointments/[id]`                                | Agenda y detalle de turno.                                                      |
 | `/customers`, `/services`, `/settings`, `/notifications` | Clientes, servicios y disponibilidad, configuración y centro de notificaciones. |
 | `/turno/gestionar`                                       | Página pública que requiere un enlace válido para operar sobre un turno.        |

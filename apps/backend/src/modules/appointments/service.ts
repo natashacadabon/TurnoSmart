@@ -102,7 +102,12 @@ export class AppointmentService {
 
   private async persistRiskScore(
     businessId: string,
-    appointment: { id: string; customerId: string; startsAt: Date },
+    appointment: {
+      id: string;
+      customerId: string;
+      startsAt: Date;
+      confirmationStatus?: 'PENDING' | 'CONFIRMED';
+    },
   ) {
     const history = await this.appointments.customerStats(
       businessId,
@@ -113,6 +118,7 @@ export class AppointmentService {
       startsAt: appointment.startsAt,
       now: this.clock(),
       history,
+      confirmed: appointment.confirmationStatus === 'CONFIRMED',
     });
     await this.risk.upsert(businessId, {
       appointmentId: appointment.id,

@@ -4,7 +4,8 @@ import { PrismaClient } from '@prisma/client';
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { assertSupabaseTarget } from './config/supabase-target.js';
-import { logger } from './lib/logger.js';
+import { logger, setLogContext } from './lib/logger.js';
+import { releaseInfo } from './lib/release.js';
 import { SupabaseTokenVerifier } from './lib/supabase-verifier.js';
 import { vercelPreviewCors } from './lib/vercel-preview-cors.js';
 import { GeminiLlmClient } from './modules/ai/gemini-client.js';
@@ -49,8 +50,15 @@ const explainer = env.GEMINI_API_KEY
   ? new RiskExplainer(new GeminiLlmClient(env.GEMINI_API_KEY, env.GEMINI_MODEL), {
       timeoutMs: env.GEMINI_TIMEOUT_MS,
       maxOutputTokens: env.GEMINI_MAX_OUTPUT_TOKENS,
+      globalLimit: { limit: env.AI_GLOBAL_LIMIT_PER_WINDOW, windowMs: env.AI_RATE_LIMIT_WINDOW_MS },
+      circuit: {
+        failureThreshold: env.AI_CIRCUIT_FAILURES,
+        cooldownMs: env.AI_CIRCUIT_COOLDOWN_MS,
+      },
     })
   : null;
+const release = releaseInfo(process.env, env.RELEASE_SHA);
+setLogContext({ sha: release.sha });
 
 const emailProcessor = emailDispatcher ? emailProcessing(() => emailDispatcher.drain()) : null;
 const processEmails = () => emailProcessor?.request();
@@ -89,6 +97,11 @@ const app = createApp({
     await prisma.$queryRaw`SELECT 1`;
     return true;
   },
+  release,
+  metrics: {
+    token: env.METRICS_TOKEN,
+    publicWithoutToken: env.NODE_ENV !== 'production',
+  },
 });
 
 const host =
@@ -99,6 +112,15 @@ const server = app.listen(env.PORT, host, () => {
   logger.info('server_started', {
     port: env.PORT,
     ai: explainer ? env.GEMINI_MODEL : 'disabled',
+    sha: release.sha,
+    source: release.source,
+    metrics: env.METRICS_TOKEN ? 'token' : env.NODE_ENV !== 'production' ? 'open' : 'disabled',
+  });
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error('unhandled_rejection', {
+    name: reason instanceof Error ? reason.name : typeof reason,
+    message: reason instanceof Error ? reason.message : undefined,
   });
 });
 

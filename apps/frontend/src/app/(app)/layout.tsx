@@ -13,9 +13,13 @@ import { ToastProvider } from '@/components/ToastProvider';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { NotificationProvider } from '@/components/notifications/NotificationProvider';
 import { Brand, softDangerButtonSx } from '@/components/ui';
+import { accountHome } from '@/lib/account-home';
 import styles from './layout.module.css';
 
-/** Navegación protegida: sin sesión → login; sin negocio → onboarding; cuenta inaccesible → error. */
+/**
+ * Pantallas del negocio, sólo para un OWNER activo. Sin sesión → login; ADMIN global → panel de
+ * la plataforma; sin perfil o desactivado → aviso de acceso; API caída → error con reintento.
+ */
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { status, me, meError } = useAuth();
   const router = useRouter();
@@ -23,13 +27,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status === 'signedOut') router.replace('/login');
-    else if (status === 'signedIn' && me?.platformAdmin) router.replace('/admin');
-    else if (status === 'signedIn' && me && !me.onboarded) router.replace('/onboarding');
+    else if (status === 'signedIn' && me && !me.onboarded) router.replace(accountHome(me));
   }, [status, me, router]);
 
   if (status === 'signedIn' && !me && meError) return <AccountError message={meError} />;
 
-  if (status !== 'signedIn' || !me?.onboarded || me.platformAdmin) {
+  if (status !== 'signedIn' || !me?.onboarded) {
     return (
       <div className={styles.loading}>
         <CircularProgress aria-label="Cargando" />

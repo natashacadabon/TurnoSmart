@@ -149,7 +149,7 @@ const controlledMessages: Record<string, string> = {
   'No se pudo iniciar sesion: si la cuenta ya existia, usa su password original. El seed no la cambia.':
     'SEED_LOGIN_FAILED',
   'El token del administrador no pudo verificarse.': 'SEED_TOKEN_INVALID',
-  'No se pudo verificar el perfil OWNER del administrador.': 'SEED_OWNER_INVALID',
+  'No se pudo verificar el perfil ADMIN global.': 'SEED_ADMIN_INVALID',
   'Auth no devolvio un usuario creado.': 'SEED_AUTH_USER_MISSING',
 };
 // Mensajes construidos solo con nombres de variables conocidos, nunca con sus valores.

@@ -12,9 +12,24 @@ import {
   Typography,
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
+import { AuthErrorAlert } from '@/components/AuthErrorAlert';
+import { AuthLink } from '@/components/AuthLink';
 import { useAuth } from '@/components/AuthProvider';
+import { accountHome } from '@/lib/account-home';
+
+const subscribeNoop = () => () => {};
+const readSearch = () => window.location.search;
+
+/** Avisos que llegan por query desde los flujos de verificación y recuperación. */
+function notice(search: string): string | null {
+  const params = new URLSearchParams(search);
+  if (params.get('verified') === '1') return 'Tu correo quedó verificado. Ya podés iniciar sesión.';
+  if (params.get('reset') === 'ok')
+    return 'Actualizaste tu contraseña. Iniciá sesión con la nueva.';
+  return null;
+}
 
 export default function LoginPage() {
   const { status, me, signIn } = useAuth();
@@ -24,16 +39,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const info = notice(useSyncExternalStore(subscribeNoop, readSearch, () => ''));
 
   useEffect(() => {
-    if (status === 'signedIn')
-      router.replace(
-        me?.platformAdmin
-          ? '/admin'
-          : me?.accountDisabled || me?.onboarded === false
-            ? '/onboarding'
-            : '/customers',
-      );
+    if (status === 'signedIn' && me) router.replace(accountHome(me));
   }, [status, me, router]);
 
   async function onSubmit(e: FormEvent) {
@@ -58,7 +67,8 @@ export default function LoginPage() {
             Ingresá con la cuenta de tu negocio.
           </Typography>
         </div>
-        {error && <Alert severity="error">{error}</Alert>}
+        {info && !error && <Alert severity="success">{info}</Alert>}
+        {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
         <TextField
           label="Email"
           type="email"
@@ -94,8 +104,12 @@ export default function LoginPage() {
         <Button type="submit" variant="contained" disabled={submitting || status === 'loading'}>
           {submitting ? 'Ingresando…' : 'Ingresar'}
         </Button>
+        <Typography variant="body2" sx={{ textAlign: 'center' }}>
+          <AuthLink href="/forgot-password">¿Olvidaste tu contraseña?</AuthLink>
+        </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-          ¿No tenés cuenta? Pedísela al administrador de tu negocio.
+          ¿Te invitaron a TurnoSmart? <AuthLink href="/register">Creá tu cuenta</AuthLink> con el
+          email de la invitación.
         </Typography>
       </Stack>
     </AuthLayout>

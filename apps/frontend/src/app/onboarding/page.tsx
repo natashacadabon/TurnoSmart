@@ -1,12 +1,15 @@
 'use client';
 
 import KeyRoundedIcon from '@mui/icons-material/KeyRounded';
+import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import { Alert, Button, Stack, TextField, Typography } from '@mui/material';
 import type { MeResponse } from '@turnosmart/shared';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
+import { AuthErrorAlert } from '@/components/AuthErrorAlert';
 import { useAuth } from '@/components/AuthProvider';
+import { softDangerButtonSx } from '@/components/ui';
 import { api, errorMessage, fieldErrors } from '@/lib/api';
 
 export default function OnboardingPage() {
@@ -60,7 +63,12 @@ export default function OnboardingPage() {
           <Alert severity="warning">
             No podés aceptar otra invitación mientras tu cuenta actual siga desactivada.
           </Alert>
-          <Button onClick={signOut} variant="outlined" sx={{ alignSelf: 'center' }}>
+          <Button
+            onClick={signOut}
+            variant="outlined"
+            startIcon={<LogoutRoundedIcon />}
+            sx={softDangerButtonSx}
+          >
             Salir
           </Button>
         </Stack>
@@ -76,7 +84,7 @@ export default function OnboardingPage() {
               OWNER ya están definidos por esa invitación.
             </Typography>
           </div>
-          {error && <Alert severity="error">{error}</Alert>}
+          {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
           <TextField
             label="Token de invitación"
             placeholder="Pegá el token recibido"
@@ -100,8 +108,9 @@ export default function OnboardingPage() {
           </Button>
           <Button
             onClick={signOut}
-            color="inherit"
-            sx={{ alignSelf: 'center', color: 'text.secondary' }}
+            variant="outlined"
+            startIcon={<LogoutRoundedIcon />}
+            sx={softDangerButtonSx}
           >
             Salir y usar otra cuenta
           </Button>

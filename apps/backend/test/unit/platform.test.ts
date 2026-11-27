@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { loadEnv } from '../../src/config/env.js';
@@ -208,13 +209,14 @@ describe('plataforma', () => {
   });
 
   it('JSON mal formado devuelve 422', async () => {
-    const { app, verifier } = buildTestApp();
-    const { token } = verifier.addUser();
+    const { app, verifier, identity } = buildTestApp();
+    const { id, token } = verifier.addUser();
+    identity.addMember(id, randomUUID(), 'OWNER');
     const res = await request(app)
-      .post('/api/onboarding')
+      .post('/api/customers')
       .set('Authorization', `Bearer ${token}`)
       .set('Content-Type', 'application/json')
-      .send('{"businessName":');
+      .send('{"fullName":');
     expect(res.status).toBe(422);
   });
 

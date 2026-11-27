@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/** Una variable vacía copiada de .env.example equivale a no definirla. */
+const emptyAsUndefined = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === '' ? undefined : value), schema);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -60,6 +64,19 @@ const envSchema = z.object({
   GEMINI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(2048).default(400),
   AI_RATE_LIMIT_PER_USER: z.coerce.number().int().min(1).default(10),
   AI_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(3_600_000),
+  // Tope de costo por instancia y circuito ante fallas seguidas del proveedor (FINAL-05B).
+  AI_GLOBAL_LIMIT_PER_WINDOW: z.coerce.number().int().min(1).default(200),
+  AI_CIRCUIT_FAILURES: z.coerce.number().int().min(1).max(20).default(3),
+  AI_CIRCUIT_COOLDOWN_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
+  // Observabilidad (FINAL-08): /metrics exige `Authorization: Bearer <METRICS_TOKEN>`.
+  // Sin token, /metrics responde 404 fuera de desarrollo y test.
+  METRICS_TOKEN: emptyAsUndefined(z.string().trim().min(32).optional()),
+  RELEASE_SHA: emptyAsUndefined(
+    z
+      .string()
+      .regex(/^[0-9a-f]{7,40}$/)
+      .optional(),
+  ),
 });
 
 export type Env = z.infer<typeof envSchema>;

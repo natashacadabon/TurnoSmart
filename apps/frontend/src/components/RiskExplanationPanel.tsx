@@ -17,7 +17,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { RiskExplanationResponse, RiskLevel } from '@turnosmart/shared';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { EmptyState } from './ui';
 
@@ -83,39 +83,81 @@ function ScoreGauge({
   );
 }
 
+type PanelError = { text: string; severity: 'error' | 'info' };
+
+/** Pide la explicación. Sin refresh, el servidor reutiliza la de la versión actual del score. */
+function fetchExplanation(appointmentId: string, refresh: boolean) {
+  return api<RiskExplanationResponse>(
+    `/api/appointments/${appointmentId}/risk/explanation${refresh ? '?refresh=true' : ''}`,
+    { method: 'POST' },
+  );
+}
+
+function toPanelError(err: unknown): PanelError {
+  // Sin score, IA no configurada o límite alcanzado no son fallas de la pantalla: se informan.
+  const info =
+    err instanceof ApiError &&
+    ['RISK_NOT_AVAILABLE', 'AI_UNAVAILABLE', 'RATE_LIMITED', 'AI_RATE_LIMITED'].includes(err.code);
+  return { text: errorMessage(err), severity: info ? 'info' : 'error' };
+}
+
 /**
- * Explicación del score bajo demanda (A08). La llamada a Gemini sólo se hace al pulsar el botón;
- * si falla, el resto de la pantalla y la agenda siguen funcionando.
+ * Riesgo de ausencia con explicación de IA (A08). Con `autoLoad` se pide sola al abrir la pantalla:
+ * el servidor guarda la explicación de cada versión del score, así que sólo llama a Gemini la
+ * primera vez o cuando el score cambió (al confirmar o reprogramar el turno se vuelve a montar).
+ * Si falla, el resto de la pantalla y la agenda siguen funcionando.
  */
 export function RiskExplanationPanel({
   appointmentId,
   compact = false,
+  autoLoad = false,
   initialResult,
   onExplained,
 }: {
   appointmentId: string;
   compact?: boolean;
+  autoLoad?: boolean;
   initialResult?: RiskExplanationResponse | undefined;
   onExplained?(result: RiskExplanationResponse): void;
 }) {
   const [result, setResult] = useState<RiskExplanationResponse | null>(initialResult ?? null);
-  const [error, setError] = useState<{ text: string; severity: 'error' | 'info' } | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<PanelError | null>(null);
+  const [loading, setLoading] = useState(autoLoad && !initialResult);
   const heading = useId();
+
+  useEffect(() => {
+    if (!autoLoad || initialResult) return;
+    let active = true;
+    fetchExplanation(appointmentId, false).then(
+      (explanation) => {
+        if (!active) return;
+        setResult(explanation);
+        setLoading(false);
+        onExplained?.(explanation);
+      },
+      (err: unknown) => {
+        if (!active) return;
+        setError(toPanelError(err));
+        setLoading(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+    // Se pide una vez por montaje; el padre vuelve a montar el panel cuando cambia el turno.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function requestExplanation() {
     setLoading(true);
     setError(null);
     try {
-      const explanation = await api<RiskExplanationResponse>(
-        `/api/appointments/${appointmentId}/risk/explanation`,
-        { method: 'POST' },
-      );
+      // Con una explicación a la vista, el botón pide una nueva; si no, reutiliza la guardada.
+      const explanation = await fetchExplanation(appointmentId, result !== null);
       setResult(explanation);
       onExplained?.(explanation);
     } catch (err) {
-      const info = err instanceof ApiError && err.code === 'RISK_NOT_AVAILABLE';
-      setError({ text: errorMessage(err), severity: info ? 'info' : 'error' });
+      setError(toPanelError(err));
     } finally {
       setLoading(false);
     }
@@ -131,7 +173,7 @@ export function RiskExplanationPanel({
       onClick={requestExplanation}
       disabled={loading}
     >
-      {loading ? 'Consultando IA…' : result ? 'Volver a explicar' : 'Explicar con IA'}
+      {loading ? 'Consultando IA…' : result ? 'Generar de nuevo' : 'Explicar con IA'}
     </Button>
   );
 
@@ -167,7 +209,7 @@ export function RiskExplanationPanel({
           </Alert>
         )}
 
-        {!result && !loading && !compact && (
+        {!result && !loading && !compact && !error && (
           <EmptyState
             icon={<InsightsRoundedIcon />}
             title="¿Qué tan probable es que el cliente venga?"
