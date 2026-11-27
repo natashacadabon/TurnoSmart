@@ -258,6 +258,27 @@ test('Promoción usa la operación oficial con teamId y acredita job y dominio a
   assert(!f.calls.some((call) => /teams|user|domains|aliases/.test(call.path)));
 });
 
+test('La verificación posterior identifica los campos inválidos sin publicar valores de la API', async () => {
+  for (const [field, assigned] of [
+    ['aliasAssigned', { aliasAssigned: false }],
+    ['ownerId', { ownerId: 'fixture-secret' }],
+    ['meta.turnosmartMergeSha', { meta: { turnosmartMergeSha: 'fixture-secret' } }],
+    ['alias', { alias: ['https://fixture-secret/?token=fixture-secret'] }],
+  ]) {
+    const f = promotionFixture({ assigned });
+    await assert.rejects(
+      () => promoteProduction(f.source, f.request, async () => {}),
+      (error) => {
+        assert(error.message.includes(`campos inválidos=${field}.`));
+        assert.match(error.message, /fase=verificación posterior/);
+        assert(!error.message.includes('fixture-secret'));
+        return true;
+      },
+    );
+    assert.equal(f.calls.filter((call) => call.method === 'POST').length, 1);
+  }
+});
+
 test('Promoción espera un job pendiente sin repetir el POST y propaga rechazos HTTP', async () => {
   const override = {
     completed: {
