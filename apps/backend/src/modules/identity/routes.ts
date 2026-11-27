@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import {
-  onboardingSchema,
   businessNotificationPreferencesSchema,
   updateBusinessNotificationPreferencesSchema,
   updateBusinessSchema,
@@ -48,7 +47,7 @@ export function identityRouter(deps: {
   const auth = authenticate(deps.verifier);
 
   router.get('/me', auth, async (req, res) => {
-    const admin = await deps.identity.findPlatformAdmin?.(req.user!.id);
+    const admin = await deps.identity.findPlatformAdmin(req.user!.id);
     if (admin) {
       res.json({
         onboarded: false,
@@ -63,25 +62,8 @@ export function identityRouter(deps: {
     res.json(toMe(req.user!, found));
   });
 
-  router.post('/onboarding', auth, async (req, res) => {
-    if (await deps.identity.findPlatformAdmin?.(req.user!.id)) {
-      throw new AppError(
-        'FORBIDDEN',
-        'Las cuentas ADMIN no pueden crear un negocio desde onboarding',
-      );
-    }
-    const input = parse(onboardingSchema, req.body);
-    if (!req.user!.email) {
-      throw new AppError('VALIDATION_ERROR', 'La cuenta de Auth no tiene email');
-    }
-    const result = await deps.identity.onboard({
-      userId: req.user!.id,
-      email: req.user!.email,
-      businessName: input.businessName,
-      timezone: input.timezone,
-      fullName: input.fullName ?? null,
-    });
-    res.status(result.created ? 201 : 200).json(toMe(req.user!, result));
+  router.post('/onboarding', auth, async (_req, _res) => {
+    throw new AppError('FORBIDDEN', 'El alta de OWNER requiere una invitación emitida por ADMIN');
   });
 
   router.patch(

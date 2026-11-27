@@ -2,7 +2,7 @@
 
 `GET /api/services` lista servicios. `POST /api/services` crea y `PATCH /api/services/:id` edita, activa o desactiva. La interfaz de administración está en `/services`. Ver parámetros, respuestas y errores en el [contrato HTTP](../../../../../docs/api-services-availability.md#servicios).
 
-OWNER, ADMIN y STAFF pueden leer. OWNER y ADMIN pueden escribir. Express autentica al usuario y resuelve el negocio a partir del perfil. La unicidad de nombre por negocio se aplica en PostgreSQL, incluye inactivos y distingue mayúsculas. Las colisiones devuelven `409 SERVICE_NAME_CONFLICT`.
+Sólo OWNER puede leer y escribir servicios. ADMIN gestiona la plataforma desde su panel global y no accede a esta ruta. Express autentica al usuario y resuelve el negocio a partir del perfil. La unicidad de nombre por negocio se aplica en PostgreSQL, incluye inactivos y distingue mayúsculas. Las colisiones devuelven `409 SERVICE_NAME_CONFLICT`.
 
 Al modificar duración o actividad, el repositorio comparte el bloqueo de la fila del negocio con la reserva y reprogramación. Los turnos existentes conservan el intervalo guardado. Las reservas nuevas y las reprogramaciones usan la configuración vigente.
 

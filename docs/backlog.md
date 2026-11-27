@@ -23,7 +23,7 @@ Orden sugerido: resolver formato y permisos, ensayar actualización y recuperaci
 ### FINAL-02 · Verificar permisos del entorno de entrega
 
 - [ ] Inventariar permisos efectivos de Data API/RLS en clientes, servicios, disponibilidad, scores y demás tablas de dominio; corregir accesos directos que eludan las operaciones autorizadas.
-- [ ] Probar aislamiento entre dos negocios, accesos `anon`/`authenticated`, roles OWNER/ADMIN/STAFF y rechazo de acciones públicas deshabilitadas.
+- [ ] Probar aislamiento entre dos negocios, accesos `anon`/`authenticated`, roles OWNER/ADMIN global y rechazo de acciones públicas deshabilitadas.
 
 **Cierre:** evidencia de denegación de lecturas entre negocios y escrituras no autorizadas. P0-06 verificó ACL/RLS del fixture, no los permisos de todas las tablas del proyecto Supabase real.
 

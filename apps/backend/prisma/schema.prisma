@@ -11,7 +11,13 @@ datasource db {
 enum ProfileRole {
   OWNER
   ADMIN
-  STAFF
+}
+
+enum OwnerInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
 enum AppointmentStatus {
@@ -85,6 +91,7 @@ model Business {
   id                          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                        String
   timezone                    String             @default("America/Argentina/Buenos_Aires")
+  active                      Boolean            @default(true)
   bookingEmailEnabled         Boolean            @default(true) @map("booking_email_enabled")
   confirmationEmailEnabled    Boolean            @default(true) @map("confirmation_email_enabled")
   remindersEnabled            Boolean            @default(true) @map("reminders_enabled")
@@ -109,6 +116,7 @@ model Business {
   riskScores                  RiskScore[]
   reminders                   Reminder[]
   notifications               Notification[]
+  ownerInvitations            OwnerInvitation[]
 
   @@map("businesses")
 }
@@ -119,6 +127,7 @@ model Profile {
   businessId        String?            @map("business_id") @db.Uuid
   email             String
   fullName          String?            @map("full_name")
+  active            Boolean            @default(true)
   role              ProfileRole        @default(OWNER)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -129,6 +138,25 @@ model Profile {
   @@unique([businessId, email])
   @@index([businessId])
   @@map("profiles")
+}
+
+model OwnerInvitation {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId String                 @map("business_id") @db.Uuid
+  email      String
+  fullName   String?                @map("full_name")
+  tokenHash  String                 @unique @map("token_hash")
+  status     OwnerInvitationStatus  @default(PENDING)
+  expiresAt  DateTime               @map("expires_at") @db.Timestamptz(3)
+  acceptedAt DateTime?              @map("accepted_at") @db.Timestamptz(3)
+  revokedAt  DateTime?              @map("revoked_at") @db.Timestamptz(3)
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  business   Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([email, status])
+  @@map("owner_invitations")
 }
 
 model Customer {

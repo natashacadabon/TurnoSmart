@@ -27,7 +27,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (status === 'signedIn')
-      router.replace(me?.onboarded === false ? '/onboarding' : '/customers');
+      router.replace(
+        me?.platformAdmin ? '/admin' : me?.onboarded === false ? '/onboarding' : '/customers',
+      );
   }, [status, me, router]);
 
   async function onSubmit(e: FormEvent) {

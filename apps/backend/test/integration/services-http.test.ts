@@ -9,24 +9,22 @@ describe('servicios: integracion HTTP, auth y tenant', () => {
   let ctx: ReturnType<typeof buildTestApp>;
   let owner: { Authorization: string };
   let admin: { Authorization: string };
-  let staff: { Authorization: string };
   let other: { Authorization: string };
   beforeEach(() => {
     ctx = buildTestApp();
     const business = randomUUID();
-    const add = (role: 'OWNER' | 'ADMIN' | 'STAFF', businessId = business) => {
+    const add = (role: 'OWNER' | 'ADMIN', businessId = business) => {
       const user = ctx.verifier.addUser();
       ctx.identity.addMember(user.id, businessId, role);
       return { Authorization: `Bearer ${user.token}` };
     };
     owner = add('OWNER');
     admin = add('ADMIN');
-    staff = add('STAFF');
     other = add('OWNER', randomUUID());
   });
   const create = async () => request(ctx.app).post('/api/services').set(owner).send(payload);
 
-  it('crea con defaults, fechas UTC y DTO sin tenant; STAFF puede leer', async () => {
+  it('crea con defaults, fechas UTC y DTO sin tenant; OWNER puede leer', async () => {
     const res = await create();
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({
@@ -38,17 +36,17 @@ describe('servicios: integracion HTTP, auth y tenant', () => {
       createdAt: expect.stringMatching(/\.\d{3}Z$/),
       updatedAt: expect.any(String),
     });
-    const list = await request(ctx.app).get('/api/services').set(staff);
+    const list = await request(ctx.app).get('/api/services').set(owner);
     expect(list.status).toBe(200);
     expect(list.body).toEqual({
       data: [res.body.data],
       meta: { active: 'true', limit: 50, offset: 0, total: 1 },
     });
   });
-  it('ADMIN edita; PATCH conserva omitidos, admite null/0, desactiva y reactiva sin borrar', async () => {
+  it('OWNER edita; PATCH conserva omitidos, admite null/0, desactiva y reactiva sin borrar', async () => {
     const created = await create();
     const id = created.body.data.id;
-    const patch = await request(ctx.app).patch(`/api/services/${id}`).set(admin).send({
+    const patch = await request(ctx.app).patch(`/api/services/${id}`).set(owner).send({
       name: ' Corte nuevo ',
       description: ' ',
       priceCents: 0,
@@ -193,13 +191,13 @@ describe('servicios: integracion HTTP, auth y tenant', () => {
     ).toBe(422);
     expect((await request(ctx.app).post('/api/services').set(owner).send({})).status).toBe(422);
   });
-  it('STAFF no escribe aunque intente inyectar rol', async () => {
+  it('ADMIN global no escribe aunque intente inyectar rol', async () => {
     const res = await create();
     expect(
       (
         await request(ctx.app)
           .post('/api/services')
-          .set(staff)
+          .set(admin)
           .send({ ...payload, role: 'OWNER' })
       ).status,
     ).toBe(403);
@@ -207,7 +205,7 @@ describe('servicios: integracion HTTP, auth y tenant', () => {
       (
         await request(ctx.app)
           .patch(`/api/services/${res.body.data.id}`)
-          .set(staff)
+          .set(admin)
           .send({ active: false })
       ).status,
     ).toBe(403);
