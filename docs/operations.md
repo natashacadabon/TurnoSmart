@@ -185,14 +185,23 @@ el lock compartido por PR, sin eliminar recursos Dev/Production o ajenos.
 
 Para diagnosticar acceso Vercel sin desplegar: con `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
 `VERCEL_PROJECT_ID` y `DEPLOY_TARGET` ya inyectados de forma segura, ejecutar
-`node apps/frontend/scripts/deploy-config.mjs vercel-access`. Sólo hace GET contra
-el equipo y proyecto; Production verifica además `/v2/user`, requerido por CLI
-65.9.0. El mismo preflight se ejecuta antes del build. No imprimir el token ni
-pasarlo como argumento. Si el proyecto es accesible pero `/v2/user` devuelve 404,
-investigar la identidad/tipo de token y la compatibilidad de la CLI con Vercel;
-no asumir que `--scope` lo resuelve ni ampliar permisos automáticamente. El
+`node apps/frontend/scripts/deploy-config.mjs vercel-access`. Sólo hace GET del
+proyecto, comprobando `id` y `accountId`; no requiere listar equipos ni usuarios.
+El mismo preflight se ejecuta antes del build. No imprimir el token ni pasarlo
+como argumento. CLI 65.9.0 consulta usuario/equipo al promover incluso con scope;
+el workflow utiliza la misma operación REST de promoción con `teamId`, después
+de los controles existentes. Sólo informa éxito tras verificar el job y los
+dominios asignados al deployment Production del SHA candidato. No ampliar permisos
+automáticamente. Un POST aceptado sin confirmación queda fallido/pendiente; consultar
+Vercel antes de reintentar. El
 preflight no acredita una promoción real: al publicar siguen siendo obligatorios
 CI, backend/readiness y vigencia del SHA candidato, bundle y bypass existentes.
+
+Los jobs de settings y cleanup usan `environment.deployment: false`: mantienen
+los secretos, variables y restricciones del environment sin generar registros
+de publicación engañosos. Sólo los jobs publicadores generan deployments con URL.
+Ver [auditoría y procedimiento de estabilización](estabilizacion-cicd-2026-11-26.md)
+para la evidencia remota, servicios vigentes y pendientes externos.
 
 El primer merge incorpora codigo, no autoriza una publicacion. Conservar dev
 como default branch y un proyecto Vercel. Antes del merge, comprobar manualmente

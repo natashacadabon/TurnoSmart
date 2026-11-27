@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // Resultado esperado del build bajo prueba, no vuelve a decidir el proveedor del cliente.
-const api = process.env.E2E_API_URL ?? 'https://turnosmart-backend-demo.onrender.com';
+const api = process.env.E2E_API_URL ?? 'https://turnosmart.onrender.com';
 const supabase = 'https://demo.supabase.co';
 const userId = '10000000-0000-4000-8000-000000000001';
 const user = {

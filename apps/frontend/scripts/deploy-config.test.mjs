@@ -18,6 +18,7 @@ import {
   verifyPublished,
   verifyProductionBackend,
   verifyVercelAccess,
+  promoteProduction,
   assertTrustedPreviewContext,
   previewOutcome,
 } from './deploy-config.mjs';
@@ -109,39 +110,30 @@ test('El resumen distingue publicado, reutilizado, omitido y fallido sin falsos 
     assert.equal(previewOutcome(candidate, jobs, output, stable).status, 'fallido');
 });
 
-test('El preflight Vercel comprueba proyecto, equipo e identidad por GET sin exponer errores del proveedor', async () => {
+test('El preflight valida proyecto y cuenta sin requerir acceso global a equipo/usuario', async () => {
   const source = { ...env, VERCEL_TOKEN: 'fixture-secret' };
-  const calls = [];
   const project = { id: env.VERCEL_PROJECT_ID, accountId: env.VERCEL_ORG_ID };
-  const team = { id: env.VERCEL_ORG_ID, slug: 'natcads-projects' };
-  const bodies = {
-    [`/v9/projects/${env.VERCEL_PROJECT_ID}`]: project,
-    [`/v2/teams/${env.VERCEL_ORG_ID}`]: team,
-    '/v2/user': { user: { id: 'fixture-user' } },
-  };
-  const request = async (url, options) => {
-    calls.push(url.pathname);
-    assert.equal(url.origin, 'https://api.vercel.com');
-    assert.equal(
-      url.searchParams.get('teamId'),
-      url.pathname === '/v2/user' ? null : env.VERCEL_ORG_ID,
+  for (const target of ['preview', 'production']) {
+    const calls = [];
+    const result = await verifyVercelAccess(
+      { ...source, DEPLOY_TARGET: target },
+      async (url, options) => {
+        calls.push(url.pathname);
+        assert.equal(url.origin, 'https://api.vercel.com');
+        assert.equal(url.searchParams.get('teamId'), env.VERCEL_ORG_ID);
+        assert.equal(options.method, 'GET');
+        assert.equal(options.redirect, 'error');
+        assert.equal(options.headers.Authorization, 'Bearer fixture-secret');
+        assert(options.signal instanceof AbortSignal);
+        // Regresión real: este token puede acceder al proyecto pero no listar equipos/usuarios.
+        return url.pathname === `/v9/projects/${env.VERCEL_PROJECT_ID}`
+          ? Response.json(project)
+          : new Response(null, { status: 403 });
+      },
     );
-    assert.equal(options.method, 'GET');
-    assert.equal(options.redirect, 'error');
-    assert.equal(options.headers.Authorization, 'Bearer fixture-secret');
-    assert(options.signal instanceof AbortSignal);
-    return Response.json(bodies[url.pathname]);
-  };
-  assert.deepEqual(await verifyVercelAccess(source, request), {
-    teamId: team.id,
-    teamSlug: team.slug,
-    projectId: project.id,
-  });
-  assert.deepEqual(calls, Object.keys(bodies));
-  calls.length = 0;
-  await verifyVercelAccess({ ...source, DEPLOY_TARGET: 'preview' }, request);
-  assert(!calls.includes('/v2/user'), 'Preview no requiere acceso a la identidad personal');
-
+    assert.deepEqual(result, { teamId: project.accountId, projectId: project.id });
+    assert.deepEqual(calls, [`/v9/projects/${env.VERCEL_PROJECT_ID}`]);
+  }
   for (const status of [401, 403, 404, 429, 500]) {
     await assert.rejects(
       () => verifyVercelAccess(source, async () => new Response('fixture-secret', { status })),
@@ -154,64 +146,28 @@ test('El preflight Vercel comprueba proyecto, equipo e identidad por GET sin exp
   }
   await assert.rejects(
     () =>
-      verifyVercelAccess(source, async (url) =>
-        url.pathname === '/v2/user'
-          ? new Response(null, { status: 404 })
-          : Response.json(bodies[url.pathname]),
-      ),
-    /identidad requerida.*\/v2\/user.*HTTP 404/,
-  );
-  await assert.rejects(
-    () =>
       verifyVercelAccess(source, async () => {
         throw new Error('fixture-secret');
       }),
-    /red, timeout o redirect/,
+    /red\/timeout/,
   );
   await assert.rejects(
     () => verifyVercelAccess(source, async () => new Response('not-json')),
-    /respuesta inválida/,
+    /JSON inválida/,
   );
   for (const override of [
     { ...project, id: 'prj_other' },
     { ...project, accountId: 'team_other' },
+    null,
   ])
     await assert.rejects(
       () => verifyVercelAccess(source, async () => Response.json(override)),
       /no corresponde/,
     );
-  await assert.rejects(
-    () =>
-      verifyVercelAccess(source, async (url) =>
-        Response.json(
-          url.pathname.startsWith('/v2/teams')
-            ? { ...team, id: 'team_other' }
-            : bodies[url.pathname],
-        ),
-      ),
-    /Equipo Vercel inválido/,
-  );
-  for (const slug of [undefined, null, '', '../another-team'])
-    await assert.rejects(
-      () =>
-        verifyVercelAccess(source, async (url) =>
-          Response.json(
-            url.pathname.startsWith('/v2/teams') ? { ...team, slug } : bodies[url.pathname],
-          ),
-        ),
-      /Equipo Vercel inválido/,
-    );
-  await assert.rejects(
-    () =>
-      verifyVercelAccess(source, async (url) =>
-        Response.json(url.pathname === '/v2/user' ? { user: null } : bodies[url.pathname]),
-      ),
-    /identidad de usuario compatible/,
-  );
   for (const override of [
     { VERCEL_TOKEN: '' },
     { VERCEL_ORG_ID: 'natcads-projects' },
-    { VERCEL_PROJECT_ID: 'another-project' },
+    { VERCEL_PROJECT_ID: 'other' },
     { DEPLOY_TARGET: 'invalid' },
   ])
     await assert.rejects(() =>
@@ -219,6 +175,243 @@ test('El preflight Vercel comprueba proyecto, equipo e identidad por GET sin exp
         assert.fail('No debe consultar con configuración inválida'),
       ),
     );
+});
+
+function promotionFixture(overrides = {}) {
+  const source = {
+    ...env,
+    VERCEL_TOKEN: 'fixture-secret',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_SHA: 'a'.repeat(40),
+    DEPLOYMENT_URL: 'https://fixture.vercel.app',
+  };
+  const project = {
+    id: env.VERCEL_PROJECT_ID,
+    accountId: env.VERCEL_ORG_ID,
+    lastAliasRequest: { requestedAt: 100 },
+  };
+  const deployment = {
+    id: 'dpl_fixture',
+    projectId: project.id,
+    ownerId: project.accountId,
+    url: 'fixture.vercel.app',
+    target: 'production',
+    readyState: 'READY',
+    meta: { turnosmartMergeSha: source.GITHUB_SHA },
+  };
+  const completed = {
+    ...project,
+    lastAliasRequest: {
+      requestedAt: Date.now(),
+      type: 'promote',
+      toDeploymentId: deployment.id,
+      jobStatus: 'succeeded',
+    },
+  };
+  const calls = [];
+  const request = async (url, options) => {
+    calls.push({ path: url.pathname, method: options.method });
+    assert.equal(url.origin, 'https://api.vercel.com');
+    assert.equal(url.searchParams.get('teamId'), env.VERCEL_ORG_ID);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.Authorization, 'Bearer fixture-secret');
+    if (options.method === 'POST') {
+      assert.equal(url.pathname, `/v10/projects/${project.id}/promote/${deployment.id}`);
+      assert.equal(options.body, '{}');
+      if (overrides.postError) throw new Error('fixture-secret');
+      return new Response(null, { status: 202 });
+    }
+    const posted = calls.some((call) => call.method === 'POST');
+    if (url.pathname === `/v9/projects/${project.id}`)
+      return Response.json(
+        posted ? { ...completed, ...overrides.completed } : { ...project, ...overrides.project },
+      );
+    if (url.pathname.startsWith('/v13/deployments/'))
+      return Response.json({
+        ...deployment,
+        ...overrides.deployment,
+        ...(posted
+          ? {
+              aliasAssigned: true,
+              aliasError: null,
+              alias: ['production.vercel.app'],
+              ...overrides.assigned,
+            }
+          : {}),
+      });
+    assert.fail('Consulta no esperada');
+  };
+  return { source, request, calls };
+}
+
+test('Promoción usa la operación oficial con teamId y acredita job y dominio antes de éxito', async () => {
+  const f = promotionFixture();
+  assert.equal(
+    await promoteProduction(f.source, f.request, async () => {}),
+    'https://production.vercel.app',
+  );
+  assert.equal(f.calls.filter((call) => call.method === 'POST').length, 1);
+  assert(!f.calls.some((call) => /teams|user|domains|aliases/.test(call.path)));
+});
+
+test('Promoción espera un job pendiente sin repetir el POST y propaga rechazos HTTP', async () => {
+  const override = {
+    completed: {
+      lastAliasRequest: {
+        requestedAt: Date.now(),
+        type: 'promote',
+        toDeploymentId: 'dpl_fixture',
+        jobStatus: 'pending',
+      },
+    },
+  };
+  const f = promotionFixture(override);
+  let waits = 0;
+  assert.equal(
+    await promoteProduction(f.source, f.request, async () => {
+      waits++;
+      override.completed.lastAliasRequest.jobStatus = 'succeeded';
+    }),
+    'https://production.vercel.app',
+  );
+  assert.equal(waits, 1);
+  assert.equal(f.calls.filter((call) => call.method === 'POST').length, 1);
+  for (const status of [401, 403, 404, 429, 500]) {
+    const rejected = promotionFixture();
+    let posts = 0;
+    await assert.rejects(
+      () =>
+        promoteProduction(rejected.source, async (url, options) => {
+          if (options.method !== 'POST') return rejected.request(url, options);
+          posts++;
+          return new Response('fixture-secret', { status });
+        }),
+      (error) => {
+        assert.match(error.message, new RegExp(`HTTP ${status}`));
+        assert(!error.message.includes('fixture-secret'));
+        return true;
+      },
+    );
+    assert.equal(posts, 1);
+  }
+});
+
+test('La promoción rechaza Preview, otro proyecto, cuenta, SHA o estado previo inválido antes del POST', async () => {
+  for (const override of [
+    { deployment: { target: null } },
+    { deployment: { target: 'preview' } },
+    { deployment: { projectId: 'prj_other' } },
+    { deployment: { ownerId: 'team_other' } },
+    { deployment: { readyState: 'BUILDING' } },
+    { deployment: { url: 'other.vercel.app' } },
+    { deployment: { meta: { turnosmartMergeSha: 'b'.repeat(40) } } },
+    { deployment: { id: '../other' } },
+    { project: { accountId: 'team_other' } },
+    { project: { rollingRelease: { active: true } } },
+    { project: { lastAliasRequest: { requestedAt: 'invalid' } } },
+  ]) {
+    const f = promotionFixture(override);
+    await assert.rejects(() => promoteProduction(f.source, f.request, async () => {}));
+    assert(!f.calls.some((call) => call.method === 'POST'), JSON.stringify(override));
+  }
+  for (const override of [
+    { GITHUB_REF: 'refs/heads/dev' },
+    { DEPLOY_TARGET: 'preview' },
+    { GITHUB_SHA: 'head' },
+    { DEPLOYMENT_URL: 'https://fixture.vercel.app/?token=x' },
+  ]) {
+    const f = promotionFixture();
+    await assert.rejects(() => promoteProduction({ ...f.source, ...override }, f.request));
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test('Aceptar la petición no acredita publicación: rechaza fallos, reemplazos, estados antiguos y dominios ausentes', async () => {
+  for (const override of [
+    ...['failed', 'skipped', 'pending', 'in-progress'].map((jobStatus) => ({
+      completed: {
+        lastAliasRequest: {
+          requestedAt: Date.now(),
+          type: 'promote',
+          toDeploymentId: 'dpl_fixture',
+          jobStatus,
+        },
+      },
+    })),
+    {
+      completed: {
+        lastAliasRequest: {
+          requestedAt: Date.now(),
+          type: 'rollback',
+          toDeploymentId: 'dpl_fixture',
+          jobStatus: 'succeeded',
+        },
+      },
+    },
+    {
+      completed: {
+        lastAliasRequest: {
+          requestedAt: Date.now(),
+          type: 'promote',
+          toDeploymentId: 'dpl_other',
+          jobStatus: 'succeeded',
+        },
+      },
+    },
+    {
+      completed: {
+        lastAliasRequest: {
+          requestedAt: 100,
+          type: 'promote',
+          toDeploymentId: 'dpl_fixture',
+          jobStatus: 'succeeded',
+        },
+      },
+    },
+    { completed: { lastAliasRequest: null } },
+    {
+      completed: {
+        lastAliasRequest: {
+          requestedAt: Date.now() - 60000,
+          type: 'promote',
+          toDeploymentId: 'dpl_fixture',
+          jobStatus: 'succeeded',
+        },
+      },
+    },
+    {
+      completed: {
+        lastAliasRequest: {
+          requestedAt: 'invalid',
+          type: 'promote',
+          toDeploymentId: 'dpl_fixture',
+          jobStatus: 'succeeded',
+        },
+      },
+    },
+    { assigned: { alias: [] } },
+    { assigned: { alias: ['https://other.com/?secret=x'] } },
+    { assigned: { aliasAssigned: false } },
+    { assigned: { aliasError: { code: 'error' } } },
+    { assigned: { id: 'dpl_other' } },
+    { assigned: { target: 'preview' } },
+    { assigned: { ownerId: 'team_other' } },
+    { assigned: { meta: {} } },
+  ]) {
+    const f = promotionFixture(override);
+    await assert.rejects(() => promoteProduction(f.source, f.request, async () => {}));
+    assert.equal(f.calls.filter((call) => call.method === 'POST').length, 1);
+  }
+  const f = promotionFixture({ postError: true });
+  await assert.rejects(
+    () => promoteProduction(f.source, f.request),
+    (error) => {
+      assert.match(error.message, /no se reintentó/);
+      assert(!error.message.includes('fixture-secret'));
+      return true;
+    },
+  );
+  assert.equal(f.calls.filter((call) => call.method === 'POST').length, 1);
 });
 
 test('Production manual exige main y Render Dev conserva su configuración', () => {
@@ -239,6 +432,7 @@ test('Production manual exige main y Render Dev conserva su configuración', () 
   assert.equal(ci.jobs.quality.if, undefined);
   assert.equal(ci.on.pull_request.types, undefined);
   assert(ci.concurrency['cancel-in-progress']);
+  assert.equal(render.name, 'TurnoSmart');
   assert.equal(render.branch, 'dev');
   assert.equal(render.plan, 'free');
   assert.equal(render.autoDeployTrigger, 'checksPass');
@@ -282,7 +476,7 @@ test('Production manual exige main y Render Dev conserva su configuración', () 
     'deploy --prebuilt',
     'deploy-config.mjs published',
     'deploy-config.mjs backend',
-    'promote "$DEPLOYMENT_URL"',
+    'deploy-config.mjs promote',
   ];
   let previous = -1;
   for (const command of commands) {
@@ -360,7 +554,7 @@ test('Production sólo autoriza main explícita aunque Dev tenga CI aprobada; Az
   assert.equal(gate.env.PRODUCTION_BRANCH, '${{ vars.VERCEL_PRODUCTION_BRANCH }}');
   // El checkpoint conserva los scopes Preview existentes; no recibe el target Production.
   assert.equal(
-    workflow.jobs.deploy.environment,
+    workflow.jobs.deploy.environment.name,
     "vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}",
   );
   assert.equal(
@@ -424,6 +618,7 @@ test('Preview descarga settings y publica sin consultar Production; Production c
             GITHUB_REPOSITORY_ID: '42',
             PR_NUMBER: '',
             PR_SHA: 'fixture-sha',
+            GITHUB_SHA: 'a'.repeat(40),
             GITHUB_OUTPUT: 'output.log',
           },
           encoding: 'utf8',
@@ -466,7 +661,7 @@ test('Preview descarga settings y publica sin consultar Production; Production c
   );
 });
 
-test('Promote usa el mismo token y equipo que upload; falla si faltan o la CLI rechaza', (t) => {
+test('Promote usa el mismo token y equipo que upload; propaga errores del verificador', (t) => {
   const {
     jobs: { deploy },
   } = yaml.load(readFileSync(join(repo, '.github/workflows/frontend-deploy.yml'), 'utf8'));
@@ -502,7 +697,7 @@ test('Promote usa el mismo token y equipo que upload; falla si faltan o la CLI r
         'pipefail',
         '-c',
         `
-      npx() { printf '%s\\n' "$@" > args.log; return "$CLI_EXIT"; }
+      node() { printf '%s\\n' "$@" > args.log; [[ "$CLI_EXIT" != 0 ]] || echo https://production.vercel.app; return "$CLI_EXIT"; }
       ${promote.run}
     `,
       ],
@@ -515,6 +710,7 @@ test('Promote usa el mismo token y equipo que upload; falla si faltan o la CLI r
           VERCEL_CLI_VERSION: '65.9.0',
           DEPLOYMENT_URL: 'https://fixture.vercel.app',
           CLI_EXIT: cliExit,
+          GITHUB_OUTPUT: 'output.log',
         },
         encoding: 'utf8',
         timeout: 10000,
@@ -527,14 +723,14 @@ test('Promote usa el mismo token y equipo que upload; falla si faltan o la CLI r
       assert.match(result.stderr, /Configurar VERCEL_(ORG_ID|TOKEN)/);
     } else {
       assert.deepEqual(readFileSync(join(root, 'args.log'), 'utf8').trim().split('\n'), [
-        '--yes',
-        'vercel@65.9.0',
+        'apps/frontend/scripts/deploy-config.mjs',
         'promote',
-        'https://fixture.vercel.app',
-        '--yes',
-        '--scope=team_fixture',
-        '--token=fixture-token',
       ]);
+      if (expected === 0)
+        assert.match(
+          readFileSync(join(root, 'output.log'), 'utf8'),
+          /url=https:\/\/production.vercel.app/,
+        );
     }
   }
 });
@@ -693,7 +889,10 @@ test('Preview separa codigo de la PR, secretos y definicion del workflow', () =>
   assert(report.steps[1].with.script.includes("outcome.status === 'fallido'"));
   for (const job of [select, settings, build, deploy])
     assert.equal(checkout(job).with['persist-credentials'], false);
-  for (const job of [settings, deploy]) assert.equal(job.environment, 'vercel-preview');
+  for (const job of [settings, deploy]) assert.equal(job.environment.name, 'vercel-preview');
+  assert.equal(settings.environment.deployment, false);
+  assert.equal(deploy.environment.deployment, undefined);
+  assert.match(deploy.environment.url, /steps\.preview-alias\.outputs\.url/);
   // Los jobs con token no instalan ni ejecutan scripts npm de la PR.
   assert(!JSON.stringify(settings).includes('npm run'));
   assert(!JSON.stringify(deploy).includes('npm run'));
@@ -1072,7 +1271,7 @@ test('Production sólo promueve con backend operativo, sin redirecciones y del S
   assert.equal(check.if, "env.DEPLOY_TARGET == 'production'");
   assert.equal(check.env.EXPECTED_PRODUCTION_API, '${{ vars.EXPECTED_PRODUCTION_API }}');
   assert.equal(
-    workflow.jobs.deploy.environment,
+    workflow.jobs.deploy.environment.name,
     "vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}",
   );
   assert(

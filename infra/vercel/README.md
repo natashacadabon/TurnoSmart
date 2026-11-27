@@ -197,13 +197,14 @@ no requiere cambiar la rama predeterminada a `main`.
    del proyecto existente, iguales para ambos scopes. Los valores
    `NEXT_PUBLIC_*` se mantienen en Vercel, no se duplican en GitHub.
    `VERCEL_ORG_ID` debe ser el ID `team_...` de `natcads-projects`, no el slug ni
-   un usuario personal. CLI 65.9.0 admite ID o slug en `--scope`; `promote` usa
-   el ID existente. `pull` y `deploy` conservan su resolución por organización y
-   proyecto; aliases y cleanup ya usan `teamId`. No hace falta otra variable.
-   El preflight `vercel-access` comprueba por GET el proyecto, su `accountId` y
-   el equipo. En Production exige también `/v2/user`, consultado por la CLI
-   incluso con scope explícito. Un 404 de identidad falla antes del upload:
-   el scope no repara por sí solo una identidad incompatible. Preflight, pull,
+   un usuario personal. CLI 65.9.0 admite ID o slug en `--scope`, pero su
+   promoción consulta usuario y equipo incluso con scope explícito. El helper
+   `promote` usa la misma operación REST de esa CLI, con `teamId` explícito;
+   no exige permisos globales de usuario/equipo. `pull` y `deploy` conservan su
+   resolución por organización/proyecto; aliases y cleanup ya usan `teamId`.
+   No hace falta otra variable. El preflight `vercel-access` sólo lee el
+   proyecto y verifica `id` y `accountId`. No consulta `/teams` ni `/user`:
+   pueden rechazar un token que sí accede al proyecto. Preflight, pull,
    upload y promote reciben el mismo secret del mismo environment.
    La lectura no demuestra permiso de promoción. No ampliar permisos ni cambiar
    de CLI sin diagnosticar. No registrar respuestas de cuenta ni credenciales.
@@ -228,7 +229,8 @@ no requiere cambiar la rama predeterminada a `main`.
    Un workflow verde con `Preview: omitido` no demuestra una publicación.
    Las reglas y secretos de environments requieren un plan compatible con la
    visibilidad del repo. Ver [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
-4. Confirmar que el proyecto existente ya tiene un deployment Production READY.
+4. Para el primer Production, usar el dispatch controlado; no crear otro proyecto
+   ni promover un Preview. Los Previews usan `--environment=preview` explícito.
    El dispatch de Production exige `main` y `VERCEL_PRODUCTION_BRANCH=main`
    como **variable de repositorio** en GitHub → Settings → Secrets and variables
    → Actions → Variables. No definirla solo en `vercel-production`: el job
@@ -242,8 +244,11 @@ no requiere cambiar la rama predeterminada a `main`.
    Production esperada sin seguir redirects; exige servicio correcto, SHA completo
    igual al candidato y estado ready. Un fallo, timeout o SHA anterior bloquea
    la promocion. El health tiene hasta 90 s para un cold start y ready hasta 15 s.
-   Despues vuelve a comprobar la rama vigente. Si falta el deployment inicial, aplicar primero esa
-   configuracion y hacer el bootstrap manual desde `main`.
+   Despues vuelve a comprobar la rama vigente. La promoción comprueba equipo,
+   proyecto, target Production, estado READY y metadata del SHA del artefacto;
+   espera el job de promoción exitoso y los dominios asignados. Un HTTP 202 no
+   acredita publicación. No se reintenta el POST automáticamente: un timeout
+   exige consultar el estado antes de iniciar otra ejecución.
 5. Habilitar `VERCEL_CD_ENABLED=true` como variable del repositorio. Para
    validar el cambio, comprobar una PR interna en borrador, una externa,
    un cambio solo backend y dos pushes consecutivos a la misma PR. Revisar
@@ -267,8 +272,8 @@ Checks ya valido el merge.
 mantiene los valores publicos, descarta el resto del cache y usa los comandos
 versionados de Node 22/workspaces. La CLI instala y compila una vez; `--prebuilt`
 sube ese artefacto. Production se sube con `--skip-domain`, se verifica /login y
-los hashes del JavaScript servido, y solo entonces se promueve. Preview exige
-una Production lista para evitar la promocion implicita del primer despliegue.
+los hashes del JavaScript servido, y solo entonces se promueve. Preview fija
+su environment explícitamente, sin depender de que exista Production.
 
 Para un checkpoint con la API Azure ya disponible, usar el mismo dispatch
 desde `dev` con `target=azure` e ingresar ambas URLs HTTPS. El build usa una
