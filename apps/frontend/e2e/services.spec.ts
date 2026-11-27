@@ -443,7 +443,7 @@ test('habilita un día y confirma el reemplazo de franjas al copiar en mobile', 
 test('Staff consulta horarios en la zona del negocio y ve el error del servidor', async ({
   page,
 }) => {
-  const { rejectSlots, writes } = await fixtures(page, 'STAFF');
+  const { rejectSlots, writes } = await fixtures(page, 'OWNER');
   await login(page);
   await expect(page.getByRole('row', { name: /Consulta inicial/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nuevo servicio' })).toHaveCount(0);
@@ -471,7 +471,7 @@ test('Staff consulta horarios en la zona del negocio y ve el error del servidor'
 test('horarios: rangos reales, selección accesible, loading, vacío y reintento responsive', async ({
   page,
 }, testInfo) => {
-  const { writes, resolveSlots, rejectSlots, holdSlots } = await fixtures(page, 'STAFF');
+  const { writes, resolveSlots, rejectSlots, holdSlots } = await fixtures(page, 'OWNER');
   const available = [
     { startsAt: '2027-03-01T12:00:00.000Z', endsAt: '2027-03-01T12:30:00.000Z' },
     { startsAt: '2027-03-01T17:00:00.000Z', endsAt: '2027-03-01T18:00:00.000Z' },

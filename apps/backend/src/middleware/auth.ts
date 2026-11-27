@@ -35,7 +35,7 @@ export function authenticate(verifier: TokenVerifier): RequestHandler {
 export function requireProfile(identity: IdentityRepository): RequestHandler {
   return async (req, _res, next) => {
     if (!req.user) throw new AppError('UNAUTHENTICATED', 'Falta el token de acceso');
-    const platformAdmin = await identity.findPlatformAdmin?.(req.user.id);
+    const platformAdmin = await identity.findPlatformAdmin(req.user.id);
     if (platformAdmin) {
       throw new AppError('FORBIDDEN', 'ADMIN solo puede operar desde el panel global');
     }
@@ -54,10 +54,25 @@ export function requireProfile(identity: IdentityRepository): RequestHandler {
   };
 }
 
+/** Resuelve exclusivamente el ADMIN global. No crea contexto de negocio. */
+export function requirePlatformAdmin(identity: IdentityRepository): RequestHandler {
+  return async (req, _res, next) => {
+    if (!req.user) throw new AppError('UNAUTHENTICATED', 'Falta el token de acceso');
+    const platformAdmin = await identity.findPlatformAdmin(req.user.id);
+    if (!platformAdmin) throw new AppError('FORBIDDEN', 'Se requiere ADMIN global');
+    req.platformAdmin = {
+      userId: req.user.id,
+      email: req.user.email,
+      role: 'ADMIN',
+      platformAdmin: true,
+    };
+    next();
+  };
+}
+
 export function requirePermission(permission: Permission): RequestHandler {
   return (req, _res, next) => {
-    if (!req.auth || req.auth.platformAdmin)
-      throw new AppError('FORBIDDEN', 'ADMIN no tiene permisos operativos de negocio');
+    if (!req.auth) throw new AppError('FORBIDDEN', 'Se requiere un OWNER operativo');
     if (!can(req.auth.role, permission))
       throw new AppError('FORBIDDEN', 'No tiene permisos para esta operación');
     next();

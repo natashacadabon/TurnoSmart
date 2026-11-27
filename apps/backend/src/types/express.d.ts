@@ -1,4 +1,4 @@
-import type { AuthContext } from '@turnosmart/shared';
+import type { AuthContext, PlatformAdminContext } from '@turnosmart/shared';
 
 declare global {
   namespace Express {
@@ -8,6 +8,8 @@ declare global {
       user?: { id: string; email: string | null };
       /** Contexto de negocio resuelto desde Profile. */
       auth?: AuthContext;
+      /** Contexto global resuelto exclusivamente por requirePlatformAdmin. */
+      platformAdmin?: PlatformAdminContext;
     }
   }
 }

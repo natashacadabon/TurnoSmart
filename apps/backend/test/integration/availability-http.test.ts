@@ -11,19 +11,17 @@ describe('disponibilidad: HTTP, permisos y aislamiento', () => {
   let ctx: ReturnType<typeof buildTestApp>;
   let owner: { Authorization: string };
   let admin: { Authorization: string };
-  let staff: { Authorization: string };
   let other: { Authorization: string };
   beforeEach(() => {
     ctx = buildTestApp();
     const businessId = randomUUID();
-    const member = (role: 'OWNER' | 'ADMIN' | 'STAFF', business = businessId) => {
+    const member = (role: 'OWNER' | 'ADMIN', business = businessId) => {
       const user = ctx.verifier.addUser();
       ctx.identity.addMember(user.id, business, role);
       return { Authorization: `Bearer ${user.token}` };
     };
     owner = member('OWNER');
     admin = member('ADMIN');
-    staff = member('STAFF');
     other = member('OWNER', randomUUID());
     ctx.identity.businesses.get(businessId)!.timezone = 'America/Argentina/Buenos_Aires';
   });
@@ -31,7 +29,7 @@ describe('disponibilidad: HTTP, permisos y aislamiento', () => {
     request(ctx.app).put(path).set(auth).send({ rules });
 
   it('lee semana vacia y reemplaza con DTO explicito, zona del negocio y orden estable', async () => {
-    expect((await request(ctx.app).get(path).set(staff)).body).toEqual({
+    expect((await request(ctx.app).get(path).set(owner)).body).toEqual({
       data: { timezone: 'America/Argentina/Buenos_Aires', rules: [] },
     });
     const result = await put([
@@ -53,22 +51,14 @@ describe('disponibilidad: HTTP, permisos y aislamiento', () => {
       '09:00',
     ]);
     expect(result.body.data.rules[2].active).toBe(false);
-    expect((await request(ctx.app).get(path).set(staff)).body).toEqual(result.body);
+    expect((await request(ctx.app).get(path).set(owner)).body).toEqual(result.body);
     expect(JSON.stringify(result.body)).not.toContain('businessId');
   });
-  it('ADMIN reemplaza, elimina omitidos, conserva IDs/createdAt y admite vaciar semana', async () => {
+  it('ADMIN global no puede reemplazar disponibilidad operativa', async () => {
     const first = await put([rule, { ...rule, dayOfWeek: 2 }]);
-    const second = await put([{ ...rule, active: false }], admin);
-    expect(second.status).toBe(200);
-    expect(second.body.data.rules).toHaveLength(1);
-    expect(second.body.data.rules[0]).toMatchObject({
-      id: first.body.data.rules[0].id,
-      createdAt: first.body.data.rules[0].createdAt,
-      active: false,
-    });
-    const repeated = await put([{ ...rule, active: false }]);
-    expect(repeated.body.data.rules[0].id).toBe(second.body.data.rules[0].id);
-    expect((await put([])).body.data.rules).toEqual([]);
+    expect((await put([{ ...rule, active: false }], admin)).status).toBe(403);
+    expect((await request(ctx.app).get(path).set(owner)).body.data.rules).toHaveLength(2);
+    expect(first.status).toBe(200);
   });
   it('GET y PUT estan aislados entre negocios aun al vaciar o reemplazar', async () => {
     const first = await put([rule]);
@@ -77,12 +67,12 @@ describe('disponibilidad: HTTP, permisos y aislamiento', () => {
     await put([], other);
     expect((await request(ctx.app).get(path).set(owner)).body).toEqual(first.body);
   });
-  it('STAFF lee pero no escribe ni inyectando rol', async () => {
-    expect((await request(ctx.app).get(path).set(staff)).status).toBe(200);
+  it('ADMIN global no lee ni escribe disponibilidad aunque inyecte un rol', async () => {
+    expect((await request(ctx.app).get(path).set(admin)).status).toBe(403);
     const spy = vi.spyOn(ctx.availability, 'replace');
-    expect((await put([], staff)).status).toBe(403);
+    expect((await put([], admin)).status).toBe(403);
     expect(
-      (await request(ctx.app).put(path).set(staff).send({ rules: [], role: 'OWNER' })).status,
+      (await request(ctx.app).put(path).set(admin).send({ rules: [], role: 'OWNER' })).status,
     ).toBe(403);
     expect(spy).not.toHaveBeenCalled();
   });

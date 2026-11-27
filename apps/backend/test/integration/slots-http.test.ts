@@ -37,7 +37,7 @@ describe('B05 HTTP', () => {
     ctx = buildTestApp();
     businessId = randomUUID();
     otherId = randomUUID();
-    const member = (id: string, role: 'OWNER' | 'ADMIN' | 'STAFF' = 'OWNER') => {
+    const member = (id: string, role: 'OWNER' | 'ADMIN' = 'OWNER') => {
       const user = ctx.verifier.addUser();
       ctx.identity.addMember(user.id, id, role);
       return { Authorization: `Bearer ${user.token}` };
@@ -148,9 +148,12 @@ describe('B05 HTTP', () => {
     const user = ctx.verifier.addUser();
     const headers = { Authorization: `Bearer ${user.token}` };
     expect((await get({}, headers)).body.error.code).toBe('PROFILE_REQUIRED');
-    for (const role of ['STAFF', 'ADMIN', 'OWNER'] as const) {
-      ctx.identity.addMember(user.id, businessId, role);
-      expect((await get({}, headers)).status).toBe(200);
+    for (const role of ['ADMIN', 'OWNER'] as const) {
+      const roleUser = ctx.verifier.addUser();
+      ctx.identity.addMember(roleUser.id, businessId, role);
+      expect((await get({}, { Authorization: `Bearer ${roleUser.token}` })).status).toBe(
+        role === 'ADMIN' ? 403 : 200,
+      );
     }
     for (const extra of [
       { businessId: otherId },

@@ -1,11 +1,10 @@
 import { z } from 'zod';
 
-/** Roles existentes en Profile. OWNER sólo lo asigna el backend durante el onboarding. */
-/** ADMIN is global; OWNER is scoped to one business. STAFF is legacy-only. */
-export const ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
+/** Roles de la plataforma. ADMIN es global; OWNER pertenece a un único negocio. */
+export const ROLES = ['OWNER', 'ADMIN'] as const;
 export type Role = (typeof ROLES)[number];
 
-/** Matriz de permisos: OWNER/ADMIN configuran y eliminan clientes; todos dan de alta y editan clientes y turnos. */
+/** Todos los permisos operativos pertenecen exclusivamente al OWNER del negocio. */
 export const PERMISSIONS = {
   'business:update': ['OWNER'],
   'services:read': ['OWNER'],
@@ -15,7 +14,7 @@ export const PERMISSIONS = {
   'slots:read': ['OWNER'],
   'customers:read': ['OWNER'],
   'customers:write': ['OWNER'],
-  // Baja definitiva: sólo quienes administran el negocio.
+  // Baja definitiva: el OWNER es quien administra la operación.
   'customers:delete': ['OWNER'],
   'appointments:read': ['OWNER'],
   'appointments:write': ['OWNER'],
@@ -36,6 +35,13 @@ export interface AuthContext {
   timezone: string;
   role: Role;
   platformAdmin: false;
+}
+
+export interface PlatformAdminContext {
+  userId: string;
+  email: string | null;
+  role: 'ADMIN';
+  platformAdmin: true;
 }
 
 export interface BusinessDto {
@@ -94,6 +100,7 @@ export type MeResponse =
   | {
       onboarded: true;
       platformAdmin: false;
+      accountDisabled: false;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: BusinessDto;
@@ -101,11 +108,25 @@ export type MeResponse =
   | {
       onboarded: false;
       platformAdmin: true;
+      accountDisabled: false;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: null;
     }
-  | { onboarded: false; platformAdmin: false; user: { id: string; email: string | null } };
+  | {
+      onboarded: false;
+      platformAdmin: false;
+      accountDisabled: true;
+      user: { id: string; email: string | null };
+      profile: ProfileDto;
+      business: BusinessDto;
+    }
+  | {
+      onboarded: false;
+      platformAdmin: false;
+      accountDisabled: false;
+      user: { id: string; email: string | null };
+    };
 
 const timezone = z
   .string()
@@ -121,14 +142,6 @@ const timezone = z
     },
     { message: 'Zona horaria IANA inválida' },
   );
-
-/** POST /api/onboarding */
-export const onboardingSchema = z.object({
-  businessName: z.string().trim().min(2).max(120),
-  timezone: timezone.default('America/Argentina/Buenos_Aires'),
-  fullName: z.string().trim().min(1).max(120).optional(),
-});
-export type OnboardingRequest = z.input<typeof onboardingSchema>;
 
 /** PATCH /api/business */
 export const updateBusinessSchema = z

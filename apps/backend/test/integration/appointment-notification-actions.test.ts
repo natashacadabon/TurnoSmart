@@ -59,25 +59,26 @@ async function fixture() {
       endsAt: new Date('2099-01-05T11:00:00Z'),
     },
   });
-  async function member(role: 'OWNER' | 'ADMIN' | 'STAFF', tenant = businessId) {
+  async function member(role: 'OWNER' | 'ADMIN', tenant = businessId) {
     const user = verifier.addUser();
     await prisma.profile.create({
       data: { id: user.id, businessId: tenant, email: `${user.id}@example.com`, role },
     });
     return { Authorization: `Bearer ${user.token}` };
   }
-  const staff = await member('STAFF');
+  const owner = await member('OWNER');
   const admin = await member('ADMIN');
   const path = `/api/appointments/${row.id}`;
   const publicPath = '/api/public/appointment-actions';
   async function issue(action: 'CONFIRM' | 'CANCEL' | 'REQUEST_RESCHEDULE') {
-    const response = await api.post(`${path}/action-links`).set(staff).send({ action });
+    const response = await api.post(`${path}/action-links`).set(owner).send({ action });
     expect(response.status).toBe(200);
     return response.body.token as string;
   }
   return {
     api,
-    staff,
+    owner,
+    staff: owner,
     admin,
     member,
     row,
@@ -96,7 +97,7 @@ async function fixture() {
 }
 
 it('guarda preferencias por negocio y aplica roles y límites de configuración', async () => {
-  const { api, staff, admin, member } = await fixture();
+  const { api, owner, admin, member } = await fixture();
   const other = await prisma.business.create({ data: { name: 'Otro' } });
   businesses.push(other.id);
   const otherOwner = await member('OWNER', other.id);
@@ -116,14 +117,14 @@ it('guarda preferencias por negocio y aplica roles y límites de configuración'
     cancellationMinimumHours: 12,
     rescheduleMinimumHours: 6,
   };
-  expect((await api.patch(path).set(staff).send(preferences)).status).toBe(403);
-  expect((await api.patch(path).set(admin).send({ cancellationMinimumHours: -1 })).status).toBe(
+  expect((await api.patch(path).set(admin).send(preferences)).status).toBe(403);
+  expect((await api.patch(path).set(owner).send({ cancellationMinimumHours: -1 })).status).toBe(
     422,
   );
-  expect((await api.patch(path).set(admin).send({ businessId: other.id })).status).toBe(422);
+  expect((await api.patch(path).set(owner).send({ businessId: other.id })).status).toBe(422);
   const saved = { ...preferences, reminder24hEnabled: false, reminder48hEnabled: false };
-  expect((await api.patch(path).set(admin).send(preferences)).body).toEqual(saved);
-  expect((await api.get(path).set(staff)).body).toEqual(saved);
+  expect((await api.patch(path).set(owner).send(preferences)).body).toEqual(saved);
+  expect((await api.get(path).set(owner)).body).toEqual(saved);
   expect((await api.get(path).set(otherOwner)).body).toMatchObject({
     bookingEmailEnabled: true,
     remindersEnabled: true,
@@ -138,8 +139,8 @@ it('guarda preferencias por negocio y aplica roles y límites de configuración'
     { rescheduleMinimumHours: -1 },
     { rescheduleMinimumHours: 721 },
   ])
-    expect((await api.patch(path).set(admin).send(body)).status).toBe(422);
-  expect((await api.get(path).set(staff)).body).toEqual(saved);
+    expect((await api.patch(path).set(owner).send(body)).status).toBe(422);
+  expect((await api.get(path).set(owner)).body).toEqual(saved);
 });
 
 it('reconcilia anticipaciones, conserva enviados y cancela los pendientes al deshabilitar', async () => {
@@ -191,11 +192,11 @@ it('emite enlaces con alcance, verifica firma y registra una sola confirmación 
   const f = await fixture();
   const other = await prisma.business.create({ data: { name: 'Otro' } });
   businesses.push(other.id);
-  const otherStaff = await f.member('STAFF', other.id);
+  const otherOwner = await f.member('OWNER', other.id);
   expect(
-    (await f.api.post(`${f.path}/action-links`).set(otherStaff).send({ action: 'CONFIRM' })).status,
+    (await f.api.post(`${f.path}/action-links`).set(otherOwner).send({ action: 'CONFIRM' })).status,
   ).toBe(404);
-  expect((await f.api.get(`${f.path}/reschedule-request`).set(otherStaff)).status).toBe(404);
+  expect((await f.api.get(`${f.path}/reschedule-request`).set(otherOwner)).status).toBe(404);
   const token = await f.issue('CONFIRM');
   expect(await f.issue('CONFIRM')).toBe(token);
   const badToken = token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A');

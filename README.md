@@ -51,14 +51,14 @@ npm run prisma:generate --workspace=apps/backend
 npm run prisma:migrate --workspace=apps/backend
 ```
 
-6. Crear y confirmar un usuario desde Supabase Auth para completar el onboarding como OWNER. También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
+6. Iniciar sesión con ADMIN para crear un negocio e invitar a su OWNER desde el panel global. El OWNER acepta el token desde `/onboarding`. También se puede usar el [seed de desarrollo](apps/backend/prisma/README.md) con una base autorizada.
 7. En terminales separadas, ejecutar `npm run dev:backend` y `npm run dev:frontend`. Ambos comandos compilan `packages/shared`.
 
 Configurar `GEMINI_API_KEY` para habilitar las explicaciones. La [guía de operación](docs/operations.md#notificaciones-de-turnos) cubre los modos de correo, los enlaces firmados y el cron. Las claves privadas se configuran en el backend o en los almacenes de secretos del entorno.
 
 | Ruta                                                     | Uso                                                                             |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `/login`, `/onboarding`                                  | Acceso y alta inicial del negocio.                                              |
+| `/login`, `/onboarding`                                  | Acceso y aceptación de invitaciones de OWNER.                                   |
 | `/`, `/appointments/[id]`                                | Agenda y detalle de turno.                                                      |
 | `/customers`, `/services`, `/settings`, `/notifications` | Clientes, servicios y disponibilidad, configuración y centro de notificaciones. |
 | `/turno/gestionar`                                       | Página pública que requiere un enlace válido para operar sobre un turno.        |
