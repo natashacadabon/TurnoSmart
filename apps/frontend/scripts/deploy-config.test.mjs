@@ -222,10 +222,14 @@ function promotionFixture(overrides = {}) {
       return new Response(null, { status: 202 });
     }
     const posted = calls.some((call) => call.method === 'POST');
-    if (url.pathname === `/v9/projects/${project.id}`)
-      return Response.json(
-        posted ? { ...completed, ...overrides.completed } : { ...project, ...overrides.project },
-      );
+    if (url.pathname === `/v9/projects/${project.id}`) {
+      const state = posted
+        ? { ...completed, ...overrides.completed }
+        : { ...project, ...overrides.project };
+      // Vercel sólo incluye el estado de promoción con rollbackInfo=true.
+      if (url.searchParams.get('rollbackInfo') !== 'true') state.lastAliasRequest = null;
+      return Response.json(state);
+    }
     if (url.pathname.startsWith('/v13/deployments/'))
       return Response.json({
         ...deployment,
