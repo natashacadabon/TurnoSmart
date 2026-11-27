@@ -184,22 +184,29 @@ export async function promoteProduction(
       assert(!['failed', 'skipped'].includes(job.jobStatus), 'Vercel no completó la promoción');
       if (job.jobStatus === 'succeeded' && !current.rollingRelease) {
         const assigned = await api(`/v13/deployments/${deployment.id}`);
-        assert(
-          assigned?.id === deployment.id &&
-            assigned.projectId === env.VERCEL_PROJECT_ID &&
-            assigned.ownerId === env.VERCEL_ORG_ID &&
-            assigned.url === host &&
-            assigned.target === 'production' &&
-            assigned.readyState === 'READY' &&
-            assigned.meta?.turnosmartMergeSha === env.GITHUB_SHA &&
-            assigned.aliasAssigned === true &&
-            !assigned.aliasError &&
-            Array.isArray(assigned.alias) &&
+        const checks = {
+          id: assigned?.id === deployment.id,
+          projectId: assigned?.projectId === env.VERCEL_PROJECT_ID,
+          ownerId: assigned?.ownerId === env.VERCEL_ORG_ID,
+          url: assigned?.url === host,
+          target: assigned?.target === 'production',
+          readyState: assigned?.readyState === 'READY',
+          'meta.turnosmartMergeSha': assigned?.meta?.turnosmartMergeSha === env.GITHUB_SHA,
+          aliasAssigned: assigned?.aliasAssigned === true,
+          aliasError: !assigned?.aliasError,
+          alias:
+            Array.isArray(assigned?.alias) &&
             assigned.alias.length > 0 &&
             assigned.alias.every(
               (name) => typeof name === 'string' && /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(name),
             ),
-          'La promoción no confirmó los dominios Production del deployment candidato',
+        };
+        const failed = Object.keys(checks).filter((key) => !checks[key]);
+        assert(
+          failed.length === 0,
+          'La promoción no confirmó los dominios Production del deployment candidato; ' +
+            `fase=verificación posterior; campos inválidos=${failed.join(', ')}. ` +
+            'Vercel informó job succeeded; consultar el estado antes de reintentar.',
         );
         return `https://${assigned.alias[0]}`;
       }
