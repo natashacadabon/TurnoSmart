@@ -34,6 +34,8 @@ export interface ProfileWithBusiness {
 
 export interface IdentityRepository {
   findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null>;
+  /** Returns an OWNER account even when its profile or business is inactive. */
+  findOwnerAccount(userId: string): Promise<ProfileWithBusiness | null>;
   findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null>;
   updateBusiness(
     businessId: string,
@@ -65,19 +67,12 @@ const businessSelect = {
 export class PrismaIdentityRepository implements IdentityRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null> {
+  private async readOwnerAccount(userId: string): Promise<ProfileWithBusiness | null> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: userId },
       include: { business: { select: businessSelect } },
     });
-    if (
-      !profile ||
-      profile.role !== 'OWNER' ||
-      !profile.active ||
-      !profile.businessId ||
-      !profile.business ||
-      !profile.business.active
-    )
+    if (!profile || profile.role !== 'OWNER' || !profile.businessId || !profile.business)
       return null;
     const { business, ...rest } = profile;
     return {
@@ -90,6 +85,16 @@ export class PrismaIdentityRepository implements IdentityRepository {
       },
       business,
     };
+  }
+
+  async findOwnerAccount(userId: string): Promise<ProfileWithBusiness | null> {
+    return this.readOwnerAccount(userId);
+  }
+
+  async findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null> {
+    const found = await this.readOwnerAccount(userId);
+    if (!found || !found.profile.active || !found.business.active) return null;
+    return found;
   }
 
   async findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null> {

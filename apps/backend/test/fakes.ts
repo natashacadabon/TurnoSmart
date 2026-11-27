@@ -92,6 +92,13 @@ export class InMemoryIdentity implements IdentityRepository {
     return { profile, business };
   }
 
+  async findOwnerAccount(userId: string): Promise<ProfileWithBusiness | null> {
+    const profile = this.profiles.get(userId);
+    if (!profile || profile.role !== 'OWNER') return null;
+    const business = this.businesses.get(profile.businessId);
+    return business ? { profile, business } : null;
+  }
+
   async findPlatformAdmin(userId: string) {
     const admin = this.platformAdmins.get(userId);
     return admin ? { ...admin, businessId: null as null, role: 'ADMIN' as const } : null;

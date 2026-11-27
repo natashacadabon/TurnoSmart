@@ -205,7 +205,7 @@ coordinar primero esquema y backend; no puede inferirse de un merge ni del CI ve
 
 ## Recorrido de demo
 
-1. Iniciar sesión y completar onboarding.
+1. Iniciar sesión como ADMIN, crear el negocio e invitar al OWNER; aceptar la invitación desde `/onboarding`.
 2. Crear un servicio y una regla de disponibilidad.
 3. Crear un cliente.
 4. Reservar un turno futuro.

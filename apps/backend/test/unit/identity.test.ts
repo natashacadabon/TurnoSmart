@@ -71,4 +71,22 @@ describe('identidad y separación de roles', () => {
     expect(res.status).toBe(403);
     expect(identity.businesses.size).toBe(0);
   });
+
+  it('reports a disabled OWNER account without sending it to another invitation', async () => {
+    const { app, verifier, identity } = buildTestApp();
+    const businessId = randomUUID();
+    const owner = verifier.addUser();
+    identity.addMember(owner.id, businessId, 'OWNER');
+    identity.profiles.get(owner.id)!.active = false;
+
+    const me = await request(app).get('/api/me').set('Authorization', `Bearer ${owner.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({
+      onboarded: false,
+      platformAdmin: false,
+      accountDisabled: true,
+      profile: { role: 'OWNER' },
+      business: { id: businessId },
+    });
+  });
 });

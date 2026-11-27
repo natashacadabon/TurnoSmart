@@ -28,7 +28,11 @@ export default function LoginPage() {
   useEffect(() => {
     if (status === 'signedIn')
       router.replace(
-        me?.platformAdmin ? '/admin' : me?.onboarded === false ? '/onboarding' : '/customers',
+        me?.platformAdmin
+          ? '/admin'
+          : me?.accountDisabled || me?.onboarded === false
+            ? '/onboarding'
+            : '/customers',
       );
   }, [status, me, router]);
 

@@ -60,6 +60,7 @@ export function adminRouter(deps: {
     res.status(201).json({
       onboarded: true,
       platformAdmin: false,
+      accountDisabled: false,
       user: req.user!,
       profile: { id: result.profileId, fullName: result.fullName, role: 'OWNER' },
       business: {

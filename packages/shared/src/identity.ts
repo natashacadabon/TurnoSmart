@@ -100,6 +100,7 @@ export type MeResponse =
   | {
       onboarded: true;
       platformAdmin: false;
+      accountDisabled: false;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: BusinessDto;
@@ -107,11 +108,25 @@ export type MeResponse =
   | {
       onboarded: false;
       platformAdmin: true;
+      accountDisabled: false;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: null;
     }
-  | { onboarded: false; platformAdmin: false; user: { id: string; email: string | null } };
+  | {
+      onboarded: false;
+      platformAdmin: false;
+      accountDisabled: true;
+      user: { id: string; email: string | null };
+      profile: ProfileDto;
+      business: BusinessDto;
+    }
+  | {
+      onboarded: false;
+      platformAdmin: false;
+      accountDisabled: false;
+      user: { id: string; email: string | null };
+    };
 
 const timezone = z
   .string()

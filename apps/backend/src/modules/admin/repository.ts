@@ -160,23 +160,31 @@ export class PrismaAdminRepository implements AdminRepository {
     ownerId: string,
     input: { fullName?: string; active?: boolean },
   ) {
-    const owner = await this.prisma.profile.findFirst({
-      where: { id: ownerId, businessId, role: 'OWNER' },
-      select: { id: true, email: true, fullName: true, active: true },
-    });
-    if (!owner) throw new AppError('NOT_FOUND', 'OWNER no encontrado');
-    if (input.active === false && owner.active) {
-      const activeOwners = await this.prisma.profile.count({
-        where: { businessId, role: 'OWNER', active: true },
-      });
-      if (activeOwners <= 1)
-        throw new AppError('CONFLICT', 'No se puede desactivar el último OWNER del negocio');
-    }
-    return this.prisma.profile.update({
-      where: { id: ownerId },
-      data: input,
-      select: { id: true, email: true, fullName: true, active: true },
-    });
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Serializa los cambios de estado de OWNERS por negocio. Sin este lock,
+        // dos desactivaciones simultáneas podrían dejar cero OWNERS activos.
+        await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+        const owner = await tx.profile.findFirst({
+          where: { id: ownerId, businessId, role: 'OWNER' },
+          select: { id: true, email: true, fullName: true, active: true },
+        });
+        if (!owner) throw new AppError('NOT_FOUND', 'OWNER no encontrado');
+        if (input.active === false && owner.active) {
+          const activeOwners = await tx.profile.count({
+            where: { businessId, role: 'OWNER', active: true },
+          });
+          if (activeOwners <= 1)
+            throw new AppError('CONFLICT', 'No se puede desactivar el último OWNER del negocio');
+        }
+        return tx.profile.update({
+          where: { id: ownerId },
+          data: input,
+          select: { id: true, email: true, fullName: true, active: true },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async listInvitations(businessId: string) {

@@ -29,10 +29,11 @@ function toMe(
   user: { id: string; email: string | null },
   found: ProfileWithBusiness | null,
 ): MeResponse {
-  if (!found) return { onboarded: false, platformAdmin: false, user };
+  if (!found) return { onboarded: false, platformAdmin: false, accountDisabled: false, user };
   return {
     onboarded: true,
     platformAdmin: false,
+    accountDisabled: false,
     user,
     profile: { id: found.profile.id, fullName: found.profile.fullName, role: found.profile.role },
     business: toBusinessDto(found.business),
@@ -52,6 +53,7 @@ export function identityRouter(deps: {
       res.json({
         onboarded: false,
         platformAdmin: true,
+        accountDisabled: false,
         user: req.user!,
         profile: { id: admin.id, fullName: admin.fullName, role: admin.role },
         business: null,
@@ -59,6 +61,24 @@ export function identityRouter(deps: {
       return;
     }
     const found = await deps.identity.findProfileWithBusiness(req.user!.id);
+    if (!found) {
+      const account = await deps.identity.findOwnerAccount(req.user!.id);
+      if (account) {
+        res.json({
+          onboarded: false,
+          platformAdmin: false,
+          accountDisabled: true,
+          user: req.user!,
+          profile: {
+            id: account.profile.id,
+            fullName: account.profile.fullName,
+            role: account.profile.role,
+          },
+          business: toBusinessDto(account.business),
+        });
+        return;
+      }
+    }
     res.json(toMe(req.user!, found));
   });
 
