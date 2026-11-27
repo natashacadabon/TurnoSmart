@@ -120,6 +120,21 @@ describe('FINAL-05B: límites y degradación', () => {
     expect(getMetrics().ai.byOutcome.circuit_open).toBeGreaterThan(0);
   });
 
+  it('cuenta en /metrics las llamadas exitosas al proveedor con su duración', async () => {
+    let now = 1_000;
+    const llm = new FakeLlm(async () => {
+      now += 250;
+      return valid;
+    });
+    const explainer = new RiskExplainer(llm, { ...options, now: () => now });
+    const before = getMetrics().ai;
+    await explainer.explain(risk);
+    const after = getMetrics().ai;
+    expect(after.calls).toBe(before.calls + 1);
+    expect(after.durationMsTotal).toBe(before.durationMsTotal + 250);
+    expect(after.byOutcome.ok).toBe((before.byOutcome.ok ?? 0) + 1);
+  });
+
   it('la cuota agotada del proveedor no abre el circuito', async () => {
     const llm = new FakeLlm(async () => {
       throw new LlmError('quota', '429');

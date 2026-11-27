@@ -164,6 +164,20 @@ describe('explicación de riesgo con Gemini', () => {
     expect(llm.calls).toHaveLength(2);
   });
 
+  it('pedidos simultáneos de la misma versión comparten una sola llamada a Gemini', async () => {
+    let release: (value: string) => void = () => {};
+    const llm = new FakeLlm(() => new Promise<string>((resolve) => (release = resolve)));
+    const ctx = setup(llm, { limit: 1 });
+    const first = explain(ctx).then((r) => r);
+    const second = explain(ctx).then((r) => r);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release(validJson);
+    const [a, b] = await Promise.all([first, second]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(a.body.explanation).toEqual(b.body.explanation);
+    expect(llm.calls).toHaveLength(1);
+  });
+
   it('refresh=true fuerza una explicación nueva', async () => {
     const llm = new FakeLlm(async () => validJson);
     const ctx = setup(llm);

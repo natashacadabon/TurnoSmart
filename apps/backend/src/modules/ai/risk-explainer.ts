@@ -171,13 +171,14 @@ export class RiskExplainer {
         logger.warn('ai_global_limit', { requestId });
         throw new AppError('AI_RATE_LIMITED', 'Cuota de IA agotada, intente más tarde');
       }
-      const raw = await this.call(prompt, requestId, attempt);
+      // Cada respuesta del proveedor cuenta como llamada en /metrics, válida o no.
+      const { raw, durationMs } = await this.call(prompt, requestId, attempt);
       const parsed = parseExplanation(raw);
       if (parsed && isSafeExplanation(parsed)) {
-        recordAiCall('ok');
+        recordAiCall('ok', durationMs);
         return parsed;
       }
-      recordAiCall('invalid');
+      recordAiCall('invalid', durationMs);
       logger.warn('ai_invalid_response', {
         requestId,
         attempt,
@@ -208,13 +209,9 @@ export class RiskExplainer {
         ),
       ]);
       this.consecutiveFailures = 0;
-      logger.info('ai_call', {
-        requestId,
-        attempt,
-        model: this.llm.model,
-        durationMs: this.now() - started,
-      });
-      return raw;
+      const durationMs = this.now() - started;
+      logger.info('ai_call', { requestId, attempt, model: this.llm.model, durationMs });
+      return { raw, durationMs };
     } catch (err) {
       const kind = err instanceof LlmError ? err.kind : 'unavailable';
       const durationMs = this.now() - started;

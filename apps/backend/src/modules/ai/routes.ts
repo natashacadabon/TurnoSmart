@@ -21,6 +21,9 @@ export function aiRouter(deps: {
   cache: ExplanationCache;
 }): Router {
   const router = Router();
+  // Pedidos simultáneos de la misma versión del score comparten una sola llamada a Gemini
+  // (p. ej. dos pestañas o el doble montaje de React en desarrollo).
+  const inFlight = new Map<string, Promise<Omit<RiskExplanationResponse, 'cached'>>>();
 
   router.post('/:id/risk/explanation', requirePermission('risk:explain'), async (req, res) => {
     const id = parseId(req.params.id, 'Turno');
@@ -50,20 +53,33 @@ export function aiRouter(deps: {
       res.json({ ...saved, cached: true } satisfies RiskExplanationResponse);
       return;
     }
+    const pending = refresh ? undefined : inFlight.get(key);
+    if (pending) {
+      res.json({ ...(await pending), cached: true } satisfies RiskExplanationResponse);
+      return;
+    }
     if (!deps.limiter.tryConsume(req.auth!.userId)) {
       throw new AppError('RATE_LIMITED', 'Alcanzó el límite de explicaciones, intente más tarde');
     }
 
-    const explanation = await deps.explainer.explain(risk, req.requestId);
-    const body = {
-      risk,
-      explanation,
-      model: deps.explainer.model,
-      generatedAt: new Date().toISOString(),
-      disclaimer: DISCLAIMER,
-    };
-    deps.cache.set(key, body);
-    res.json({ ...body, cached: false } satisfies RiskExplanationResponse);
+    const explainer = deps.explainer;
+    const generation = explainer.explain(risk, req.requestId).then((explanation) => {
+      const body = {
+        risk,
+        explanation,
+        model: explainer.model,
+        generatedAt: new Date().toISOString(),
+        disclaimer: DISCLAIMER,
+      };
+      deps.cache.set(key, body);
+      return body;
+    });
+    inFlight.set(key, generation);
+    try {
+      res.json({ ...(await generation), cached: false } satisfies RiskExplanationResponse);
+    } finally {
+      inFlight.delete(key);
+    }
   });
 
   return router;
