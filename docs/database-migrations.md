@@ -9,6 +9,15 @@ migraciones históricas, despliegues ni datos durante su implementación/pruebas
 
 En **Settings → Environments**, crear/configurar estos environments independientes:
 
+Estado consultado por API GitHub el 26/11/2026: ambos environments ya existen.
+`database-production` tiene una política de branch **main**; conservarla.
+**`database-dev` no tiene restricciones de ramas**: antes de habilitar el uso,
+seleccionar **Selected branches and tags → Add deployment branch or tag rule →
+Branch → dev**. No permitir todas las ramas ni tags. Esta barrera impide que
+una definición de workflow modificada en una feature solicite los secrets; los
+guards del código no sustituyen la política de GitHub. No se cambió remotamente.
+La presencia/valor de secrets y variables de esos environments no se inspeccionó.
+
 | Campo                        | `database-dev`                                              | `database-production`                                              |
 | ---------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
 | Deployment branches and tags | Selected branches and tags: **branch `dev` solamente**      | Selected branches and tags: **branch `main` solamente**            |

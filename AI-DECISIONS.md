@@ -640,6 +640,10 @@ Implementación versionada con pruebas integradas a `npm test` y procedimiento e
 la integración antes de usarla. No se ejecutó ninguna migración remota. La carrera
 entre GitHub y la base no puede eliminarse mediante una transacción compartida;
 los fallos SQL/runner requieren inspección y recuperación, no rollback automático.
+La consulta de configuración pública confirmó que ambos environments existen:
+Production sólo permite Main, pero Dev aún no restringe ramas. Queda pendiente
+limitar `database-dev` a Dev antes de usarlo; no se modificaron políticas remotas
+ni se inspeccionaron valores de secrets.
 
 ---
 
