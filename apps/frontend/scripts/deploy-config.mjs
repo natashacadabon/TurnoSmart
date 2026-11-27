@@ -143,7 +143,7 @@ export async function promoteProduction(
   );
   const host = new URL(env.DEPLOYMENT_URL).hostname;
   const api = vercelApi(env, request);
-  const projectPath = `/v9/projects/${env.VERCEL_PROJECT_ID}`;
+  const projectPath = `/v9/projects/${env.VERCEL_PROJECT_ID}?rollbackInfo=true`;
   const project = await api(projectPath);
   assertProject(project, env);
   assert(!project.rollingRelease, 'No se admite promoción parcial mediante rolling release');
