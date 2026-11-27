@@ -165,7 +165,8 @@ it('rechaza enlaces pÃºblicos vencidos sin mutar la reserva ni emitir correo',
   expect(issued.status).toBe(200);
 
   const linkId = String(issued.body.token).split('.', 1)[0];
-  await prisma.appointmentPublicActionLink.update({
+  if (!linkId) throw new Error('El token de acción no contiene el identificador del enlace');
+  await prisma.appointmentPublicActionLink.updateMany({
     where: { id: linkId },
     data: { expiresAt: new Date('2098-01-05T13:00:00.000Z') },
   });
