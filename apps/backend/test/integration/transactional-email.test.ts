@@ -145,8 +145,43 @@ it('encola la reserva y envía una sola vez con enlaces válidos aunque haya dos
     'CANCEL',
   ]);
   expect(await f.jobs()).toMatchObject([
-    { status: 'SENT', attempts: 1, providerId: 'fake-provider-id' },
+    {
+      status: 'SENT',
+      attempts: 1,
+      providerId: 'fake-provider-id',
+      sentAt: expect.any(Date),
+      lastAttemptAt: expect.any(Date),
+      payloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    },
   ]);
+});
+
+it('rechaza enlaces pÃºblicos vencidos sin mutar la reserva ni emitir correo', async () => {
+  const f = await fixture();
+  const issued = await f.api
+    .post(f.path + '/action-links')
+    .set(f.auth)
+    .send({ action: 'CONFIRM' });
+  expect(issued.status).toBe(200);
+
+  const linkId = String(issued.body.token).split('.', 1)[0];
+  await prisma.appointmentPublicActionLink.update({
+    where: { id: linkId },
+    data: { expiresAt: new Date('2098-01-05T13:00:00.000Z') },
+  });
+
+  const publicPath = '/api/public/appointment-actions';
+  expect(
+    (await f.api.post(publicPath + '/preview').send({ token: issued.body.token })).status,
+  ).toBe(404);
+  expect(
+    (await f.api.post(publicPath).send({ token: issued.body.token, confirmed: true })).status,
+  ).toBe(404);
+  expect((await f.api.get(f.path).set(f.auth)).body).toMatchObject({
+    status: 'SCHEDULED',
+    confirmationStatus: 'PENDING',
+  });
+  expect(f.send).not.toHaveBeenCalled();
 });
 
 it('dispara el correo tras commit sin Cron y responde aunque el proveedor siga pendiente', async () => {
