@@ -6,13 +6,11 @@ import {
 } from '@turnosmart/shared';
 import { AppError, notFound } from '../../lib/errors.js';
 import { calculateNoShowRisk } from '../ai/risk-calculator.js';
-import type { RiskRepository } from '../ai/risk-repository.js';
-import type { AppointmentRepository } from './repository.js';
+import type { AppointmentRepository, RiskScoreValues } from './repository.js';
 
 export class AppointmentService {
   constructor(
     private readonly appointments: AppointmentRepository,
-    private readonly risk: RiskRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -35,8 +33,9 @@ export class AppointmentService {
     return this.appointments.findById(businessId, id);
   }
 
-  async create(businessId: string, input: CreateAppointmentRequest) {
+  async create(businessId: string, input: CreateAppointmentRequest, operationKey?: string) {
     const startsAt = new Date(input.startsAt);
+    const risk = await this.calculateRiskScore(businessId, input.customerId, startsAt);
     const result = await this.appointments.createAtomically(
       businessId,
       {
@@ -45,13 +44,13 @@ export class AppointmentService {
         startsAt,
         notes: input.notes ?? null,
       },
-      { type: 'CREATED' },
+      { type: 'CREATED', ...(operationKey && { operationKey }) },
       this.clock,
+      risk,
     );
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
     }
-    await this.persistRiskScore(businessId, result.row);
     return result.row;
   }
 
@@ -67,29 +66,46 @@ export class AppointmentService {
     input: RescheduleAppointmentRequest,
     requestId?: string,
     actorId?: string,
+    operationKey?: string,
   ) {
     const startsAt = new Date(input.startsAt);
+    const current = await this.appointments.findById(businessId, id);
+    if (!current) throw notFound('Turno');
+    const risk = await this.calculateRiskScore(businessId, current.customerId, startsAt);
     const result = await this.appointments.rescheduleAtomically(
       businessId,
       id,
       startsAt,
       {
         type: 'RESCHEDULED',
+        ...(operationKey && { operationKey }),
         metadata: { startsAt: startsAt.toISOString(), ...(actorId && { actorId }) },
       },
       this.clock,
       requestId,
+      risk,
     );
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'conflict') {
       throw new AppError('APPOINTMENT_TIME_CONFLICT', 'El horario ya esta ocupado');
     }
-    await this.persistRiskScore(businessId, result.row);
     return result.row;
   }
 
-  async transition(businessId: string, id: string, status: AppointmentStatus, actorId?: string) {
-    const result = await this.appointments.transitionAtomically(businessId, id, status, actorId);
+  async transition(
+    businessId: string,
+    id: string,
+    status: AppointmentStatus,
+    actorId?: string,
+    operationKey?: string,
+  ) {
+    const result = await this.appointments.transitionAtomically(
+      businessId,
+      id,
+      status,
+      actorId,
+      operationKey,
+    );
     if (result.kind === 'not_found') throw notFound('Turno');
     if (result.kind === 'invalid_transition') {
       throw new AppError(
@@ -100,23 +116,16 @@ export class AppointmentService {
     return result.row;
   }
 
-  private async persistRiskScore(
+  private async calculateRiskScore(
     businessId: string,
-    appointment: { id: string; customerId: string; startsAt: Date },
-  ) {
-    const history = await this.appointments.customerStats(
-      businessId,
-      appointment.customerId,
-      appointment.startsAt,
-    );
-    const risk = calculateNoShowRisk({
-      startsAt: appointment.startsAt,
+    customerId: string,
+    startsAt: Date,
+  ): Promise<RiskScoreValues> {
+    const history = await this.appointments.customerStats(businessId, customerId, startsAt);
+    return calculateNoShowRisk({
+      startsAt,
       now: this.clock(),
       history,
-    });
-    await this.risk.upsert(businessId, {
-      appointmentId: appointment.id,
-      ...risk,
     });
   }
 }

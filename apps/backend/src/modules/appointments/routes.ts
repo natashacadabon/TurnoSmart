@@ -45,11 +45,10 @@ const actions: Record<string, AppointmentStatus> = {
 
 export function appointmentsRouter(deps: {
   appointments: ConstructorParameters<typeof AppointmentService>[0];
-  risk: ConstructorParameters<typeof AppointmentService>[1];
   actionLinks?: AppointmentActionLinks | undefined;
 }): Router {
   const router = Router();
-  const service = new AppointmentService(deps.appointments, deps.risk);
+  const service = new AppointmentService(deps.appointments);
 
   router.get('/', requirePermission('appointments:read'), async (req, res) => {
     const query = parse(listAppointmentsQuerySchema, req.query);
@@ -67,6 +66,7 @@ export function appointmentsRouter(deps: {
     const row = await service.create(
       req.auth!.businessId,
       parse(createAppointmentSchema, req.body),
+      req.requestId,
     );
     res.status(201).json(toDto(row));
   });
@@ -91,6 +91,9 @@ export function appointmentsRouter(deps: {
           req.auth!.businessId,
           id,
           parse(rescheduleAppointmentSchema, req.body),
+          undefined,
+          undefined,
+          req.requestId,
         ),
       ),
     );
@@ -99,7 +102,17 @@ export function appointmentsRouter(deps: {
   for (const [action, status] of Object.entries(actions)) {
     router.post(`/:id/${action}`, requirePermission('appointments:write'), async (req, res) => {
       const id = parseId(req.params.id, 'Turno');
-      res.json(toDto(await service.transition(req.auth!.businessId, id, status, req.auth!.userId)));
+      res.json(
+        toDto(
+          await service.transition(
+            req.auth!.businessId,
+            id,
+            status,
+            req.auth!.userId,
+            req.requestId,
+          ),
+        ),
+      );
     });
   }
 
@@ -110,7 +123,18 @@ export function appointmentsRouter(deps: {
       const { businessId, userId } = req.auth!;
       const id = parseId(req.params.id, 'Turno');
       const { requestId, startsAt } = parse(approveRescheduleRequestSchema, req.body);
-      res.json(toDto(await service.reschedule(businessId, id, { startsAt }, requestId, userId)));
+      res.json(
+        toDto(
+          await service.reschedule(
+            businessId,
+            id,
+            { startsAt },
+            requestId,
+            userId,
+            `reschedule-approval:${requestId}`,
+          ),
+        ),
+      );
     },
   );
 

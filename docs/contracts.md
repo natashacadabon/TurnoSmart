@@ -5,6 +5,7 @@ Fuente de verdad en código: [`packages/shared/src`](../packages/shared/src). Es
 ## Convenciones
 
 - IDs UUID. Timestamps ISO 8601 en UTC (`2026-11-09T14:00:00.000Z`).
+- Las mutaciones de turnos aceptan `X-Request-Id`; el cliente debe reutilizarlo al reintentar la misma operaciÃ³n. La API devuelve el mismo resultado sin crear otro turno, score ni evento.
 - Fechas locales `YYYY-MM-DD`; horarios recurrentes `HH:mm`; día 0 = domingo.
 - La fecha de consulta de slots se interpreta en `Business.timezone` (IANA). Los filtros `from` y `to` del listado de turnos usan días UTC, con ambos días incluidos.
 - Rutas autenticadas: `Authorization: Bearer <access_token de Supabase>`. Las rutas públicas de acciones usan el token firmado del enlace en el body y no requieren sesión del personal.
@@ -85,9 +86,11 @@ turnos y piden explicaciones. La baja de clientes requiere OWNER o ADMIN.
 - `GET /api/appointments?from=&to=&status=&page=&pageSize=` devuelve `AppointmentsResponse`.
 - `POST /api/appointments` recibe `{ customerId, serviceId, startsAt, notes? }` y devuelve `201` con el turno.
 - `GET /api/appointments/:id` devuelve `AppointmentDto`.
+- La reserva, su evento, el score de riesgo y los recordatorios se confirman en una Ãºnica transacciÃ³n.
 - `PATCH /api/appointments/:id` permite modificar únicamente `notes`.
 - `POST /api/appointments/:id/reschedule` recibe `{ startsAt }` y mantiene el estado actual.
 - Las acciones de estado usan `POST /api/appointments/:id/{confirm,cancel,complete,no-show}`.
+- Las operaciones concurrentes se serializan mediante el lock del negocio y los conflictos de horario devuelven `409 APPOINTMENT_TIME_CONFLICT`.
 
 Un turno activo usa `operationalStatus: SCHEDULED`. Su `confirmationStatus` puede ser `PENDING` o `CONFIRMED`. El campo `status` y su filtro conservan la proyección anterior. `CANCELLED`, `COMPLETED` y `NO_SHOW` son estados terminales. La reprogramación valida disponibilidad y solapamientos dentro de la transacción y conserva la confirmación. Un conflicto de horario devuelve `409 APPOINTMENT_TIME_CONFLICT`. Un cambio efectivo de horario invalida los enlaces anteriores.
 

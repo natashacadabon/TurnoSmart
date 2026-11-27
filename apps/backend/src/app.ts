@@ -151,7 +151,6 @@ export function createApp(deps: AppDeps): Express {
     appointmentsRouter({
       appointments: deps.appointments,
       actionLinks: deps.appointmentActionLinks,
-      risk: deps.risk,
     }),
   );
   app.use('/api/appointments', ...authed, eventsRouter(deps));

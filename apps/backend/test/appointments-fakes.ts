@@ -14,15 +14,20 @@ import type {
   AppointmentListQuery,
   AppointmentRecord,
   AppointmentRepository,
+  RiskScoreValues,
 } from '../src/modules/appointments/repository.js';
+import type { RiskRepository } from '../src/modules/ai/risk-repository.js';
 
 export class InMemoryAppointmentRepository implements AppointmentRepository {
   readonly rows: AppointmentRecord[] = [];
+  readonly operationAppointments = new Map<string, string>();
+  readonly operationEvents: AppointmentEventInput[] = [];
 
   constructor(
     private readonly customers: CustomerRepository,
     private readonly services: ServiceRepository,
     private readonly availability: AvailabilityRepository,
+    private readonly risk?: RiskRepository,
   ) {}
 
   private async end(
@@ -92,9 +97,16 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
   async createAtomically(
     businessId: string,
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'notes'>,
-    _event?: AppointmentEventInput,
+    event?: AppointmentEventInput,
     clock: () => Date = () => new Date(),
+    risk?: RiskScoreValues,
   ) {
+    const operationId = event?.operationKey && `${businessId}:${event.operationKey}`;
+    const existingId = operationId ? this.operationAppointments.get(operationId) : undefined;
+    if (existingId) {
+      const existing = await this.findById(businessId, existingId);
+      if (existing) return { kind: 'created' as const, row: existing };
+    }
     const endsAt = await this.end(
       businessId,
       data.customerId,
@@ -105,7 +117,13 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     if (this.conflict(businessId, data.startsAt, endsAt)) {
       return { kind: 'conflict' as const };
     }
-    return { kind: 'created' as const, row: await this.create(businessId, { ...data, endsAt }) };
+    const row = await this.create(businessId, { ...data, endsAt });
+    if (operationId) {
+      this.operationAppointments.set(operationId, row.id);
+      if (event) this.operationEvents.push(event);
+    }
+    if (risk) await this.risk?.upsert(businessId, { appointmentId: row.id, ...risk });
+    return { kind: 'created' as const, row };
   }
 
   async updateNotes(businessId: string, id: string, notes: string | null) {
@@ -134,11 +152,16 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     businessId: string,
     id: string,
     startsAt: Date,
-    _event?: AppointmentEventInput,
+    event?: AppointmentEventInput,
     clock: () => Date = () => new Date(),
+    _requestId?: string,
+    risk?: RiskScoreValues,
   ) {
     const current = await this.findById(businessId, id);
     if (!current) return { kind: 'not_found' as const };
+    const operationId = event?.operationKey && `${businessId}:${event.operationKey}`;
+    const existingId = operationId ? this.operationAppointments.get(operationId) : undefined;
+    if (existingId) return { kind: 'updated' as const, row: current };
     const now = clock();
     if (current.status !== 'SCHEDULED' || current.startsAt <= now) {
       throw new AppError('APPOINTMENT_NOT_RESCHEDULABLE', 'El turno no admite reprogramacion');
@@ -147,15 +170,30 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     if (this.conflict(businessId, startsAt, endsAt, id)) {
       return { kind: 'conflict' as const };
     }
-    return {
+    const result = {
       kind: 'updated' as const,
       row: (await this.reschedule(businessId, id, startsAt, endsAt)) as AppointmentRecord,
     };
+    if (operationId) {
+      this.operationAppointments.set(operationId, id);
+      if (event) this.operationEvents.push(event);
+    }
+    if (risk) await this.risk?.upsert(businessId, { appointmentId: id, ...risk });
+    return result;
   }
 
-  async transitionAtomically(businessId: string, id: string, nextStatus: AppointmentStatus) {
+  async transitionAtomically(
+    businessId: string,
+    id: string,
+    nextStatus: AppointmentStatus,
+    _actorId?: string,
+    operationKey?: string,
+  ) {
     const current = await this.findById(businessId, id);
     if (!current) return { kind: 'not_found' as const };
+    const operationId = operationKey && `${businessId}:${operationKey}`;
+    if (operationId && this.operationAppointments.has(operationId))
+      return { kind: 'updated' as const, row: current };
     const currentStatus = projectAppointmentStatus(current.status, current.confirmationStatus);
     if (!canTransitionAppointmentStatus(currentStatus, nextStatus) || nextStatus === 'SCHEDULED') {
       return { kind: 'invalid_transition' as const, currentStatus };
@@ -163,6 +201,13 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     if (nextStatus === 'CONFIRMED') current.confirmationStatus = 'CONFIRMED';
     else current.status = nextStatus;
     current.updatedAt = new Date();
+    if (operationId) {
+      this.operationAppointments.set(operationId, id);
+      this.operationEvents.push({
+        type: nextStatus === 'NO_SHOW' ? 'MARKED_NO_SHOW' : nextStatus,
+        operationKey,
+      });
+    }
     return { kind: 'updated' as const, row: current };
   }
 

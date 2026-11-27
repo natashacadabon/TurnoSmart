@@ -157,6 +157,75 @@ describe('API de turnos - Fase 2', () => {
     expect(invalid.body.error.code).toBe('APPOINTMENT_INVALID_TRANSITION');
   });
 
+  it('hace idempotentes los reintentos y registra un solo evento por operacion', async () => {
+    const { ctx, auth, customer, service } = await setup();
+    const createKey = 'create-operation-001';
+    const createPayload = {
+      customerId: customer.id,
+      serviceId: service.id,
+      startsAt: '2099-01-05T10:00:00.000Z',
+    };
+    const firstCreate = await request(ctx.app)
+      .post('/api/appointments')
+      .set(auth)
+      .set('X-Request-Id', createKey)
+      .send(createPayload);
+    const retryCreate = await request(ctx.app)
+      .post('/api/appointments')
+      .set(auth)
+      .set('X-Request-Id', createKey)
+      .send(createPayload);
+
+    expect(firstCreate.status).toBe(201);
+    expect(retryCreate.status).toBe(201);
+    expect(retryCreate.body.id).toBe(firstCreate.body.id);
+    expect(ctx.appointmentRepository.rows).toHaveLength(1);
+    expect(
+      ctx.appointmentRepository.operationEvents.filter((event) => event.operationKey === createKey),
+    ).toHaveLength(1);
+
+    const id = firstCreate.body.id as string;
+    expect(ctx.appointments.risks.has(id)).toBe(true);
+    const rescheduleKey = 'reschedule-operation-001';
+    const firstReschedule = await request(ctx.app)
+      .post(`/api/appointments/${id}/reschedule`)
+      .set(auth)
+      .set('X-Request-Id', rescheduleKey)
+      .send({ startsAt: '2099-01-05T12:00:00.000Z' });
+    const retryReschedule = await request(ctx.app)
+      .post(`/api/appointments/${id}/reschedule`)
+      .set(auth)
+      .set('X-Request-Id', rescheduleKey)
+      .send({ startsAt: '2099-01-05T12:00:00.000Z' });
+
+    expect(firstReschedule.status).toBe(200);
+    expect(retryReschedule.status).toBe(200);
+    expect(retryReschedule.body.updatedAt).toBe(firstReschedule.body.updatedAt);
+    expect(
+      ctx.appointmentRepository.operationEvents.filter(
+        (event) => event.operationKey === rescheduleKey,
+      ),
+    ).toHaveLength(1);
+
+    const transitionKey = 'confirm-operation-001';
+    const firstTransition = await request(ctx.app)
+      .post(`/api/appointments/${id}/confirm`)
+      .set(auth)
+      .set('X-Request-Id', transitionKey);
+    const retryTransition = await request(ctx.app)
+      .post(`/api/appointments/${id}/confirm`)
+      .set(auth)
+      .set('X-Request-Id', transitionKey);
+
+    expect(firstTransition.status).toBe(200);
+    expect(retryTransition.status).toBe(200);
+    expect(
+      ctx.appointmentRepository.operationEvents.filter(
+        (event) => event.operationKey === transitionKey,
+      ),
+    ).toHaveLength(1);
+  });
+
   it('mantiene aislamiento entre negocios y permisos', async () => {
     const first = await setup();
     const second = await setup();

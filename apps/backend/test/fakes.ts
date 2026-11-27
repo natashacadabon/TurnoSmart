@@ -208,6 +208,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     overrides.customers ?? customers,
     overrides.services ?? services,
     overrides.availability ?? availability,
+    appointments,
   );
   const deps: AppDeps = {
     corsOrigins: ['http://localhost:3000'],

@@ -233,6 +233,7 @@ model AppointmentEvent {
   businessId    String               @map("business_id") @db.Uuid
   appointmentId String               @map("appointment_id") @db.Uuid
   type          AppointmentEventType
+  operationKey  String?              @map("operation_key")
   metadata      Json?
   createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   business      Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -240,6 +241,7 @@ model AppointmentEvent {
 
   @@index([businessId, createdAt])
   @@index([appointmentId, createdAt])
+  @@unique([businessId, operationKey], map: "appointment_events_business_operation_key_key")
   @@map("appointment_events")
 }
 

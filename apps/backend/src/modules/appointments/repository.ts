@@ -12,6 +12,7 @@ import {
   invalidateAppointmentReminders,
   scheduleAppointmentReminders,
 } from '../notifications/reminder-schedule.js';
+import type { RiskScoreInput } from '../ai/risk-repository.js';
 import { bookingEnd } from './booking.js';
 
 export type AppointmentRecord = Prisma.AppointmentGetPayload<{
@@ -39,8 +40,12 @@ export type AppointmentTransitionResult =
 
 export interface AppointmentEventInput {
   type: AppointmentEventType;
+  /** Stable key reused by a client when retrying the same mutation. */
+  operationKey?: string;
   metadata?: Record<string, unknown>;
 }
+
+export type RiskScoreValues = Omit<RiskScoreInput, 'appointmentId'>;
 
 export interface CustomerAppointmentStats {
   total: number;
@@ -60,6 +65,7 @@ export interface AppointmentRepository {
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'notes'>,
     event?: AppointmentEventInput,
     clock?: () => Date,
+    risk?: RiskScoreValues,
   ): Promise<AppointmentCreateResult>;
   updateNotes(
     businessId: string,
@@ -73,12 +79,14 @@ export interface AppointmentRepository {
     event?: AppointmentEventInput,
     clock?: () => Date,
     requestId?: string,
+    risk?: RiskScoreValues,
   ): Promise<AppointmentRescheduleResult>;
   transitionAtomically(
     businessId: string,
     id: string,
     nextStatus: AppointmentStatus,
     actorId?: string,
+    operationKey?: string,
   ): Promise<AppointmentTransitionResult>;
   hasConflict(
     businessId: string,
@@ -153,6 +161,7 @@ export async function appendAppointmentEvent(
       businessId: row.businessId,
       appointmentId: row.id,
       type: event.type,
+      ...(event.operationKey && { operationKey: event.operationKey }),
       ...(event.metadata && { metadata: event.metadata as Prisma.InputJsonValue }),
     },
   });
@@ -167,6 +176,7 @@ export async function transitionAppointment(
   current: AppointmentRecord,
   nextStatus: AppointmentStatus,
   actor: { source: 'customer' } | { source: 'staff'; actorId?: string },
+  operationKey?: string,
 ): Promise<AppointmentTransitionResult> {
   const previousStatus = projectAppointmentStatus(current.status, current.confirmationStatus);
   if (actor.source === 'customer' && previousStatus === nextStatus) {
@@ -182,12 +192,38 @@ export async function transitionAppointment(
   });
   await appendAppointmentEvent(tx, row, {
     type: nextStatus === 'NO_SHOW' ? 'MARKED_NO_SHOW' : nextStatus,
+    ...(operationKey && { operationKey }),
     metadata: { previousStatus, status: nextStatus, ...actor },
   });
   if (row.status !== 'SCHEDULED') {
     await invalidateAppointmentReminders(tx, row.businessId, { appointmentId: row.id }, new Date());
   }
   return { kind: 'updated', row };
+}
+
+async function persistRiskScore(
+  tx: Prisma.TransactionClient,
+  businessId: string,
+  appointmentId: string,
+  risk: RiskScoreValues,
+) {
+  return tx.riskScore.upsert({
+    where: { appointmentId_businessId: { appointmentId, businessId } },
+    create: {
+      businessId,
+      appointmentId,
+      score: risk.score,
+      level: risk.level,
+      factors: risk.factors as unknown as Prisma.InputJsonValue,
+    },
+    update: {
+      score: risk.score,
+      level: risk.level,
+      factors: risk.factors as unknown as Prisma.InputJsonValue,
+      calculatedAt: new Date(),
+    },
+    select: { appointmentId: true, score: true, level: true, factors: true, calculatedAt: true },
+  });
 }
 
 async function loadBookingConfiguration(
@@ -279,12 +315,30 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     data: Pick<AppointmentRecord, 'customerId' | 'serviceId' | 'startsAt' | 'notes'>,
     event?: AppointmentEventInput,
     clock?: () => Date,
+    risk?: RiskScoreValues,
   ) {
     return this.prisma.$transaction(
       async (tx) => {
         // Todas las operaciones que reservan o modifican agenda usan el mismo
         // lock. Así, dos solicitudes para el mismo negocio se serializan.
         await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
+        if (event?.operationKey) {
+          const existing = await tx.appointmentEvent.findUnique({
+            where: {
+              businessId_operationKey: { businessId, operationKey: event.operationKey },
+            },
+            select: { appointmentId: true, type: true },
+          });
+          if (existing) {
+            if (existing.type !== event.type)
+              throw new AppError('CONFLICT', 'La clave de operación ya fue utilizada');
+            const row = await tx.appointment.findUnique({
+              where: { id_businessId: { id: existing.appointmentId, businessId } },
+              select: appointmentSelect,
+            });
+            if (row) return { kind: 'created' as const, row };
+          }
+        }
         const configuration = await loadBookingConfiguration(
           tx,
           businessId,
@@ -308,6 +362,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           select: appointmentSelect,
         });
         if (event) await appendAppointmentEvent(tx, row, event);
+        if (risk) await persistRiskScore(tx, businessId, row.id, risk);
         await scheduleAppointmentReminders(tx, businessId, row.id, now);
         return { kind: 'created' as const, row };
       },
@@ -331,6 +386,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     event?: AppointmentEventInput,
     clock?: () => Date,
     requestId?: string,
+    risk?: RiskScoreValues,
   ) {
     return this.prisma.$transaction(
       async (tx) => {
@@ -340,6 +396,19 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           select: appointmentSelect,
         });
         if (!current) return { kind: 'not_found' as const };
+        if (event?.operationKey) {
+          const existing = await tx.appointmentEvent.findUnique({
+            where: {
+              businessId_operationKey: { businessId, operationKey: event.operationKey },
+            },
+            select: { appointmentId: true, type: true },
+          });
+          if (existing) {
+            if (existing.appointmentId !== id || existing.type !== event.type)
+              throw new AppError('CONFLICT', 'La clave de operación ya fue utilizada');
+            return { kind: 'updated' as const, row: current };
+          }
+        }
         const now = clock?.() ?? new Date();
         if (requestId) {
           const approved = await tx.appointmentEvent.findFirst({
@@ -350,7 +419,6 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
               AND: [
                 { metadata: { path: ['requestId'], equals: requestId } },
                 { metadata: { path: ['startsAt'], equals: startsAt.toISOString() } },
-                { metadata: { path: ['scheduleVersion'], equals: current.scheduleVersion } },
               ],
             },
             select: { id: true },
@@ -396,6 +464,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         if (event) {
           await appendAppointmentEvent(tx, row, {
             type: event.type,
+            ...(event.operationKey && { operationKey: event.operationKey }),
             metadata: {
               ...event.metadata,
               previousStartsAt: current.startsAt.toISOString(),
@@ -403,6 +472,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             },
           });
         }
+        if (risk) await persistRiskScore(tx, businessId, row.id, risk);
         return { kind: 'updated' as const, row };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
@@ -414,6 +484,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     id: string,
     nextStatus: AppointmentStatus,
     actorId?: string,
+    operationKey?: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId}::uuid FOR UPDATE`;
@@ -422,10 +493,34 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         select: appointmentSelect,
       });
       if (!current) return { kind: 'not_found' as const };
-      return transitionAppointment(tx, current, nextStatus, {
-        source: 'staff',
-        ...(actorId && { actorId }),
-      });
+      if (operationKey) {
+        const existing = await tx.appointmentEvent.findUnique({
+          where: { businessId_operationKey: { businessId, operationKey } },
+          select: { appointmentId: true, type: true },
+        });
+        if (
+          existing &&
+          existing.appointmentId === id &&
+          existing.type !== (nextStatus === 'NO_SHOW' ? 'MARKED_NO_SHOW' : nextStatus)
+        ) {
+          throw new AppError('CONFLICT', 'Operation key already used for another transition');
+        }
+        if (existing) {
+          if (existing.appointmentId !== id)
+            throw new AppError('CONFLICT', 'La clave de operación ya fue utilizada');
+          return { kind: 'updated' as const, row: current };
+        }
+      }
+      return transitionAppointment(
+        tx,
+        current,
+        nextStatus,
+        {
+          source: 'staff',
+          ...(actorId && { actorId }),
+        },
+        operationKey,
+      );
     });
   }
 
