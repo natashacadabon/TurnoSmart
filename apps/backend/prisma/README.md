@@ -104,15 +104,15 @@ no prueba la validez de una credencial.
 
 ## Cuenta, datos e idempotencia
 
-La cuenta es **admin@turnosmart.test**, rol **OWNER** de Demo TurnoSmart 1.
+La cuenta es **admin@turnosmart.test**, rol **ADMIN global**, sin negocio asociado.
 Se crea con Supabase Auth Admin y email confirmado, sin SQL sobre auth.users.
 La password es la elegida en `SEED_ADMIN_PASSWORD`, minimo 10 caracteres: guardar
 ese valor en un gestor. Si la cuenta ya existe, se reutiliza **sin cambiar la
 password**; para comprobar login se debe ingresar la original.
 
-Las otras cuentas tienen roles OWNER/ADMIN/STAFF y passwords nuevas aleatorias
+Las otras cuentas tienen rol OWNER y passwords nuevas aleatorias.
 que no se publican. Si ya existen tampoco se cambian sus credenciales. El seed
-verifica `signInWithPassword`, el token con `getUser` y el perfil OWNER. Frontend
+verifica `signInWithPassword`, el token con `getUser` y el perfil ADMIN global. Frontend
 y backend deben apuntar al mismo proyecto para usar http://localhost:3000/login.
 Verificar en la respuesta de `GET /api/me` que `onboarded` sea true y
 `profile.role` OWNER; no copiar ni publicar el header Authorization.

@@ -170,6 +170,45 @@ El ensayo aplica las nueve migraciones SQL originales a una base nueva y genera 
 
 ## FINAL-05C: barreras antes del primer merge y de la publicacion
 
+Para consultar/aplicar migraciones sin preparar variables locales, ver
+[Migraciones Prisma manuales por entorno](database-migrations.md). El workflow
+`database-migrate.yml` usa `database-dev`/`database-production`, status por defecto,
+ramas y secretos aislados, CI/SHA para Production y verificación final. No integra
+migraciones automáticas en Render ni sustituye el procedimiento de backup/rollback.
+
+Ante fallos de Preview o cleanup antes de iniciar runner, revisar las anotaciones
+del check y la combinación default branch/environment: ambos eventos privilegiados
+usan la rama predeterminada. Debe ser `dev`, autorizada en `vercel-preview`;
+Production queda restringido a `main`. No sustituir esa política por acceso desde
+todas las ramas. Generar una ejecución nueva tras corregir configuración, porque
+un reintento antiguo puede conservar su referencia original.
+
+Los cuatro workflows conservan CI/SHA, concurrencia y separación de secretos.
+Preview fija scripts confiables al SHA del evento y ejecuta código de la PR sólo
+en el build sin secretos. Su resumen diferencia publicado, omitido y fallido.
+Cleanup valida el contexto sin secretos antes de entrar al environment y mantiene
+el lock compartido por PR, sin eliminar recursos Dev/Production o ajenos.
+
+Para diagnosticar acceso Vercel sin desplegar: con `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
+`VERCEL_PROJECT_ID` y `DEPLOY_TARGET` ya inyectados de forma segura, ejecutar
+`node apps/frontend/scripts/deploy-config.mjs vercel-access`. Sólo hace GET del
+proyecto, comprobando `id` y `accountId`; no requiere listar equipos ni usuarios.
+El mismo preflight se ejecuta antes del build. No imprimir el token ni pasarlo
+como argumento. CLI 65.9.0 consulta usuario/equipo al promover incluso con scope;
+el workflow utiliza la misma operación REST de promoción con `teamId`, después
+de los controles existentes. Sólo informa éxito tras verificar el job y los
+dominios asignados al deployment Production del SHA candidato. No ampliar permisos
+automáticamente. Un POST aceptado sin confirmación queda fallido/pendiente; consultar
+Vercel antes de reintentar. El
+preflight no acredita una promoción real: al publicar siguen siendo obligatorios
+CI, backend/readiness y vigencia del SHA candidato, bundle y bypass existentes.
+
+Los jobs de settings y cleanup usan `environment.deployment: false`: mantienen
+los secretos, variables y restricciones del environment sin generar registros
+de publicación engañosos. Sólo los jobs publicadores generan deployments con URL.
+Ver [auditoría y procedimiento de estabilización](estabilizacion-cicd-2026-11-26.md)
+para la evidencia remota, servicios vigentes y pendientes externos.
+
 El primer merge incorpora codigo, no autoriza una publicacion. Conservar dev
 como default branch y un proyecto Vercel. Antes del merge, comprobar manualmente
 que Render Production tiene Auto-Deploy Off y que el publicador manual Production
@@ -205,7 +244,7 @@ coordinar primero esquema y backend; no puede inferirse de un merge ni del CI ve
 
 ## Recorrido de demo
 
-1. Iniciar sesión y completar onboarding.
+1. Iniciar sesión como ADMIN, crear el negocio e invitar al OWNER; aceptar la invitación desde `/onboarding`.
 2. Crear un servicio y una regla de disponibilidad.
 3. Crear un cliente.
 4. Reservar un turno futuro.
@@ -222,7 +261,7 @@ La API guarda el turno y su evento en la misma transacción PostgreSQL. También
 
 Con `EMAIL_PROVIDER=disabled` (valor por defecto) los trabajos quedan en cola. Con un proveedor activo se mantienen el polling cada cinco segundos y Supabase Cron como recuperación. Los recordatorios se calculan restando horas reales del inicio UTC. El email y la interfaz muestran el horario en la zona del negocio.
 
-En **Configuración**, OWNER y ADMIN pueden guardar las preferencias de correo y de acciones públicas. Los nuevos negocios reciben correo de reserva activado y recordatorios de 48 y 24 horas. Se permiten hasta tres anticipaciones distintas entre 2, 6, 12, 24, 48 y 72 horas. Desactivar recordatorios cancela los trabajos pendientes disponibles. Cambiar anticipaciones reconcilia las reservas futuras, conservando los envíos ya procesados. Un trabajo que el proveedor ya está procesando puede terminar su entrega.
+En **Configuración**, solo OWNER puede guardar las preferencias de correo y de acciones públicas. Los nuevos negocios reciben correo de reserva activado y recordatorios de 48 y 24 horas. Se permiten hasta tres anticipaciones distintas entre 2, 6, 12, 24, 48 y 72 horas. Desactivar recordatorios cancela los trabajos pendientes disponibles. Cambiar anticipaciones reconcilia las reservas futuras, conservando los envíos ya procesados. Un trabajo que el proveedor ya está procesando puede terminar su entrega.
 
 La confirmación, cancelación y solicitud de reprogramación por enlace tienen controles independientes. Cancelar y solicitar un cambio admiten un plazo mínimo. La configuración vigente se vuelve a comprobar al emitir, consultar y ejecutar enlaces, incluidos los emitidos antes del cambio de preferencias. El turno original sigue reservado hasta la aprobación del negocio.
 

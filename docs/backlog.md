@@ -23,7 +23,7 @@ Orden sugerido: resolver formato y permisos, ensayar actualización y recuperaci
 ### FINAL-02 · Verificar permisos del entorno de entrega
 
 - [ ] Inventariar permisos efectivos de Data API/RLS en clientes, servicios, disponibilidad, scores y demás tablas de dominio; corregir accesos directos que eludan las operaciones autorizadas.
-- [ ] Probar aislamiento entre dos negocios, accesos `anon`/`authenticated`, roles OWNER/ADMIN/STAFF y rechazo de acciones públicas deshabilitadas.
+- [ ] Probar aislamiento entre dos negocios, accesos `anon`/`authenticated`, roles OWNER/ADMIN global y rechazo de acciones públicas deshabilitadas.
 
 **Cierre:** evidencia de denegación de lecturas entre negocios y escrituras no autorizadas. P0-06 verificó ACL/RLS del fixture, no los permisos de todas las tablas del proyecto Supabase real.
 
@@ -47,7 +47,7 @@ Orden sugerido: resolver formato y permisos, ensayar actualización y recuperaci
 
 - [ ] Confirmar frontend/backend de entrega y requisito académico de Azure. Usar el [procedimiento de Azure](../infra/azure/README.md) si corresponde al checkpoint.
 - [ ] Publicar el candidato con los parches de seguridad, variables y migraciones verificadas; revisar CORS y ausencia de secretos en frontend, artefactos y logs.
-- [ ] Probar login/logout, onboarding, clientes, crear/editar/activar/desactivar servicios, guardar/copiar disponibilidad, consultar slots, reservar, confirmar, cancelar, reprogramar, historial y explicación Gemini.
+- [ ] Probar login/logout, aceptación de invitación OWNER, clientes, crear/editar/activar/desactivar servicios, guardar/copiar disponibilidad, consultar slots, reservar, confirmar, cancelar, reprogramar, historial y explicación Gemini.
 - [ ] Verificar `/health`, `/ready` y `/metrics` según su configuración de acceso. Probar campana, CTA de toasts, solicitud pendiente/resuelta/obsoleta, sincronización de agenda y regreso por breadcrumbs en escritorio y móvil.
 
 **Cierre:** URLs y SHA documentados, recorrido real aprobado con cuentas de prueba y límites observados. Un deploy exitoso no basta para cerrar esta tarea.
@@ -87,7 +87,7 @@ Fuera del alcance actual, salvo exigencia explícita de la consigna:
 
 ## Funcionalidades implementadas
 
-Identidad y onboarding, clientes, servicios, disponibilidad semanal, consulta de slots, agenda, gestión de turnos, historial, score heurístico y explicación con Gemini. El centro interno de notificaciones ya está integrado. La rama incorpora enlaces públicos, solicitudes de cambio, correo transaccional asíncrono y recordatorios configurables por anticipación. Configuración y Servicios tienen una composición compacta responsive; la disponibilidad se edita en modal. La campana global y los toasts sincronizan la agenda sin recarga manual. Sus preferencias y validaciones están en [notificaciones](notifications-plan.md).
+Identidad e invitaciones de OWNER, clientes, servicios, disponibilidad semanal, consulta de slots, agenda, gestión de turnos, historial, score heurístico y explicación con Gemini. El centro interno de notificaciones ya está integrado. La rama incorpora enlaces públicos, solicitudes de cambio, correo transaccional asíncrono y recordatorios configurables por anticipación. Configuración y Servicios tienen una composición compacta responsive; la disponibilidad se edita en modal. La campana global y los toasts sincronizan la agenda sin recarga manual. Sus preferencias y validaciones están en [notificaciones](notifications-plan.md).
 
 ## Condición de entrega final
 

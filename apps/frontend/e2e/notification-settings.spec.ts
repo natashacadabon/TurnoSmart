@@ -176,9 +176,9 @@ test('preserva dependencias, guardado y descarte', async ({ page }) => {
   await page.getByRole('button', { name: 'Descartar', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Email al reservar' })).toBeChecked();
 });
-test('STAFF conserva la vista previa sin edición', async ({ page }) => {
+test('OWNER conserva la vista previa con edición operativa', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
-  await setup(page, 'STAFF');
+  await setup(page, 'OWNER');
   expect(
     (await page.getByRole('textbox', { name: 'Nombre', exact: true }).boundingBox())!.width,
   ).toBeGreaterThan(200);

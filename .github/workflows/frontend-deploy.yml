@@ -43,17 +43,17 @@ jobs:
           PRODUCTION_BRANCH: ${{ vars.VERCEL_PRODUCTION_BRANCH }}
         run: |
           test "$FRONTEND_TARGET" = "vercel" || { echo "Azure frontend bloqueado: faltan infraestructura, ZIP standalone y startup comprobados."; exit 1; }
-          test "$HOBBY_ELIGIBLE" = "true" || { echo "Confirmar elegibilidad Hobby antes de desplegar; no hay upgrade automatico."; exit 1; }
           case "$API_TARGET" in
             render)
               test "${PRODUCTION_BRANCH:-}" = "main" || { echo "Configurar VERCEL_PRODUCTION_BRANCH=main como variable del repositorio."; exit 1; }
-              test "${GITHUB_REF:-}" = "refs/heads/main" || { echo "Production solo puede publicarse desde main."; exit 1; }
+              test "${GITHUB_REF:-}" = "refs/heads/main" || { echo "Production solo puede publicarse desde main. Dev usa Frontend preview automático; no este dispatch Render."; exit 1; }
               ;;
             azure)
               test "${GITHUB_REF:-}" = "refs/heads/dev" || { echo "El checkpoint Azure solo admite dev como Preview."; exit 1; }
               ;;
             *) echo "Proveedor de API no autorizado."; exit 1 ;;
           esac
+          test "$HOBBY_ELIGIBLE" = "true" || { echo "Crear una ejecución nueva y confirmar elegibilidad Hobby si corresponde; re-run conserva los inputs."; exit 1; }
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
@@ -80,7 +80,9 @@ jobs:
         shell: bash
     permissions:
       contents: read
-    environment: vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}
+    environment:
+      name: vercel-${{ inputs.target == 'azure' && 'preview' || 'production' }}
+      url: ${{ steps.promote.outputs.url || steps.upload.outputs.url }}
     concurrency:
       group: vercel-${{ inputs.target == 'azure' && 'checkpoint' || 'production' }}
       cancel-in-progress: false
@@ -101,6 +103,11 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+
+      - name: Verify Vercel identity and project access
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node apps/frontend/scripts/deploy-config.mjs vercel-access
 
       - name: Pull Vercel settings
         env:
@@ -152,7 +159,7 @@ jobs:
           if [[ "$DEPLOY_TARGET" == production ]]; then
             flags=(--prod --skip-domain)
           fi
-          url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --archive=tgz --yes "${flags[@]}" --token="$VERCEL_TOKEN")
+          url=$(npx --yes "vercel@$VERCEL_CLI_VERSION" deploy --prebuilt --archive=tgz --yes "${flags[@]}" --meta "turnosmartMergeSha=$GITHUB_SHA" --token="$VERCEL_TOKEN")
           [[ "$url" =~ ^https://[a-zA-Z0-9-]+\.vercel\.app/?$ ]]
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
@@ -180,14 +187,20 @@ jobs:
             await assertCurrentRevision(github, context);
 
       - name: Promote Production
+        id: promote
         if: env.DEPLOY_TARGET == 'production'
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes "vercel@$VERCEL_CLI_VERSION" promote "$DEPLOYMENT_URL" --yes --token="$VERCEL_TOKEN"
+        run: |
+          : "${VERCEL_ORG_ID:?Configurar VERCEL_ORG_ID}" "${VERCEL_TOKEN:?Configurar VERCEL_TOKEN}"
+          url=$(node apps/frontend/scripts/deploy-config.mjs promote)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Report deployment URL
         env:
           DEPLOYMENT_URL: ${{ steps.upload.outputs.url }}
+          PRODUCTION_URL: ${{ steps.promote.outputs.url }}
         run: |
-          echo "Frontend ($DEPLOY_TARGET): $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Frontend ($DEPLOY_TARGET): ${PRODUCTION_URL:-$DEPLOYMENT_URL}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Artefacto verificado: $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"

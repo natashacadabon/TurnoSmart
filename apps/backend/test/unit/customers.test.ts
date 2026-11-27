@@ -171,7 +171,7 @@ describe('baja de clientes', () => {
     expect((await request(ctx.app).delete(`/api/customers/${id}`).set(owner)).status).toBe(404);
   });
 
-  it('STAFF no puede eliminar (403) y el cliente sigue existiendo', async () => {
+  it('ADMIN global no puede eliminar (403) y el cliente sigue existiendo', async () => {
     const id = await create('Protegido');
     const res = await request(ctx.app).delete(`/api/customers/${id}`).set(admin);
     expect(res.status).toBe(403);

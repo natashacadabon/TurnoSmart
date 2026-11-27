@@ -83,7 +83,7 @@ async function openAgenda(
     rules?: AvailabilityRuleInput[];
     rejectFirstTransition?: boolean;
     failMetrics?: boolean;
-    role?: 'OWNER' | 'ADMIN' | 'STAFF';
+    role?: 'OWNER' | 'ADMIN';
     initialNotifications?: CenterNotifications['items'];
   } = {},
 ) {
@@ -537,13 +537,13 @@ test('guarda configuración de correos y hasta tres recordatorios únicos en mó
   expect(await page.locator('html').evaluate((element) => element.scrollWidth)).toBe(390);
 });
 
-test('STAFF puede consultar configuración y no tiene controles de escritura', async ({ page }) => {
+test('OWNER puede consultar y modificar la configuración operativa', async ({ page }) => {
   const writes: object[] = [];
   await page.route('**/api/business/notification-preferences', (route) => {
     if (route.request().method() === 'PATCH') writes.push(route.request().postDataJSON());
     return respond(route, notificationPreferences());
   });
-  await openAgenda(page, false, [], { role: 'STAFF' });
+  await openAgenda(page, false, [], { role: 'OWNER' });
   await page
     .getByRole('navigation', { name: 'Secciones principales' })
     .getByRole('link', { name: 'Configuración', exact: true })
