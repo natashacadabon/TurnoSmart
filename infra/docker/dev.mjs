@@ -231,7 +231,8 @@ if (command === 'up') {
     if (error?.code !== 'EADDRINUSE') throw error;
     console.error(
       'Ya hay un entorno local de TurnoSmart corriendo (npm run docker:dev).\n' +
-        'Usalo en http://127.0.0.1:3000 o detenelo con: npm run docker:down',
+        // localhost, no 127.0.0.1: Auth y la API sólo aceptan ese origen por CORS.
+        `Usalo en http://localhost:${env.TS_FRONTEND_PORT} o detenelo con: npm run docker:down`,
     );
     process.exit(1);
   }
