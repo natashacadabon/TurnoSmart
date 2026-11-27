@@ -4,6 +4,7 @@ import { InMemorySlots } from './slots-fakes.js';
 import { randomUUID } from 'node:crypto';
 import type { Role } from '@turnosmart/shared';
 import { createApp, type AppDeps } from '../src/app.js';
+import { AppError } from '../src/lib/errors.js';
 import type { TokenVerifier, VerifiedUser } from '../src/middleware/auth.js';
 import type { LlmClient, LlmRequest } from '../src/modules/ai/llm.js';
 import type {
@@ -22,10 +23,14 @@ import { InMemoryAppointmentRepository } from './appointments-fakes.js';
 import type {
   BusinessRecord,
   IdentityRepository,
-  OnboardingInput,
   ProfileRecord,
   ProfileWithBusiness,
 } from '../src/modules/identity/repository.js';
+import type {
+  AdminBusinessRecord,
+  AdminRepository,
+  OwnerInvitationRecord,
+} from '../src/modules/admin/repository.js';
 
 /** Tokens de prueba: "token-<userId>". "expired" simula un token vencido. */
 export class FakeVerifier implements TokenVerifier {
@@ -45,7 +50,7 @@ export class InMemoryIdentity implements IdentityRepository {
   readonly businesses = new Map<string, BusinessRecord>();
   readonly profiles = new Map<string, ProfileRecord>();
   readonly platformAdmins = new Map<string, { id: string; fullName: string | null }>();
-  private readonly preferences = {
+  readonly preferences = {
     bookingEmailEnabled: true,
     confirmationEmailEnabled: true,
     remindersEnabled: true,
@@ -72,42 +77,31 @@ export class InMemoryIdentity implements IdentityRepository {
         id: businessId,
         name: 'Negocio',
         timezone: 'UTC',
+        active: true,
         createdAt: new Date(),
       });
     }
-    this.profiles.set(userId, { id: userId, businessId, fullName: null, role });
+    this.profiles.set(userId, { id: userId, businessId, fullName: null, active: true, role });
   }
 
   async findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null> {
     const profile = this.profiles.get(userId);
     if (!profile) return null;
-    return { profile, business: this.businesses.get(profile.businessId)! };
+    const business = this.businesses.get(profile.businessId);
+    if (profile.role !== 'OWNER' || !profile.active || !business?.active) return null;
+    return { profile, business };
+  }
+
+  async findOwnerAccount(userId: string): Promise<ProfileWithBusiness | null> {
+    const profile = this.profiles.get(userId);
+    if (!profile || profile.role !== 'OWNER') return null;
+    const business = this.businesses.get(profile.businessId);
+    return business ? { profile, business } : null;
   }
 
   async findPlatformAdmin(userId: string) {
     const admin = this.platformAdmins.get(userId);
     return admin ? { ...admin, businessId: null as null, role: 'ADMIN' as const } : null;
-  }
-
-  async onboard(input: OnboardingInput) {
-    const existing = await this.findProfileWithBusiness(input.userId);
-    if (existing) return { ...existing, created: false };
-    const business = {
-      ...this.preferences,
-      id: randomUUID(),
-      name: input.businessName,
-      timezone: input.timezone,
-      createdAt: new Date(),
-    };
-    this.businesses.set(business.id, business);
-    const profile: ProfileRecord = {
-      id: input.userId,
-      businessId: business.id,
-      fullName: input.fullName,
-      role: 'OWNER',
-    };
-    this.profiles.set(profile.id, profile);
-    return { profile, business, created: true };
   }
 
   async updateBusiness(
@@ -117,6 +111,157 @@ export class InMemoryIdentity implements IdentityRepository {
     const b = { ...this.businesses.get(businessId)!, ...data };
     this.businesses.set(businessId, b);
     return b;
+  }
+}
+
+export class InMemoryAdmin implements AdminRepository {
+  readonly invitations = new Map<string, OwnerInvitationRecord & { token: string }>();
+
+  constructor(private readonly identity: InMemoryIdentity) {}
+
+  private business(id: string): AdminBusinessRecord {
+    const business = this.identity.businesses.get(id);
+    if (!business) throw new Error('Negocio no encontrado');
+    const owner = [...this.identity.profiles.values()].find(
+      (profile) => profile.businessId === id && profile.role === 'OWNER',
+    );
+    const pendingInvitations = [...this.invitations.values()].filter(
+      (invitation) => invitation.businessId === id && invitation.status === 'PENDING',
+    ).length;
+    return {
+      id: business.id,
+      name: business.name,
+      timezone: business.timezone,
+      active: business.active,
+      createdAt: business.createdAt,
+      owner: owner
+        ? { id: owner.id, email: `${owner.id}@test.local`, fullName: owner.fullName }
+        : null,
+      owners: owner
+        ? [
+            {
+              id: owner.id,
+              email: `${owner.id}@test.local`,
+              fullName: owner.fullName,
+              active: owner.active,
+            },
+          ]
+        : [],
+      pendingInvitations,
+    };
+  }
+
+  async listBusinesses() {
+    return [...this.identity.businesses.keys()].map((id) => this.business(id));
+  }
+
+  async createBusiness(input: { name: string; timezone: string }) {
+    const id = randomUUID();
+    this.identity.businesses.set(id, {
+      ...this.identity['preferences'],
+      id,
+      name: input.name,
+      timezone: input.timezone,
+      active: true,
+      createdAt: new Date(),
+    });
+    return this.business(id);
+  }
+
+  async updateBusiness(
+    businessId: string,
+    input: { name?: string; timezone?: string; active?: boolean },
+  ) {
+    const business = this.identity.businesses.get(businessId);
+    if (!business) throw new Error('Negocio no encontrado');
+    Object.assign(business, input);
+    return this.business(businessId);
+  }
+
+  async updateOwner(
+    businessId: string,
+    ownerId: string,
+    input: { fullName?: string; active?: boolean },
+  ) {
+    const owner = this.identity.profiles.get(ownerId);
+    if (!owner || owner.businessId !== businessId || owner.role !== 'OWNER')
+      throw new AppError('NOT_FOUND', 'OWNER no encontrado');
+    const activeOwners = [...this.identity.profiles.values()].filter(
+      (profile) => profile.businessId === businessId && profile.role === 'OWNER' && profile.active,
+    ).length;
+    if (input.active === false && owner.active && activeOwners <= 1)
+      throw new AppError('CONFLICT', 'No se puede desactivar el último OWNER');
+    Object.assign(owner, input);
+    return {
+      id: owner.id,
+      email: `${owner.id}@test.local`,
+      fullName: owner.fullName,
+      active: owner.active,
+    };
+  }
+
+  async listInvitations(businessId: string) {
+    return [...this.invitations.values()]
+      .filter((invitation) => invitation.businessId === businessId)
+      .map(({ token: _token, ...invitation }) => invitation);
+  }
+
+  async inviteOwner(businessId: string, input: { email: string; fullName: string | null }) {
+    const token = `${randomUUID()}${randomUUID()}`;
+    const invitation: OwnerInvitationRecord & { token: string } = {
+      id: randomUUID(),
+      businessId,
+      email: input.email.toLowerCase(),
+      fullName: input.fullName,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 7 * 86_400_000),
+      createdAt: new Date(),
+      token,
+    };
+    this.invitations.set(invitation.id, invitation);
+    return invitation;
+  }
+
+  async resendInvitation(businessId: string, invitationId: string) {
+    const old = this.invitations.get(invitationId);
+    if (!old || old.businessId !== businessId) throw new Error('Invitación no encontrada');
+    old.status = 'REVOKED';
+    return this.inviteOwner(businessId, { email: old.email, fullName: old.fullName });
+  }
+
+  async revokeInvitation(businessId: string, invitationId: string) {
+    const invitation = this.invitations.get(invitationId);
+    if (!invitation || invitation.businessId !== businessId)
+      throw new Error('Invitación no encontrada');
+    invitation.status = 'REVOKED';
+  }
+
+  async acceptInvitation(input: {
+    userId: string;
+    email: string;
+    token: string;
+    fullName: string | null;
+  }) {
+    const invitation = [...this.invitations.values()].find(
+      (candidate) => candidate.token === input.token && candidate.status === 'PENDING',
+    );
+    if (
+      !invitation ||
+      invitation.expiresAt <= new Date() ||
+      invitation.email !== input.email.toLowerCase()
+    )
+      throw new Error('Invitación inválida');
+    this.identity.addMember(input.userId, invitation.businessId, 'OWNER');
+    invitation.status = 'ACCEPTED';
+    const business = this.identity.businesses.get(invitation.businessId)!;
+    return {
+      businessId: business.id,
+      businessName: business.name,
+      timezone: business.timezone,
+      businessCreatedAt: business.createdAt,
+      profileId: input.userId,
+      fullName: input.fullName ?? invitation.fullName,
+    };
   }
 }
 
@@ -214,6 +359,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
   const availability = new InMemoryAvailability(identity);
   const slots = new InMemorySlots(services);
   const appointments = new InMemoryAppointments();
+  const admin = new InMemoryAdmin(identity);
   const appointmentRepository = new InMemoryAppointmentRepository(
     overrides.customers ?? customers,
     overrides.services ?? services,
@@ -223,6 +369,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     corsOrigins: ['http://localhost:3000'],
     verifier,
     identity,
+    admin,
     customers,
     services,
     availability,
@@ -239,6 +386,7 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     app: createApp(deps),
     verifier,
     identity,
+    admin,
     customers,
     services,
     availability,

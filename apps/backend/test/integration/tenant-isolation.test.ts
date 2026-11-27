@@ -84,7 +84,7 @@ describe('centro de notificaciones', () => {
         id: staff.id,
         businessId: member.businessId,
         email: 'staff@example.test',
-        role: 'STAFF',
+        role: 'OWNER',
       },
     });
     const staffAuth = { Authorization: `Bearer ${staff.token}` };

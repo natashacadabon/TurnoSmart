@@ -25,9 +25,9 @@ let businessId: string;
 let otherId: string;
 let owner: { Authorization: string };
 let other: { Authorization: string };
-let staff: { Authorization: string };
+let admin: { Authorization: string };
 
-async function member(id: string, role: 'OWNER' | 'STAFF') {
+async function member(id: string, role: 'OWNER') {
   const user = ctx.verifier.addUser();
   await prisma.profile.create({
     data: { id: user.id, businessId: id, email: `${user.id}@test.local`, role },
@@ -66,7 +66,16 @@ beforeEach(async () => {
   createdBusinesses.push(otherId);
   owner = await member(businessId, 'OWNER');
   other = await member(otherId, 'OWNER');
-  staff = await member(businessId, 'STAFF');
+  const globalAdmin = ctx.verifier.addUser();
+  await prisma.profile.create({
+    data: {
+      id: globalAdmin.id,
+      businessId: null,
+      email: `${globalAdmin.id}@test.local`,
+      role: 'ADMIN',
+    },
+  });
+  admin = { Authorization: `Bearer ${globalAdmin.token}` };
 });
 afterAll(async () => {
   await prisma.business.deleteMany({ where: { id: { in: createdBusinesses } } });
@@ -114,8 +123,9 @@ describe('B04 API + PostgreSQL', () => {
     expect(first.status).toBe(200);
     const row = (await repository.list(businessId)).rules[0]!;
     expect(row.startTime.toISOString()).toBe('1970-01-01T09:00:00.000Z');
-    expect((await request(ctx.app).get(path).set(staff)).body).toEqual(first.body);
-    expect((await request(ctx.app).put(path).set(staff).send({ rules: [] })).status).toBe(403);
+    expect((await request(ctx.app).get(path).set(owner)).body).toEqual(first.body);
+    expect((await request(ctx.app).get(path).set(admin)).status).toBe(403);
+    expect((await request(ctx.app).put(path).set(admin).send({ rules: [] })).status).toBe(403);
     expect((await request(ctx.app).get(path).set(other)).body.data.rules).toEqual([]);
     await repository.replace(otherId, [{ ...rule, active: false }]);
     await repository.replace(businessId, [{ ...rule, active: false }]);

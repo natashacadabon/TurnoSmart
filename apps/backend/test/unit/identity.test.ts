@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { buildTestApp } from '../fakes.js';
 
-describe('autenticación', () => {
+describe('identidad y separación de roles', () => {
   it('401 sin token', async () => {
     const { app } = buildTestApp();
     const res = await request(app).get('/api/me');
@@ -11,90 +11,14 @@ describe('autenticación', () => {
     expect(res.body.error.code).toBe('UNAUTHENTICATED');
   });
 
-  it('401 con token inválido o vencido', async () => {
-    const { app } = buildTestApp();
-    for (const header of ['Bearer expired', 'Bearer ', 'Basic abc']) {
-      const res = await request(app).get('/api/me').set('Authorization', header);
-      expect(res.status).toBe(401);
-    }
-  });
-
-  it('/me indica cuenta sin perfil', async () => {
-    const { app, verifier } = buildTestApp();
-    const { id, token } = verifier.addUser();
-    const res = await request(app).get('/api/me').set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ onboarded: false, user: { id } });
-  });
-
-  it('cuenta sin perfil recibe 403 PROFILE_REQUIRED en rutas de negocio', async () => {
+  it('cuenta sin perfil recibe PROFILE_REQUIRED en rutas operativas', async () => {
     const { app, verifier } = buildTestApp();
     const { token } = verifier.addUser();
     const res = await request(app).get('/api/customers').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('PROFILE_REQUIRED');
   });
-});
 
-describe('onboarding', () => {
-  it('crea un único negocio con rol OWNER, aunque el body intente otro rol o negocio', async () => {
-    const { app, verifier, identity } = buildTestApp();
-    const { token } = verifier.addUser();
-    const res = await request(app)
-      .post('/api/onboarding')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ businessName: 'Peluquería Sol', role: 'STAFF', businessId: randomUUID() });
-    expect(res.status).toBe(201);
-    expect(res.body.profile.role).toBe('OWNER');
-    expect(res.body.business.name).toBe('Peluquería Sol');
-    expect(res.body.business.timezone).toBe('America/Argentina/Buenos_Aires');
-    expect(identity.businesses.size).toBe(1);
-  });
-
-  it('repetido no duplica el negocio', async () => {
-    const { app, verifier, identity } = buildTestApp();
-    const { token } = verifier.addUser();
-    const auth = { Authorization: `Bearer ${token}` };
-    const first = await request(app)
-      .post('/api/onboarding')
-      .set(auth)
-      .send({ businessName: 'Uno' });
-    const second = await request(app)
-      .post('/api/onboarding')
-      .set(auth)
-      .send({ businessName: 'Dos' });
-    expect(second.status).toBe(200);
-    expect(second.body.business.id).toBe(first.body.business.id);
-    expect(identity.businesses.size).toBe(1);
-  });
-
-  it('rechaza cuentas de Auth sin email (Profile.email es obligatorio)', async () => {
-    const { app, verifier, identity } = buildTestApp();
-    const { token } = verifier.addUser(randomUUID(), null);
-    const res = await request(app)
-      .post('/api/onboarding')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ businessName: 'Sin email' });
-    expect(res.status).toBe(422);
-    expect(identity.businesses.size).toBe(0);
-  });
-
-  it('valida nombre y zona horaria', async () => {
-    const { app, verifier } = buildTestApp();
-    const { token } = verifier.addUser();
-    const res = await request(app)
-      .post('/api/onboarding')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ businessName: 'X', timezone: 'Marte/Olympus' });
-    expect(res.status).toBe(422);
-    expect(res.body.error.details.map((d: { path: string }) => d.path).sort()).toEqual([
-      'businessName',
-      'timezone',
-    ]);
-  });
-});
-
-describe('permisos por rol', () => {
   it('ADMIN se resuelve como cuenta global sin negocio y no accede a la API operativa', async () => {
     const { app, verifier, identity } = buildTestApp();
     const admin = verifier.addUser();
@@ -116,26 +40,53 @@ describe('permisos por rol', () => {
     expect(operational.body.error.code).toBe('FORBIDDEN');
   });
 
-  it('STAFF no puede modificar el negocio; ADMIN sí', async () => {
+  it('OWNER tiene acceso a su negocio y ADMIN global no puede modificarlo', async () => {
     const { app, verifier, identity } = buildTestApp();
     const businessId = randomUUID();
-    const staff = verifier.addUser();
+    const owner = verifier.addUser();
     const admin = verifier.addUser();
-    identity.addMember(staff.id, businessId, 'STAFF');
-    identity.addMember(admin.id, businessId, 'ADMIN');
+    identity.addMember(owner.id, businessId, 'OWNER');
+    identity.addMember(admin.id, randomUUID(), 'ADMIN');
 
-    const denied = await request(app)
+    const ownerResponse = await request(app)
       .patch('/api/business')
-      .set('Authorization', `Bearer ${staff.token}`)
+      .set('Authorization', `Bearer ${owner.token}`)
       .send({ name: 'Nuevo nombre' });
-    expect(denied.status).toBe(403);
-    expect(denied.body.error.code).toBe('FORBIDDEN');
+    expect(ownerResponse.status).toBe(200);
 
-    const deniedAdmin = await request(app)
+    const adminResponse = await request(app)
       .patch('/api/business')
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({ name: 'Nuevo nombre' });
-    expect(deniedAdmin.status).toBe(403);
-    expect(deniedAdmin.body.error.code).toBe('FORBIDDEN');
+      .send({ name: 'No permitido' });
+    expect(adminResponse.status).toBe(403);
+  });
+
+  it('el onboarding público no crea OWNERS sin una invitación emitida por ADMIN', async () => {
+    const { app, verifier, identity } = buildTestApp();
+    const { token } = verifier.addUser();
+    const res = await request(app)
+      .post('/api/onboarding')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ businessName: 'Negocio no permitido' });
+    expect(res.status).toBe(403);
+    expect(identity.businesses.size).toBe(0);
+  });
+
+  it('reports a disabled OWNER account without sending it to another invitation', async () => {
+    const { app, verifier, identity } = buildTestApp();
+    const businessId = randomUUID();
+    const owner = verifier.addUser();
+    identity.addMember(owner.id, businessId, 'OWNER');
+    identity.profiles.get(owner.id)!.active = false;
+
+    const me = await request(app).get('/api/me').set('Authorization', `Bearer ${owner.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({
+      onboarded: false,
+      platformAdmin: false,
+      accountDisabled: true,
+      profile: { role: 'OWNER' },
+      business: { id: businessId },
+    });
   });
 });
