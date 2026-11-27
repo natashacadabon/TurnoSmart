@@ -11,6 +11,7 @@ import {
   migrate,
   migrationStatus,
   migrationDiagnostic,
+  prismaCommandInfo,
   runPrisma,
   validateMigrationContext,
 } from './database-migrate.mjs';
@@ -44,6 +45,140 @@ const pending = {
 };
 const noop = async () => {};
 const options = { migrations: [migration], report: () => {}, authorize: noop };
+
+test('errores Prisma preservan códigos y tipo sin aceptar pendientes ni imprimir credenciales', async () => {
+  for (const [code, type] of [
+    ['P1000', 'PRISMA_AUTHENTICATION_ERROR'],
+    ['P1001', 'PRISMA_CONNECTION_ERROR'],
+    ['P1011', 'PRISMA_TLS_ERROR'],
+    ['P1010', 'PRISMA_PERMISSION_ERROR'],
+    ['P3009', 'PRISMA_FAILED_MIGRATION'],
+    ['P3018', 'PRISMA_FAILED_MIGRATION'],
+    ['P9999', 'PRISMA_ERROR'],
+  ]) {
+    const result = {
+      ...pending,
+      stderr: `\u001b[31mError code: ${code}\u001b[0m\r\npostgresql://private:synthetic-secret@private.invalid/db?token=fixture-github-token`,
+    };
+    assert.throws(
+      () => migrationStatus(result, [migration]),
+      (error) => migrationDiagnostic(error).type === type,
+    );
+    const reports = [],
+      commands = [];
+    await assert.rejects(() =>
+      migrate(env, {
+        ...options,
+        run: (op) => {
+          commands.push(op);
+          return result;
+        },
+        report: (text) => reports.push(text),
+      }),
+    );
+    assert.deepEqual(commands, ['status'], 'Nunca iniciar deploy ante errores reales');
+    const summary = reports.join('\n');
+    assert(summary.includes(`Tipo de error: ${type}`));
+    assert(summary.includes(`Códigos Prisma: ${code}`));
+    assert.match(summary, /Fase: status inicial/);
+    assert.match(summary, /Exit code: 1/);
+    assert(!/synthetic-secret|fixture-github-token|private.invalid|postgresql:/.test(summary));
+  }
+  for (const prefix of [
+    'Error: P1001',
+    'Error code: P1001',
+    'P1001:',
+    '"error_code":"P1001"',
+    '{"error_code":"P1001","message":"synthetic-secret"}',
+  ])
+    assert.deepEqual(prismaCommandInfo({ status: 1, stderr: prefix }).prismaCodes, ['P1001']);
+  assert.deepEqual(
+    prismaCommandInfo({ status: 1, stderr: 'postgresql://user:P1000@private.invalid/db' })
+      .prismaCodes,
+    [],
+  );
+});
+
+test('historial, salida desconocida, engine y fallos de ejecución reciben diagnósticos específicos', async () => {
+  for (const [result, type] of [
+    [
+      {
+        status: 1,
+        stderr:
+          'Your local migration history and the migrations table from your database are different:',
+      },
+      'PRISMA_HISTORY_DIVERGED',
+    ],
+    [{ status: 1, stderr: 'Following migrations have failed:' }, 'PRISMA_FAILED_MIGRATION'],
+    [
+      { status: 1, stderr: 'The current database is not managed by Prisma Migrate.' },
+      'PRISMA_BASELINE_REQUIRED',
+    ],
+    [{ status: 1, stderr: 'Error: Schema engine error:' }, 'PRISMA_ENGINE_ERROR'],
+    [{ status: 1, stderr: 'synthetic-secret' }, 'PRISMA_STATUS_UNRECOGNIZED'],
+    [
+      { status: null, error: Object.assign(new Error('synthetic-secret'), { code: 'ENOENT' }) },
+      'PRISMA_EXECUTION_ERROR',
+    ],
+    [{ status: null, signal: 'SIGTERM' }, 'PRISMA_EXECUTION_ERROR'],
+    [
+      { status: null, error: Object.assign(new Error('synthetic-secret'), { code: 'ENOBUFS' }) },
+      'PRISMA_EXECUTION_ERROR',
+    ],
+  ]) {
+    const reports = [],
+      commands = [];
+    await assert.rejects(() =>
+      migrate(env, {
+        ...options,
+        run: (op) => {
+          commands.push(op);
+          return result;
+        },
+        report: (text) => reports.push(text),
+      }),
+    );
+    assert.deepEqual(commands, ['status']);
+    assert(reports.join().includes(`Tipo de error: ${type}`));
+    assert(!reports.join().includes('synthetic-secret'));
+  }
+  const reports = [];
+  await assert.rejects(() =>
+    migrate(env, {
+      ...options,
+      run: () => {
+        throw Object.assign(new Error('synthetic-secret'), { code: 'EACCES' });
+      },
+      report: (text) => reports.push(text),
+    }),
+  );
+  assert.match(reports.join(), /Error de ejecución: EACCES/);
+  assert(!reports.join().includes('synthetic-secret'));
+});
+
+test('pendientes válidas mantienen exit 1 del CLI y éxito del status sin confundir cualquier exit 1', async () => {
+  const reports = [];
+  await migrate(
+    { ...env, MIGRATION_OPERATION: 'status' },
+    { ...options, run: () => pending, report: (text) => reports.push(text) },
+  );
+  assert.match(reports.join(), /Resultado: pendientes/);
+  assert.match(reports.join(), /Exit code: 1/);
+  assert(!reports.join().includes('UNEXPECTED_ERROR'));
+  const ansi = {
+    ...pending,
+    stdout: `\u001b[1m${pending.stdout.replaceAll('\n', '\r\n')}\u001b[0m`,
+  };
+  assert.deepEqual(migrationStatus(ansi, [migration]).pending, [migration]);
+  const another = '20261113000100_fixture';
+  const multiple = {
+    ...pending,
+    stdout: pending.stdout
+      .replace('Following migration ', 'Following migrations ')
+      .replace(`${migration}\n\n`, `${migration}\n${another}\n\n`),
+  };
+  assert.deepEqual(migrationStatus(multiple, [migration, another]).pending, [migration, another]);
+});
 
 test('diagnóstico seguro identifica variable, tipo y fase de la validación sin exponer valores', async () => {
   const cases = [
@@ -336,6 +471,8 @@ test('SHA/CI que dejan de estar autorizados bloquean escrituras; fallo deploy o 
     );
     assert.equal(commands.filter((op) => op === 'deploy').length, 1);
     assert.match(reports.join(), /Resultado: fallido/);
+    if (failure === 'final')
+      assert.match(reports.join(), /Tipo de error: PRISMA_PENDING_AFTER_DEPLOY/);
     assert(!reports.join().includes('synthetic-secret'));
   }
 });
@@ -406,6 +543,9 @@ test('ejecuta npm existente sin shell ni DSN/token en argumentos y sin token Git
       assert.equal(opts.shell, undefined);
       assert.equal(opts.env.GH_TOKEN, undefined);
       assert.equal(opts.env.DIRECT_URL, env.DIRECT_URL);
+      assert.equal(opts.env.DATABASE_URL, env.DATABASE_URL);
+      assert.equal(opts.env.EXPECTED_DEV_SUPABASE, env.EXPECTED_DEV_SUPABASE);
+      assert.equal(opts.cwd, process.cwd());
       return current;
     });
   }

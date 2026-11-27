@@ -99,6 +99,35 @@ La clasificación está ligada a Prisma 6.12 fijado en el lockfile. Si se actual
 Prisma, comprobar el contrato de salida y las regresiones antes de publicar.
 No es una auditoría de drift, integridad de datos ni recuperación de Supabase Auth.
 
+### Diagnóstico del subproceso Prisma
+
+Cada comando conserva stdout/stderr en memoria para clasificarlo y registra sólo
+fase, comando fijo, exit code, códigos Prisma, código de ejecución, señal y tamaño
+de ambas capturas. No publica la salida cruda: puede contener usuario, contraseña,
+DSN, SQL o tokens. `P1000` identifica autenticación, `P1001` conexión y `P1011` TLS;
+otros códigos también se conservan cuando aparecen en marcadores del CLI/engine.
+Si Prisma sólo devuelve `Schema engine error`, se informa `PRISMA_ENGINE_ERROR`
+sin inventar un código o atribuirlo a una credencial concreta.
+
+Un exit 1 con el bloque completo de pendientes y nombres locales conocidos sigue
+siendo una consulta exitosa con resultado `pendientes`. Errores Prisma, historial
+divergente, migraciones fallidas, baseline ausente o salida desconocida bloquean
+deploy. Un fallo de proceso/timeout/señal se informa como `PRISMA_EXECUTION_ERROR`;
+una salida no reconocida como `PRISMA_STATUS_UNRECOGNIZED`. No se convierten en
+pendientes ni se reintenta deploy automáticamente.
+
+Auditoría de Dev `a48ad0c5e2ef02befd9da6979924d979feddae7c`: el problema comprobado
+del wrapper era descartar el detalle del fallo y convertir todas estas causas en
+`UNEXPECTED_ERROR`. El mensaje anterior no conserva el motivo remoto y no permite
+afirmar que fueran pendientes. Se reprodujeron con Prisma 6.12 real tanto status
+actualizado (0) como pendientes (1), que el parser anterior ya aceptaba. El contador
+de once migraciones no indica por sí mismo un error.
+
+`cwd` raíz + `npm run --workspace=apps/backend` ejecuta Prisma desde el backend y
+carga su `prisma.config.ts`. Las URLs se transmiten únicamente por environment;
+el token GitHub se elimina del subprocess. Se verificó este recorrido sin cambiar
+configuración Prisma, workflow, TLS, secrets o el validador de destino.
+
 ## Aplicar (`deploy`, selección explícita)
 
 1. Revisar las migraciones versionadas y su compatibilidad con el backend vigente.
@@ -147,6 +176,15 @@ opciones, secretos ausentes, destinos cruzados, TLS, DIRECT_URL, CI/SHA, comando
 errores y resumen sin credenciales. Usan dobles; un smoke del CLI real sólo intenta
 conectar a `127.0.0.1:1` para comprobar carga de config y rechazo de conexión. Nunca conecta
 con Supabase remoto. Los resultados ejecutados se registran en la PR.
+
+`npm run test:migrations:integration` requiere Docker local y Node 22. Crea un
+PostgreSQL efímero, accesible sólo por loopback, con historial sintético para los
+archivos reales del repo. Prueba actualizado, pendientes, autenticación, conexión,
+TLS, divergencia y migración fallida mediante el CLI instalado. No aplica los SQL
+de negocio ni altera bases existentes; elimina únicamente su propio contenedor
+verificando su etiqueta. En Windows se observó que auth/conexión/TLS pueden
+devolver sólo el error genérico del engine: se informa esa limitación sin fingir
+que Prisma devolvió P1000/P1001/P1011. Los códigos concretos se cubren con dobles.
 
 Fuentes: [Prisma 6: referencia CLI](https://www.prisma.io/docs/orm/v6/reference/prisma-cli-reference)
 y la implementación instalada de `prisma@6.12.0`. Se reutiliza el validador

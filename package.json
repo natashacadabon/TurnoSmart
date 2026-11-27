@@ -22,6 +22,7 @@
     "test": "npm run test:install && npm run test:backup && npm run test:migrations && node --test infra/docker/dev.test.mjs && npm run build:shared && npm run test --workspaces --if-present",
     "database:migrate": "node --import tsx scripts/database-migrate.mjs",
     "test:migrations": "node --import tsx --test scripts/database-migrate.test.mjs",
+    "test:migrations:integration": "node --import tsx --test scripts/database-migrate.integration.test.mjs",
     "test:backup": "node --test scripts/database-backup.test.mjs",
     "test:backup:integration": "node --test scripts/database-backup.integration.test.mjs",
     "test:install": "node --test .husky/install.test.mjs",

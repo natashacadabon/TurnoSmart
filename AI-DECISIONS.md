@@ -686,6 +686,50 @@ para conocer el rechazo concreto del entorno remoto. No se ejecutó contra Supab
 
 ---
 
+## 2026-11-26 - Clasificar resultados del subproceso Prisma sin ocultar códigos
+
+**Problema abordado**
+
+Dev/status del SHA a48ad0c falló en status inicial con UNEXPECTED_ERROR después
+de superar la validación del destino. La captura privada se descartaba sin
+preservar códigos Prisma ni distinguir historial, conexión o fallos del proceso.
+
+**Prompt / herramienta utilizada**
+
+Codex. El usuario solicitó auditar wrapper/config/workflow y reproducir Prisma
+real con Node 22, sin modificar secrets ni el validador ni ejecutar migraciones
+remotas. Autorizó rama, commit, push y PR.
+
+**Código / arquitectura propuesta por IA**
+
+Clasificar errores por marcadores conocidos y códigos Prisma, conservar exit code,
+señal, error de ejecución y tamaños de stdout/stderr, sin imprimir el contenido
+privado. Pendientes requieren el bloque positivo de Prisma con nombres locales;
+ningún exit 1 genérico habilita deploy. Conservar los gates de destino, CI y SHA.
+Añadir una prueba específica con PostgreSQL efímero local e historial sintético.
+
+**Validación y corrección humana**
+
+Se verificaron cwd raíz, npm workspace backend, variables del subprocess y carga
+de prisma.config.ts. Prisma 6.12 real devuelve 0 actualizado y 1 pendiente; ambos
+casos ya eran reconocidos por el parser previo. No se atribuye el fallo remoto
+a pendientes: el error original perdió su salida. Se reprodujeron además auth,
+conexión, TLS, divergencia y migraciones fallidas sin modificar bases existentes.
+En Windows auth/conexión/TLS devolvieron sólo Schema engine error; los códigos
+P1000/P1001/P1011 se prueban con dobles y sólo se reportan cuando Prisma los emite.
+
+**Resultado**
+
+Errores Prisma y del proceso dejan de convertirse en UNEXPECTED_ERROR genérico.
+El contenedor de prueba se eliminó verificando su identidad. No se alteraron
+secrets, validador, migraciones históricas, workflow ni configuración Prisma.
+La causa concreta del rechazo remoto requiere un status nuevo tras integrar;
+no se presenta la validación local como una ejecución cloud exitosa.
+Con Node 22.23.4 aprobaron 16 pruebas del wrapper y la integración Prisma/PostgreSQL
+con siete escenarios, además de lint, typecheck, format:check y git diff --check.
+
+---
+
 ## Pendientes con docentes (A10)
 
 - [ ] Se acepta CD con disparo manual (`workflow_dispatch`) como "despliegue continuo"? Registrar respuesta y fecha.
