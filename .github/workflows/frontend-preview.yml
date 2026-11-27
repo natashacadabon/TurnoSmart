@@ -60,7 +60,9 @@ jobs:
     if: needs.select.outputs.sha != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: vercel-preview
+    environment:
+      name: vercel-preview
+      deployment: false
     permissions:
       contents: read
     defaults:
@@ -176,7 +178,9 @@ jobs:
       queue: max
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: vercel-preview
+    environment:
+      name: vercel-preview
+      url: ${{ steps.preview-alias.outputs.url || steps.revision.outputs.existing || steps.upload.outputs.url }}
     permissions:
       contents: read
       pull-requests: read

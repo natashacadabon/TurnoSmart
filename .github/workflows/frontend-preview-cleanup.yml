@@ -35,7 +35,9 @@ jobs:
       queue: max
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: vercel-preview
+    environment:
+      name: vercel-preview
+      deployment: false
     steps:
       - name: Checkout trusted cleanup script
         uses: actions/checkout@v7

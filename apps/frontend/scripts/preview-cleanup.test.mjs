@@ -143,7 +143,7 @@ test('cleanup and publication use the same queued PR lock and cleanup uses trust
   assert.equal(preflight.steps[0].with.ref, '${{ github.sha }}');
   assert(preflight.steps[1].with.script.includes('assertTrustedPreviewContext(context)'));
   assert(!JSON.stringify(preflight).includes('secrets.'));
-  assert.equal(job.environment, 'vercel-preview');
+  assert.deepEqual(job.environment, { name: 'vercel-preview', deployment: false });
   assert.equal(job.concurrency.queue, 'max');
   assert.equal(publish.jobs.deploy.concurrency.queue, 'max');
   assert.equal(
