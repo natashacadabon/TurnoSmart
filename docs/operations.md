@@ -170,6 +170,12 @@ El ensayo aplica las nueve migraciones SQL originales a una base nueva y genera 
 
 ## FINAL-05C: barreras antes del primer merge y de la publicacion
 
+Para consultar/aplicar migraciones sin preparar variables locales, ver
+[Migraciones Prisma manuales por entorno](database-migrations.md). El workflow
+`database-migrate.yml` usa `database-dev`/`database-production`, status por defecto,
+ramas y secretos aislados, CI/SHA para Production y verificación final. No integra
+migraciones automáticas en Render ni sustituye el procedimiento de backup/rollback.
+
 Ante fallos de Preview o cleanup antes de iniciar runner, revisar las anotaciones
 del check y la combinación default branch/environment: ambos eventos privilegiados
 usan la rama predeterminada. Debe ser `dev`, autorizada en `vercel-preview`;
