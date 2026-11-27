@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildSeedData,
   SEED_ADMIN_EMAIL,
-  SEED_PLATFORM_ADMIN_EMAIL,
+  SEED_OWNER_EMAIL,
   validateSeedData,
 } from './seed-data.js';
 import { ensureSeedUsers, readSeedConfig, SeedError, verifyAdminLogin } from './seed-auth.js';
@@ -53,35 +53,26 @@ async function main() {
         '[seed] Comprobacion de tablas y permisos de lectura (sin aplicar migraciones).',
       );
       await seedStep('migrations', () => checkSeedSchema(prisma));
-      const owner = await ensureSeedUsers(
+      const admin = await ensureSeedUsers(
         adminClient.auth.admin,
         fixtures.accounts.filter((a) => a.email === SEED_ADMIN_EMAIL),
         env.password,
       );
-      await verifyAdminLogin(loginClient.auth, env.password, owner[0]!.id);
-      const others = await ensureSeedUsers(
+      await verifyAdminLogin(loginClient.auth, env.password, admin[0]!.id);
+      const owners = await ensureSeedUsers(
         adminClient.auth.admin,
         fixtures.accounts.filter((a) => a.email !== SEED_ADMIN_EMAIL),
         env.password,
       );
-      const platformAdmins = await ensureSeedUsers(
-        adminClient.auth.admin,
-        fixtures.platformAdmins,
-        env.password,
-      );
-      const counts = await seedDomain(prisma, fixtures, [...owner, ...others], platformAdmins);
+      const counts = await seedDomain(prisma, fixtures, [...admin, ...owners]);
       await seedStep('profiles', async () => {
-        const profile = await prisma.profile.findUnique({ where: { id: owner[0]!.id } });
-        if (
-          profile?.role !== 'OWNER' ||
-          !profile.active ||
-          profile.businessId !== fixtures.businesses[0]!.id
-        )
-          throw new SeedError('No se pudo verificar el perfil OWNER del negocio demo.');
+        const profile = await prisma.profile.findUnique({ where: { id: admin[0]!.id } });
+        if (profile?.role !== 'ADMIN' || profile.businessId !== null)
+          throw new SeedError('No se pudo verificar el perfil ADMIN global.');
       });
-      console.info('Seed completado. Login Auth y perfil OWNER verificados.');
-      console.info(`OWNER del negocio demo: ${SEED_ADMIN_EMAIL}`);
-      console.info(`ADMIN de la plataforma: ${SEED_PLATFORM_ADMIN_EMAIL}`);
+      console.info('Seed completado. Login Auth y perfil ADMIN global verificados.');
+      console.info(`ADMIN global: ${SEED_ADMIN_EMAIL}`);
+      console.info(`OWNER del negocio demo: ${SEED_OWNER_EMAIL}`);
       console.info(JSON.stringify(counts));
     },
     () => prisma.$disconnect(),

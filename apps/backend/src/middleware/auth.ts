@@ -64,6 +64,7 @@ export function requireProfile(identity: IdentityRepository): RequestHandler {
       businessId: business.id,
       timezone: business.timezone,
       role: 'OWNER',
+      platformAdmin: false,
     };
     next();
   };

@@ -16,9 +16,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useSyncExternalStore, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
+import { AuthErrorAlert } from '@/components/AuthErrorAlert';
 import { useAuth } from '@/components/AuthProvider';
 import { accountHome } from '@/lib/account-home';
-import { PASSWORD_MIN_LENGTH, validateNewPassword } from '@/lib/auth-flow.mjs';
+import { PASSWORD_MIN_LENGTH, newPasswordProblem } from '@/lib/auth-flow.mjs';
 
 const subscribeNoop = () => () => {};
 const readInvite = () => new URLSearchParams(window.location.search).get('flow') === 'invite';
@@ -35,13 +36,15 @@ export default function ResetPasswordPage() {
   const [confirmation, setConfirmation] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorField, setErrorField] = useState<'password' | 'confirmation' | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const invalid = validateNewPassword(password, confirmation);
-    if (invalid) {
-      setError(invalid);
+    const problem = newPasswordProblem(password, confirmation);
+    setErrorField(problem?.field ?? null);
+    if (problem) {
+      setError(problem.message);
       return;
     }
     setError(null);
@@ -111,15 +114,19 @@ export default function ResetPasswordPage() {
             Al menos {PASSWORD_MIN_LENGTH} caracteres, combinando letras y números.
           </Typography>
         </div>
-        {error && <Alert severity="error">{error}</Alert>}
+        {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
         <TextField
           label="Nueva contraseña"
           type={show ? 'text' : 'password'}
           autoComplete="new-password"
           required
           autoFocus
+          error={errorField === 'password'}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setErrorField(null);
+          }}
           slotProps={visibility}
         />
         <TextField
@@ -127,8 +134,15 @@ export default function ResetPasswordPage() {
           type={show ? 'text' : 'password'}
           autoComplete="new-password"
           required
+          error={errorField === 'confirmation'}
+          helperText={
+            errorField === 'confirmation' ? 'Tiene que ser igual a la contraseña.' : undefined
+          }
           value={confirmation}
-          onChange={(e) => setConfirmation(e.target.value)}
+          onChange={(e) => {
+            setConfirmation(e.target.value);
+            setErrorField(null);
+          }}
         />
         <Button type="submit" variant="contained" disabled={submitting}>
           {submitting ? 'Guardando…' : 'Guardar contraseña'}

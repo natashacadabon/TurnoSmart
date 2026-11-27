@@ -49,20 +49,24 @@ interface AuthContext {
   businessId: string;
   timezone: string;
   role: 'OWNER';
+  platformAdmin: false;
 }
 ```
 
-Sólo un OWNER activo opera las rutas del negocio. El ADMIN global (`AdminContext`, sin negocio) usa únicamente
-las rutas del panel de la plataforma (`requirePlatformAdmin`). Matriz completa en
+Sólo un OWNER activo opera las rutas del negocio. El ADMIN global (perfil `ADMIN` con `business_id` NULL,
+`AdminContext`) usa únicamente las rutas del panel de la plataforma (`requirePlatformAdmin`). Matriz completa en
 [identidad y seguridad](identity-security.md#matriz-de-permisos).
 
 ## Identidad
 
 - `GET /api/me` (`Cache-Control: no-store`) →
-  - `{ access: 'OWNER', onboarded: true, user, profile, business }`
-  - `{ access: 'ADMIN', onboarded: false, user, admin }`
-  - `{ access: 'NONE', onboarded: false, user, reason: 'NO_PROFILE' | 'DISABLED' }`
-- No hay alta pública de negocios: el ADMIN crea el negocio e invita al OWNER (FINAL-11).
+  - `{ access: 'OWNER', onboarded: true, platformAdmin: false, user, profile, business }`
+  - `{ access: 'ADMIN', onboarded: false, platformAdmin: true, user, profile, business: null }`
+  - `{ access: 'NONE', onboarded: false, platformAdmin: false, user, reason: 'NO_PROFILE' | 'DISABLED' }`
+- `POST /api/onboarding` `{ businessName, timezone?, fullName? }` → 201 la primera vez; 200 con el mismo negocio si se
+  repite (también ante requests concurrentes). Sólo para una cuenta verificada sin perfil: ADMIN recibe 403
+  `FORBIDDEN` y un perfil desactivado o STAFF 403 `ACCOUNT_DISABLED`. El ADMIN también puede crear negocios e invitar
+  OWNERs desde su panel (FINAL-11).
 - `PATCH /api/business` `{ name?, timezone? }` → `BusinessDto`. Solo OWNER. Un cambio de zona que deje turnos vigentes fuera de disponibilidad devuelve `409 AVAILABILITY_CONFLICT`.
 
 ## Clientes
@@ -79,9 +83,12 @@ las rutas del panel de la plataforma (`requirePlatformAdmin`). Matriz completa e
 
 - `GET /api/appointments/:id/events` → `AppointmentEventDto[]` en orden cronológico:
   `{ id, appointmentId, type, metadata, createdAt }`. `type` pertenece por defecto a `APPOINTMENT_EVENT_TYPES` del contrato compartido. `includeRequests=true` agrega `RESCHEDULE_REQUESTED` y `RESCHEDULE_REQUEST_DISMISSED`. El turno y el evento se escriben atómicamente. Los metadatos pueden incluir la transición, el actor o la referencia a una solicitud, según el evento.
-- `POST /api/appointments/:id/risk/explanation` →
-  `RiskExplanationResponse { risk, explanation: { summary, recommendations[] }, model, generatedAt, disclaimer }`.
-- El score se calcula y persiste al crear o reprogramar. Gemini recibe el score, nivel y los factores `{ code, label, impact, value? }` saneados.
+- `POST /api/appointments/:id/risk/explanation[?refresh=true]` →
+  `RiskExplanationResponse { risk, explanation: { summary, recommendations[] }, model, generatedAt, disclaimer, cached }`.
+  La explicación de cada versión del score queda en memoria del servidor: repetir el pedido devuelve `cached: true`
+  sin llamar a Gemini ni consumir el límite por usuario. `refresh=true` fuerza una nueva y sí consume el límite.
+- El score se calcula y persiste al crear o reprogramar, y la confirmación le suma su factor. Gemini recibe el score, nivel
+  y sólo los factores permitidos con etiqueta y significado fijos.
 
 ## Turnos
 
@@ -96,7 +103,7 @@ Un turno activo usa `operationalStatus: SCHEDULED`. Su `confirmationStatus` pued
 
 ### Preferencias y acciones del cliente
 
-- `GET /api/business/notification-preferences` devuelve las preferencias del negocio de la sesión. `PATCH` admite un objeto parcial para OWNER y ADMIN. Los booleanos de email son `bookingEmailEnabled`, `confirmationEmailEnabled`, `cancellationEmailEnabled` y `rescheduleEmailEnabled`. Los negocios nuevos reciben correo de reserva y confirmación activados; cancelación y reprogramación comienzan desactivados. Las tres acciones públicas comienzan habilitadas y los mínimos de cancelación/reprogramación son 0 horas. Las preferencias anteriores de correo y recordatorios se conservan al migrar; la confirmación inicial de negocios existentes se copia de su preferencia previa de reserva.
+- `GET /api/business/notification-preferences` devuelve las preferencias del negocio de la sesión. `PATCH` admite un objeto parcial solo para OWNER. Los booleanos de email son `bookingEmailEnabled`, `confirmationEmailEnabled`, `cancellationEmailEnabled` y `rescheduleEmailEnabled`. Los negocios nuevos reciben correo de reserva y confirmación activados; cancelación y reprogramación comienzan desactivados. Las tres acciones públicas comienzan habilitadas y los mínimos de cancelación/reprogramación son 0 horas. Las preferencias anteriores de correo y recordatorios se conservan al migrar; la confirmación inicial de negocios existentes se copia de su preferencia previa de reserva.
 - `remindersEnabled` y `reminderHours` configuran hasta tres anticipaciones distintas entre 2, 6, 12, 24, 48 y 72 horas. En negocios nuevos comienzan habilitados con 48 y 24 horas. Guardar recordatorios habilitados sin ninguna anticipación devuelve `422 VALIDATION_ERROR` en `reminderHours`; con recordatorios deshabilitados se permite conservar la selección o guardar una lista vacía. Los campos históricos `reminder24hEnabled` y `reminder48hEnabled` mantienen compatibilidad y se sincronizan con la configuración de anticipaciones. Cambiar estos campos de recordatorios reconcilia trabajos pendientes de reservas futuras y conserva los envíos procesados. Los demás booleanos de correo se comprueban al reclamar cada envío.
 - `customerConfirmationEnabled`, `customerCancellationEnabled` y `customerRescheduleEnabled` regulan las acciones públicas. `cancellationMinimumHours` y `rescheduleMinimumHours` admiten enteros de 0 a 720. Para un enlace vigente y un turno activo futuro, preview devuelve `allowed: false` si la acción se deshabilita o no cumple su anticipación mínima. Ejecutar confirmación o solicitud deshabilitadas devuelve `403 FORBIDDEN`. Cancelación conserva `409 APPOINTMENT_CANCELLATION_NOT_ALLOWED`. La consulta pública de slots también verifica la política. El personal conserva sus permisos internos.
 - Crear una reserva encola el correo de forma atómica cuando la preferencia está habilitada y el cliente tiene un email válido; el procesamiento se solicita de forma asíncrona después de completar la respuesta HTTP. Los fallos mantienen la reserva y el trabajo para su reintento.

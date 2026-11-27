@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  onboardingSchema,
   businessNotificationPreferencesSchema,
   updateBusinessNotificationPreferencesSchema,
   updateBusinessSchema,
@@ -32,18 +33,21 @@ const toBusinessDto = (b: BusinessRecord): BusinessDto => ({
 
 function toMe(user: { id: string; email: string | null }, access: AccountAccess): MeResponse {
   if (access.kind === 'NONE')
-    return { access: 'NONE', onboarded: false, user, reason: access.reason };
+    return { access: 'NONE', onboarded: false, platformAdmin: false, user, reason: access.reason };
   if (access.kind === 'ADMIN')
     return {
       access: 'ADMIN',
       onboarded: false,
+      platformAdmin: true,
       user,
-      admin: { id: access.admin.id, fullName: access.admin.fullName, role: 'ADMIN' },
+      profile: { id: access.admin.id, fullName: access.admin.fullName, role: 'ADMIN' },
+      business: null,
     };
   const { profile, business } = access.found;
   return {
     access: 'OWNER',
     onboarded: true,
+    platformAdmin: false,
     user,
     profile: { id: profile.id, fullName: profile.fullName, role: 'OWNER' },
     business: toBusinessDto(business),
@@ -58,8 +62,8 @@ async function ownerBusiness(identity: IdentityRepository, userId: string) {
 }
 
 /**
- * Identidad de la cuenta autenticada. Los negocios y los OWNER los crea un ADMIN global desde el
- * panel de la plataforma (no hay alta pública de negocios).
+ * Identidad de la cuenta autenticada. Un negocio se crea por alta pública (onboarding de una cuenta
+ * verificada sin perfil) o desde el panel del ADMIN global (FINAL-11).
  */
 export function identityRouter(deps: {
   verifier: TokenVerifier;
@@ -72,6 +76,22 @@ export function identityRouter(deps: {
   router.get('/me', auth, async (req, res) => {
     const access = await resolveAccess(deps.identity, req.user!.id);
     res.set('Cache-Control', 'no-store').json(toMe(req.user!, access));
+  });
+
+  router.post('/onboarding', auth, async (req, res) => {
+    const input = parse(onboardingSchema, req.body);
+    if (!req.user!.email) {
+      throw new AppError('VALIDATION_ERROR', 'La cuenta de Auth no tiene email');
+    }
+    // El repositorio rechaza ADMIN global (403 FORBIDDEN) y perfiles desactivados o STAFF.
+    const result = await deps.identity.onboard({
+      userId: req.user!.id,
+      email: req.user!.email,
+      businessName: input.businessName,
+      timezone: input.timezone,
+      fullName: input.fullName ?? null,
+    });
+    res.status(result.created ? 201 : 200).json(toMe(req.user!, { kind: 'OWNER', found: result }));
   });
 
   router.patch(

@@ -11,10 +11,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
+import { AuthErrorAlert } from '@/components/AuthErrorAlert';
+import { AuthLink } from '@/components/AuthLink';
 import { useAuth } from '@/components/AuthProvider';
 import { accountHome } from '@/lib/account-home';
 
@@ -67,7 +68,7 @@ export default function LoginPage() {
           </Typography>
         </div>
         {info && !error && <Alert severity="success">{info}</Alert>}
-        {error && <Alert severity="error">{error}</Alert>}
+        {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
         <TextField
           label="Email"
           type="email"
@@ -104,10 +105,11 @@ export default function LoginPage() {
           {submitting ? 'Ingresando…' : 'Ingresar'}
         </Button>
         <Typography variant="body2" sx={{ textAlign: 'center' }}>
-          <Link href="/forgot-password">¿Olvidaste tu contraseña?</Link>
+          <AuthLink href="/forgot-password">¿Olvidaste tu contraseña?</AuthLink>
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-          ¿No tenés cuenta? El acceso es sólo por invitación del administrador de la plataforma.
+          ¿No tenés cuenta? <AuthLink href="/register">Registrá tu negocio</AuthLink> o pedile una
+          invitación al administrador de la plataforma.
         </Typography>
       </Stack>
     </AuthLayout>

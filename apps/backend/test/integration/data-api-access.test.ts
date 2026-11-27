@@ -70,7 +70,6 @@ describe('Data API cerrada para anon y authenticated', () => {
       expect.arrayContaining([
         'businesses',
         'profiles',
-        'platform_admins',
         'customers',
         'services',
         'appointments',

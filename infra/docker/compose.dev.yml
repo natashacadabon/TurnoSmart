@@ -30,7 +30,8 @@ services:
       GOTRUE_DB_DATABASE_URL: postgres://turnosmart_local:turnosmart-local-db@postgres:5432/turnosmart_local?search_path=auth
       DB_NAMESPACE: auth
       GOTRUE_SITE_URL: http://localhost:${TS_FRONTEND_PORT:-3000}
-      GOTRUE_DISABLE_SIGNUP: 'true'
+      # Registro público con verificación de correo (FINAL-10).
+      GOTRUE_DISABLE_SIGNUP: 'false'
       GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
       GOTRUE_JWT_SECRET: ${TS_JWT_SECRET:?run npm run docker:dev}
       GOTRUE_JWT_ADMIN_ROLES: service_role
@@ -45,13 +46,22 @@ services:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      # Plantillas con el diseño de TurnoSmart (infra/supabase/email-templates), servidas por el gateway.
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://auth-gateway:8080/email-templates/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://auth-gateway:8080/email-templates/recovery.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://auth-gateway:8080/email-templates/invite.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://auth-gateway:8080/email-templates/email_change.html
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: Confirmá tu correo en TurnoSmart
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: Restablecé tu contraseña de TurnoSmart
+      GOTRUE_MAILER_SUBJECTS_INVITE: Te invitaron a administrar un negocio en TurnoSmart
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: Confirmá tu nuevo correo en TurnoSmart
       GOTRUE_PASSWORD_MIN_LENGTH: 10
       # Correos locales capturados por Mailpit (http://localhost:54327); nunca salen de la máquina.
       GOTRUE_SMTP_HOST: mailpit
       GOTRUE_SMTP_PORT: 1025
       # Sin usuario: GoTrue no envía credenciales por SMTP sin TLS y Mailpit acepta sin autenticación.
       GOTRUE_SMTP_ADMIN_EMAIL: no-reply@turnosmart.test
-      GOTRUE_SMTP_SENDER_NAME: TurnoSmart Local
+      GOTRUE_SMTP_SENDER_NAME: TurnoSmart
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +81,7 @@ services:
       - '127.0.0.1:${TS_AUTH_PORT:-54326}:8080'
     volumes:
       - ./auth-gateway.conf:/etc/nginx/templates/default.conf.template:ro
+      - ../supabase/email-templates:/usr/share/nginx/email-templates:ro
     environment:
       TS_FRONTEND_ORIGIN: http://localhost:${TS_FRONTEND_PORT:-3000}
     depends_on:

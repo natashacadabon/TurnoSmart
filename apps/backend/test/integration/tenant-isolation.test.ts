@@ -52,7 +52,7 @@ let ownerA: { Authorization: string };
 let businessA: string;
 let ownerB: { Authorization: string };
 
-/** Negocio + OWNER creados directamente: el alta la hace el ADMIN de plataforma, no la API pública. */
+/** Negocio + OWNER creados directamente en la base; el alta por API se prueba con `onboard`. */
 async function createOwner(name: string) {
   const user = verifier.addUser();
   const auth = { Authorization: `Bearer ${user.token}` };
@@ -80,17 +80,46 @@ async function addOwner(businessId: string, active = true) {
   return { auth: { Authorization: `Bearer ${user.token}` }, userId: user.id };
 }
 
+/** ADMIN global: perfil con role ADMIN y business_id NULL. */
 async function createPlatformAdmin(id = verifier.addUser().id, active = true) {
-  await prisma.platformAdmin.create({
+  await prisma.profile.create({
     data: {
       id,
+      businessId: null,
       email: `${id}@admin.test.local`,
+      role: 'ADMIN',
       active,
       deactivatedAt: active ? null : new Date(),
     },
   });
   createdAdmins.push(id);
   return { Authorization: `Bearer token-${id}` };
+}
+
+/** Perfil STAFF legado: conserva su negocio pero queda desactivado, como deja la migración. */
+async function addLegacyStaff(businessId: string) {
+  const user = verifier.addUser();
+  await prisma.profile.create({
+    data: {
+      id: user.id,
+      businessId,
+      email: `${user.id}@test.local`,
+      role: 'STAFF',
+      active: false,
+      deactivatedAt: new Date(),
+    },
+  });
+  return { auth: { Authorization: `Bearer ${user.token}` }, userId: user.id };
+}
+
+/** Alta pública por API: una cuenta verificada sin perfil crea su negocio como OWNER. */
+async function onboard(name: string) {
+  const user = verifier.addUser();
+  const auth = { Authorization: `Bearer ${user.token}` };
+  const res = await request(app).post('/api/onboarding').set(auth).send({ businessName: name });
+  expect(res.status).toBe(201);
+  createdBusinesses.push(res.body.business.id);
+  return { auth, userId: user.id, businessId: res.body.business.id as string, body: res.body };
 }
 
 beforeAll(async () => {
@@ -104,7 +133,7 @@ beforeAll(async () => {
 afterAll(async () => {
   // Cascade elimina perfiles, clientes y turnos de prueba. Los ADMIN no dependen de un negocio.
   await prisma.business.deleteMany({ where: { id: { in: createdBusinesses } } });
-  await prisma.platformAdmin.deleteMany({ where: { id: { in: createdAdmins } } });
+  await prisma.profile.deleteMany({ where: { id: { in: createdAdmins } } });
   await prisma.$disconnect();
 });
 
@@ -260,14 +289,64 @@ describe('integración API-DB: identidad', () => {
     expect((await request(app).get('/ready')).status).toBe(200);
   });
 
-  it('el alta pública de negocios ya no existe', async () => {
-    const user = verifier.addUser();
-    const res = await request(app)
+  it('el onboarding crea negocio y OWNER activo; repetirlo devuelve el mismo negocio', async () => {
+    const created = await onboard('Alta pública');
+    expect(created.body).toMatchObject({
+      access: 'OWNER',
+      onboarded: true,
+      platformAdmin: false,
+      profile: { id: created.userId, role: 'OWNER' },
+      business: { name: 'Alta pública' },
+    });
+    expect(await prisma.profile.findUnique({ where: { id: created.userId } })).toMatchObject({
+      businessId: created.businessId,
+      role: 'OWNER',
+      active: true,
+      deactivatedAt: null,
+    });
+    const again = await request(app)
       .post('/api/onboarding')
-      .set('Authorization', `Bearer ${user.token}`)
-      .send({ businessName: 'Carrera' });
-    expect(res.status).toBe(404);
-    expect(await prisma.profile.count({ where: { id: user.id } })).toBe(0);
+      .set(created.auth)
+      .send({ businessName: 'Otro nombre' });
+    expect(again.status).toBe(200);
+    expect(again.body.business.id).toBe(created.businessId);
+    expect((await request(app).get('/api/customers').set(created.auth)).status).toBe(200);
+  });
+
+  it('onboarding concurrente crea un único negocio', async () => {
+    const user = verifier.addUser();
+    const auth = { Authorization: `Bearer ${user.token}` };
+    const before = await prisma.business.count({ where: { name: 'Carrera' } });
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app).post('/api/onboarding').set(auth).send({ businessName: 'Carrera' }),
+      ),
+    );
+    const ids = new Set(results.map((r) => r.body.business?.id));
+    createdBusinesses.push(...[...ids].filter(Boolean));
+    expect(ids.size).toBe(1);
+    expect(results.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(results.filter((r) => r.status === 200)).toHaveLength(4);
+    expect(await prisma.profile.count({ where: { id: user.id } })).toBe(1);
+    // Las transacciones perdedoras hacen rollback de su negocio.
+    expect(await prisma.business.count({ where: { name: 'Carrera' } })).toBe(before + 1);
+  });
+
+  it('el onboarding rechaza ADMIN (FORBIDDEN) y OWNER desactivado o STAFF (ACCOUNT_DISABLED)', async () => {
+    const send = (auth: { Authorization: string }) =>
+      request(app).post('/api/onboarding').set(auth).send({ businessName: 'No debe existir' });
+    const admin = await send(await createPlatformAdmin());
+    expect(admin.status).toBe(403);
+    expect(admin.body.error.code).toBe('FORBIDDEN');
+    for (const auth of [
+      (await addOwner(businessA, false)).auth,
+      (await addLegacyStaff(businessA)).auth,
+    ]) {
+      const res = await send(auth);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('ACCOUNT_DISABLED');
+    }
+    expect(await prisma.business.count({ where: { name: 'No debe existir' } })).toBe(0);
   });
 
   it('/me resuelve OWNER, ADMIN, OWNER desactivado y cuenta sin perfil', async () => {
@@ -280,10 +359,19 @@ describe('integración API-DB: identidad', () => {
       profile: { role: 'OWNER' },
       business: { id: businessA },
     });
-    expect((await me(await createPlatformAdmin())).body).toMatchObject({
+    const admin = await me(await createPlatformAdmin());
+    expect(admin.headers['cache-control']).toBe('no-store');
+    expect(admin.body).toMatchObject({
       access: 'ADMIN',
       onboarded: false,
-      admin: { role: 'ADMIN' },
+      platformAdmin: true,
+      profile: { role: 'ADMIN' },
+      business: null,
+    });
+    expect((await me((await addLegacyStaff(businessA)).auth)).body).toMatchObject({
+      access: 'NONE',
+      platformAdmin: false,
+      reason: 'DISABLED',
     });
     expect((await me(await createPlatformAdmin(undefined, false))).body).toMatchObject({
       access: 'NONE',
@@ -301,23 +389,18 @@ describe('integración API-DB: identidad', () => {
     });
   });
 
-  it('el ADMIN de plataforma recibe 403 FORBIDDEN en rutas de negocio, aunque además sea OWNER', async () => {
-    const admin = await createPlatformAdmin();
-    const both = await addOwner(businessA);
-    const bothAuth = await createPlatformAdmin(both.userId);
-    expect((await request(app).get('/api/me').set(bothAuth)).body.access).toBe('ADMIN');
-    for (const auth of [admin, bothAuth]) {
-      for (const res of await Promise.all([
-        request(app).get('/api/customers').set(auth),
-        request(app).post('/api/customers').set(auth).send({ fullName: 'No debe existir' }),
-        request(app).get('/api/services').set(auth),
-        request(app).get('/api/appointments').set(auth),
-        request(app).get('/api/notifications').set(auth),
-        request(app).patch('/api/business').set(auth).send({ name: 'No debe cambiar' }),
-      ])) {
-        expect(res.status).toBe(403);
-        expect(res.body.error.code).toBe('FORBIDDEN');
-      }
+  it('el ADMIN de plataforma recibe 403 FORBIDDEN en rutas de negocio', async () => {
+    const auth = await createPlatformAdmin();
+    for (const res of await Promise.all([
+      request(app).get('/api/customers').set(auth),
+      request(app).post('/api/customers').set(auth).send({ fullName: 'No debe existir' }),
+      request(app).get('/api/services').set(auth),
+      request(app).get('/api/appointments').set(auth),
+      request(app).get('/api/notifications').set(auth),
+      request(app).patch('/api/business').set(auth).send({ name: 'No debe cambiar' }),
+    ])) {
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
     }
     expect(await prisma.customer.count({ where: { fullName: 'No debe existir' } })).toBe(0);
     expect((await prisma.business.findUnique({ where: { id: businessA } }))?.name).not.toBe(
@@ -325,12 +408,26 @@ describe('integración API-DB: identidad', () => {
     );
   });
 
-  it('un OWNER desactivado recibe 403 ACCOUNT_DISABLED y la base exige fecha de baja', async () => {
+  it('la base exige que sólo el ADMIN no tenga negocio', async () => {
+    const profile = (role: 'ADMIN' | 'OWNER' | 'STAFF', businessId: string | null) =>
+      prisma.profile.create({
+        data: { id: randomUUID(), businessId, email: `${randomUUID()}@test.local`, role },
+      });
+    // ADMIN con negocio, OWNER sin negocio y STAFF sin negocio violan profiles_role_business_check.
+    await expect(profile('ADMIN', businessA)).rejects.toThrow(/profiles_role_business_check/);
+    await expect(profile('OWNER', null)).rejects.toThrow(/profiles_role_business_check/);
+    await expect(profile('STAFF', null)).rejects.toThrow(/profiles_role_business_check/);
+  });
+
+  it('un OWNER desactivado o un STAFF legado recibe 403 ACCOUNT_DISABLED y la base exige fecha de baja', async () => {
     const disabled = await addOwner(businessA, false);
-    for (const res of await Promise.all([
-      request(app).get('/api/customers').set(disabled.auth),
-      request(app).patch('/api/business').set(disabled.auth).send({ name: 'No debe cambiar' }),
-    ])) {
+    const staff = await addLegacyStaff(businessA);
+    for (const res of await Promise.all(
+      [disabled.auth, staff.auth].flatMap((auth) => [
+        request(app).get('/api/customers').set(auth),
+        request(app).patch('/api/business').set(auth).send({ name: 'No debe cambiar' }),
+      ]),
+    )) {
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('ACCOUNT_DISABLED');
     }

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { softDangerButtonSx } from '@/components/ui';
 import { accountHome } from '@/lib/account-home';
 
 /** Cuenta autenticada sin perfil asignado o desactivada por el administrador de la plataforma. */
@@ -36,12 +37,17 @@ export default function NoAccessPage() {
         <Alert severity="warning">
           {me.reason === 'DISABLED'
             ? 'El administrador de la plataforma desactivó tu acceso. Comunicate con él para reactivarlo.'
-            : 'Tu usuario existe pero no está asociado a ningún negocio. Pedile una invitación al administrador de la plataforma.'}
+            : 'Tu usuario no está asociado a ningún negocio. Registrá tu negocio o pedile una invitación al administrador de la plataforma.'}
         </Alert>
         <Typography variant="body2" color="text.secondary">
           Sesión iniciada como {me.user.email ?? 'usuario sin email'}.
         </Typography>
-        <Button variant="outlined" startIcon={<LogoutRoundedIcon />} onClick={signOut}>
+        <Button
+          variant="outlined"
+          startIcon={<LogoutRoundedIcon />}
+          onClick={signOut}
+          sx={softDangerButtonSx}
+        >
           Cerrar sesión
         </Button>
       </Stack>

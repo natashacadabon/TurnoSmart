@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   authCallbackUrl,
   authErrorMessage,
+  newPasswordProblem,
   nextAfterCallback,
   parseAuthCallback,
   validateNewPassword,
@@ -67,4 +68,11 @@ test('traduce errores de Auth sin revelar si la cuenta existe', () => {
   );
   assert.match(authErrorMessage({ code: 'user_not_found' }), /No se pudo completar/);
   assert.match(authErrorMessage(null), /No se pudo completar/);
+});
+
+test('indica qué campo marcar según el problema de la contraseña', () => {
+  assert.equal(newPasswordProblem('corta1', 'corta1')?.field, 'password');
+  assert.equal(newPasswordProblem('soloLetrasLargas', 'soloLetrasLargas')?.field, 'password');
+  assert.equal(newPasswordProblem('clave12345a', 'clave12345b')?.field, 'confirmation');
+  assert.equal(newPasswordProblem('clave12345a', 'clave12345a'), null);
 });

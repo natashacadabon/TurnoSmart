@@ -13,6 +13,7 @@ import { getMetrics } from '../../src/lib/metrics.js';
 import { releaseInfo } from '../../src/lib/release.js';
 import { LlmError } from '../../src/modules/ai/llm.js';
 import {
+  ALLOWED_FACTORS,
   buildPrompt,
   isSafeExplanation,
   promptPayload,
@@ -58,7 +59,7 @@ describe('FINAL-05B: datos permitidos hacia Gemini', () => {
         {
           code: 'NO_SHOW_HISTORY',
           label: 'Antecedentes de inasistencia',
-          meaning: 'Proporción de sus turnos anteriores a los que no asistió (0 a 1).',
+          meaning: ALLOWED_FACTORS.NO_SHOW_HISTORY!.meaning,
           impact: 100,
           value: null,
         },

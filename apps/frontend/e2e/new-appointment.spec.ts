@@ -277,12 +277,15 @@ async function openAgenda(
             return respond(route, {
               access: 'ADMIN',
               onboarded: false,
+              platformAdmin: true,
               user: { id: user.id, email },
-              admin: { id: user.id, role: 'ADMIN', fullName: 'Admin Plataforma' },
+              profile: { id: user.id, role: 'ADMIN', fullName: 'Admin Plataforma' },
+              business: null,
             });
           return respond(route, {
             access: 'OWNER',
             onboarded: true,
+            platformAdmin: false,
             user: { id: user.id, email },
             profile: { id: user.id, role: 'OWNER', fullName: 'Operadora' },
             business: {

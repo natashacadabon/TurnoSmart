@@ -57,17 +57,31 @@ export function nextAfterCallback(flow) {
 }
 
 /**
+ * Problema de la nueva contraseña y el campo que hay que marcar, o null si es válida.
+ * @param {string} password
+ * @param {string} confirmation
+ * @returns {{ field: 'password' | 'confirmation'; message: string } | null}
+ */
+export function newPasswordProblem(password, confirmation) {
+  if (password.length < PASSWORD_MIN_LENGTH)
+    return {
+      field: 'password',
+      message: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
+    };
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password))
+    return { field: 'password', message: 'La contraseña debe combinar letras y números.' };
+  if (password !== confirmation)
+    return { field: 'confirmation', message: 'Las contraseñas no coinciden.' };
+  return null;
+}
+
+/**
  * Valida la nueva contraseña antes de enviarla a Supabase. Devuelve un mensaje o null.
  * @param {string} password
  * @param {string} confirmation
  */
 export function validateNewPassword(password, confirmation) {
-  if (password.length < PASSWORD_MIN_LENGTH)
-    return `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`;
-  if (!/[A-Za-z]/.test(password) || !/\d/.test(password))
-    return 'La contraseña debe combinar letras y números.';
-  if (password !== confirmation) return 'Las contraseñas no coinciden.';
-  return null;
+  return newPasswordProblem(password, confirmation)?.message ?? null;
 }
 
 /**
@@ -86,7 +100,9 @@ export function authErrorMessage(error) {
   if (code === 'weak_password')
     return 'La contraseña es demasiado débil. Usá al menos 10 caracteres con letras y números.';
   if (code === 'email_not_confirmed')
-    return 'Tu correo todavía no está verificado. Abrí el enlace de invitación que te enviamos.';
+    return 'Tu correo todavía no está verificado. Abrí el enlace que te enviamos por correo.';
+  if (code === 'signup_disabled')
+    return 'El registro está deshabilitado. Pedile una invitación al administrador de la plataforma.';
   if (code === 'invalid_credentials' || error?.message === 'Invalid login credentials')
     return 'Email o contraseña incorrectos';
   if (code === 'session_not_found' || code === 'refresh_token_not_found')

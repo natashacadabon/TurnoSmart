@@ -547,32 +547,32 @@ D08 sigue pendiente para accesos directos a Supabase. Sin commit ni push.
 
 ---
 
-## 2026-11-26 - Roles ADMIN global y OWNER, acceso por invitación y endurecimiento (Yae)
+## 2026-11-26 - Integración de roles ADMIN global/OWNER, acceso y endurecimiento (Yae)
 
 **Problema abordado**
 
-El equipo redefinió los roles: un ADMIN global administra negocios y propietarios, y el OWNER opera su negocio. Había que eliminar STAFF y el ADMIN por negocio, cerrar el alta pública, sumar recuperación de contraseña y cerrar FINAL-02, FINAL-05B y FINAL-08.
+El equipo redefinió los roles: un ADMIN global administra negocios y propietarios, y el OWNER opera su negocio. Yae debía cerrar FINAL-10 (registro, verificación y recuperación), FINAL-02, FINAL-05B y FINAL-08 sobre ese modelo, que Sofi implementó en paralelo (PR #36).
 
 **Prompt / herramienta utilizada**
 
-Claude Code. Se pidió implementar la parte de Yae del backlog final con el nuevo modelo de roles; el equipo decidió acceso sólo por invitación, uno o más OWNER por negocio, panel ADMIN a cargo de FINAL-11 y desactivar las cuentas STAFF/ADMIN existentes.
+Claude Code. Se pidió implementar la parte de Yae del backlog final y, después de traer `dev`, integrar el trabajo con el modelo de roles de Sofi.
 
 **Código / arquitectura propuesta por IA**
 
-- Tabla `platform_admins` separada de `profiles` (en vez de `business_id` nulo), enum `ProfileRole` sólo con OWNER y `active`/`deactivated_at` con CHECK.
-- Migración que convierte ADMIN/STAFF existentes en OWNER desactivados.
-- `GET /api/me` con `access` y middlewares `requireProfile`/`requirePlatformAdmin`.
-- Páginas de recuperación, callback de enlaces y nueva contraseña, con Mailpit local.
+- Primera propuesta: tabla `platform_admins` separada, enum sólo con OWNER y acceso sólo por invitación.
+- Integración: se adoptó el modelo de Sofi (ADMIN en `profiles` con `business_id` NULL) y se sumaron `active`/`deactivated_at`, un CHECK que vincula rol y negocio, STAFF legado desactivado, y `/me` con `access` y `reason` además de `platformAdmin`.
+- Registro público con verificación de correo, onboarding, recuperación y enlaces vencidos, con Mailpit local.
 - Revocación total de la Data API para `anon`/`authenticated`, con RLS como segunda barrera.
-- Lista cerrada de factores hacia Gemini, filtro de salida, tope global y circuito.
+- Lista cerrada de factores hacia Gemini, filtro de salida, tope global, circuito y factor de confirmación.
 - Métricas protegidas por token, SHA en logs y `/health`, y redacción de campos sensibles.
 
 **Validación y corrección humana**
 
-- Se descartó `business_id` nulo porque rompía la FK compuesta de lecturas de notificaciones.
-- Se conservó `admin@turnosmart.test` como OWNER demo para no romper entornos sembrados ni secretos de E2E; el ADMIN demo es `plataforma@turnosmart.test`.
-- Se corrigió el orden del SHA para priorizar el del proveedor, como exigía un test existente.
-- Las suites unitarias e integración se ejecutaron sobre una base descartable para no borrar datos demo.
+- Yae eligió construir sobre el modelo de Sofi, que ya estaba en `dev` y es la base de FINAL-11; se descartó `platform_admins`.
+- Se mantuvo el registro público porque el backlog lo pide en FINAL-10; la invitación queda para el panel ADMIN.
+- Los ADMIN por negocio existentes quedan como ADMIN globales, tal como definió la migración de Sofi.
+- Se corrigió el seed para que `owner@turnosmart.test` tenga la contraseña local conocida.
+- Las suites unitarias e integración se ejecutaron sobre bases descartables para no borrar datos demo.
 
 **Resultado**
 

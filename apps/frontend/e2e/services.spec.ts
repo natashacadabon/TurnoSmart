@@ -111,6 +111,7 @@ async function fixtures(page: Page, role: Role = 'OWNER', overlapping = false) {
         return respond(route, {
           access: 'OWNER',
           onboarded: true,
+          platformAdmin: false,
           user: { id: fixtureId, email },
           profile: { id: fixtureId, role, fullName: 'Persona E2E' },
           business: { id: fixtureId, name: 'Negocio E2E', timezone, createdAt: timestamp },

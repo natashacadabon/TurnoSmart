@@ -18,9 +18,12 @@ import type {
 } from '../src/modules/customers/repository.js';
 import type { EventRecord, EventRepository } from '../src/modules/events/repository.js';
 import { InMemoryAppointmentRepository } from './appointments-fakes.js';
+import type { Role } from '@turnosmart/shared';
+import { AppError } from '../src/lib/errors.js';
 import type {
   BusinessRecord,
   IdentityRepository,
+  OnboardingInput,
   PlatformAdminRecord,
   ProfileRecord,
   ProfileWithBusiness,
@@ -43,7 +46,10 @@ export class FakeVerifier implements TokenVerifier {
 export class InMemoryIdentity implements IdentityRepository {
   readonly businesses = new Map<string, BusinessRecord>();
   readonly profiles = new Map<string, ProfileRecord>();
+  /** Perfiles ADMIN globales (role ADMIN, business_id NULL). */
   readonly admins = new Map<string, PlatformAdminRecord>();
+  /** Perfiles STAFF legados: existen pero no tienen permisos ni pueden hacer onboarding. */
+  readonly legacyProfiles = new Set<string>();
   private readonly preferences = {
     bookingEmailEnabled: true,
     confirmationEmailEnabled: true,
@@ -60,8 +66,41 @@ export class InMemoryIdentity implements IdentityRepository {
     rescheduleMinimumHours: 0,
   };
 
-  /** Perfil OWNER de un negocio. `active: false` simula un OWNER desactivado por un ADMIN. */
-  addMember(userId: string, businessId: string, role: 'OWNER' = 'OWNER', active = true) {
+  /**
+   * Perfil de un negocio. `active: false` simula un OWNER desactivado por un ADMIN.
+   * Con role ADMIN registra un ADMIN global (sin negocio: se ignora businessId) y con STAFF un
+   * perfil legado sin acceso, igual que las restricciones de profiles en la base.
+   */
+  addMember(userId: string, businessId: string, role: Role = 'OWNER', active = true) {
+    if (role === 'ADMIN') {
+      this.addPlatformAdmin(userId, active);
+      return;
+    }
+    if (role === 'STAFF') {
+      this.addLegacyProfile(userId);
+      return;
+    }
+    this.ensureBusiness(businessId);
+    this.profiles.set(userId, { id: userId, businessId, fullName: null, role, active });
+  }
+
+  /** ADMIN global de la plataforma, sin negocio. */
+  addPlatformAdmin(userId: string, active = true) {
+    this.admins.set(userId, {
+      id: userId,
+      businessId: null,
+      fullName: 'Admin',
+      role: 'ADMIN',
+      active,
+    });
+  }
+
+  /** Perfil STAFF legado (desactivado por la migración): no es OWNER ni ADMIN. */
+  addLegacyProfile(userId: string) {
+    this.legacyProfiles.add(userId);
+  }
+
+  private ensureBusiness(businessId: string) {
     if (!this.businesses.has(businessId)) {
       this.businesses.set(businessId, {
         ...this.preferences,
@@ -71,12 +110,6 @@ export class InMemoryIdentity implements IdentityRepository {
         createdAt: new Date(),
       });
     }
-    this.profiles.set(userId, { id: userId, businessId, fullName: null, role, active });
-  }
-
-  /** ADMIN global de la plataforma, sin negocio. */
-  addPlatformAdmin(userId: string, active = true) {
-    this.admins.set(userId, { id: userId, fullName: 'Admin', active });
   }
 
   async findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null> {
@@ -87,6 +120,45 @@ export class InMemoryIdentity implements IdentityRepository {
 
   async findPlatformAdmin(userId: string) {
     return this.admins.get(userId) ?? null;
+  }
+
+  async hasProfile(userId: string) {
+    return this.profiles.has(userId) || this.admins.has(userId) || this.legacyProfiles.has(userId);
+  }
+
+  /** Misma semántica que PrismaIdentityRepository.onboard. */
+  async onboard(input: OnboardingInput) {
+    if (this.admins.has(input.userId)) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Las cuentas ADMIN no pueden crear un negocio desde onboarding',
+      );
+    }
+    const existing = await this.findProfileWithBusiness(input.userId);
+    if (existing) {
+      if (!existing.profile.active)
+        throw new AppError('ACCOUNT_DISABLED', 'La cuenta está desactivada');
+      return { ...existing, created: false };
+    }
+    if (await this.hasProfile(input.userId))
+      throw new AppError('ACCOUNT_DISABLED', 'La cuenta está desactivada');
+    const business = {
+      ...this.preferences,
+      id: randomUUID(),
+      name: input.businessName,
+      timezone: input.timezone,
+      createdAt: new Date(),
+    };
+    this.businesses.set(business.id, business);
+    const profile: ProfileRecord = {
+      id: input.userId,
+      businessId: business.id,
+      fullName: input.fullName,
+      role: 'OWNER',
+      active: true,
+    };
+    this.profiles.set(profile.id, profile);
+    return { profile, business, created: true };
   }
 
   async updateBusiness(

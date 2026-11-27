@@ -27,7 +27,11 @@ const NAV = [
   { href: '/settings', label: 'Configuración', icon: <SettingsRoundedIcon fontSize="small" /> },
 ];
 
-const ROLE_LABEL: Record<Role, string> = { OWNER: 'Dueño/a', ADMIN: 'Admin plataforma' };
+const ROLE_LABEL: Record<Role, string> = {
+  OWNER: 'Dueño/a',
+  ADMIN: 'Admin plataforma',
+  STAFF: 'Staff (legado)',
+};
 
 function isActive(href: string, pathname: string): boolean {
   if (href.includes('#')) return false;

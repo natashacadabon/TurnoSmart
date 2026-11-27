@@ -22,7 +22,8 @@ const platformAdmins: string[] = [];
 afterAll(async () => {
   try {
     await prisma.business.deleteMany({ where: { id: { in: businesses } } });
-    await prisma.platformAdmin.deleteMany({ where: { id: { in: platformAdmins } } });
+    // Los perfiles ADMIN no tienen negocio: no se borran en cascada con los negocios.
+    await prisma.profile.deleteMany({ where: { id: { in: platformAdmins } } });
   } finally {
     await prisma.$disconnect();
   }
@@ -77,8 +78,14 @@ async function fixture() {
   }
   async function platformAdmin() {
     const user = verifier.addUser();
-    await prisma.platformAdmin.create({
-      data: { id: user.id, email: `${user.id}@admin.example.com` },
+    // ADMIN global: perfil con role ADMIN y sin negocio.
+    await prisma.profile.create({
+      data: {
+        id: user.id,
+        businessId: null,
+        email: `${user.id}@admin.example.com`,
+        role: 'ADMIN',
+      },
     });
     platformAdmins.push(user.id);
     return { Authorization: `Bearer ${user.token}` };

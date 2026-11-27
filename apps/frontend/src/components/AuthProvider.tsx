@@ -28,6 +28,8 @@ interface AuthValue {
   refreshMe(): Promise<MeResponse | null>;
   /** Envía el correo de recuperación. No revela si la cuenta existe. */
   requestPasswordReset(email: string): Promise<void>;
+  /** Registro público: crea la cuenta y envía el correo de verificación. No revela si ya existía. */
+  signUp(email: string, password: string): Promise<void>;
   /**
    * Define la contraseña de la sesión abierta por un enlace de invitación o recuperación y
    * devuelve la cuenta resuelta (null si la API no respondió).
@@ -140,6 +142,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
+  const signUp = useCallback(async (email: string, password: string) => {
+    const { error } = await getSupabase().auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: authCallbackUrl(window.location.origin, 'verify') },
+    });
+    if (error) throw new Error(authErrorMessage(error));
+  }, []);
+
   const requestPasswordReset = useCallback(async (email: string) => {
     const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
       redirectTo: authCallbackUrl(window.location.origin, 'recovery'),
@@ -171,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshMe,
       requestPasswordReset,
+      signUp,
       updatePassword,
     }),
     [
@@ -183,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshMe,
       requestPasswordReset,
       updatePassword,
+      signUp,
     ],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

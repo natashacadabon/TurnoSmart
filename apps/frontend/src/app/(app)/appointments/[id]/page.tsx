@@ -628,10 +628,18 @@ function AppointmentDetails({
               alignItems: 'start',
             }}
           >
+            {/* La clave cambia al reprogramar, confirmar o cerrar el turno: el panel vuelve a
+                pedir la explicación y el servidor genera una nueva sólo si el score cambió. */}
             <RiskExplanationPanel
-              key={appointment.startsAt + appointment.endsAt}
+              key={[
+                appointment.startsAt,
+                appointment.endsAt,
+                appointment.status,
+                appointment.confirmationStatus,
+              ].join('/')}
               appointmentId={id}
               compact
+              autoLoad
             />
             <EventHistory
               appointmentId={id}

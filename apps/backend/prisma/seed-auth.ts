@@ -1,7 +1,7 @@
 import { databaseProject as readDatabaseProject } from '../src/config/supabase-target.js';
 import { randomBytes } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { SEED_ADMIN_EMAIL, SEED_PLATFORM_ADMIN_EMAIL } from './seed-data.js';
+import { SEED_ADMIN_EMAIL, SEED_OWNER_EMAIL } from './seed-data.js';
 import { ALLOWED_REMOTE_SEED_PROJECT_REFS } from './seed-targets.js';
 
 import { SeedError, seedStep } from './seed-diagnostics.js';
@@ -140,8 +140,8 @@ export async function findSeedUser(admin: Admin, email: string) {
 }
 
 /** Reutiliza cuentas sin actualizar password ni metadatos del usuario existente.
- * Sólo el OWNER demo y el ADMIN de plataforma reciben la contraseña conocida del seed. */
-const KNOWN_PASSWORD_EMAILS = new Set([SEED_ADMIN_EMAIL, SEED_PLATFORM_ADMIN_EMAIL]);
+ * Sólo el ADMIN global y el OWNER demo reciben la contraseña conocida del seed. */
+const KNOWN_PASSWORD_EMAILS = new Set([SEED_ADMIN_EMAIL, SEED_OWNER_EMAIL]);
 export async function ensureSeedUsers<T extends { email: string }>(
   admin: Admin,
   accounts: T[],

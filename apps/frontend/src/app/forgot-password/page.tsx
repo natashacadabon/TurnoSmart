@@ -1,9 +1,10 @@
 'use client';
 
 import { Alert, Button, Stack, TextField, Typography } from '@mui/material';
-import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
+import { AuthErrorAlert } from '@/components/AuthErrorAlert';
+import { AuthLink } from '@/components/AuthLink';
 import { useAuth } from '@/components/AuthProvider';
 
 /** Solicitud de recuperación de contraseña. Siempre responde igual para no revelar cuentas. */
@@ -44,7 +45,7 @@ export default function ForgotPasswordPage() {
           </Alert>
         ) : (
           <>
-            {error && <Alert severity="error">{error}</Alert>}
+            {error && <AuthErrorAlert>{error}</AuthErrorAlert>}
             <TextField
               label="Email"
               type="email"
@@ -60,7 +61,7 @@ export default function ForgotPasswordPage() {
           </>
         )}
         <Typography variant="body2" sx={{ textAlign: 'center' }}>
-          <Link href="/login">Volver a iniciar sesión</Link>
+          <AuthLink href="/login">Volver a iniciar sesión</AuthLink>
         </Typography>
       </Stack>
     </AuthLayout>

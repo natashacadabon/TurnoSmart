@@ -222,10 +222,19 @@ if (command === 'up') {
       server.close();
     }
   }
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(socket, resolve);
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socket, resolve);
+    });
+  } catch (error) {
+    if (error?.code !== 'EADDRINUSE') throw error;
+    console.error(
+      'Ya hay un entorno local de TurnoSmart corriendo (npm run docker:dev).\n' +
+        'Usalo en http://127.0.0.1:3000 o detenelo con: npm run docker:down',
+    );
+    process.exit(1);
+  }
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   try {

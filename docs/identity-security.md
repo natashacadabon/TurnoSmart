@@ -4,17 +4,17 @@ Bloques FINAL-10, FINAL-02, FINAL-05B y FINAL-08 (Yae). Describe el comportamien
 
 ## Modelo de roles
 
-Hay dos roles, sin permisos compartidos.
+Base: modelo de Sofi (PR #36, migración `20261126000100_global_platform_admin`). Los roles viven en `profiles` y no comparten permisos.
 
-| Rol   | Dónde vive                                 | Alcance                                                                                                                                                                                    |
-| ----- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ADMIN | `platform_admins` (id = `auth.users.id`)   | Administrador global. Alta y estado de negocios, invitación y gestión de propietarios. No pertenece a un negocio y no opera clientes, servicios, agenda, turnos, riesgo ni notificaciones. |
-| OWNER | `profiles` (`role = OWNER`, `business_id`) | Operación diaria de su negocio. No crea otros OWNER, no desactiva propietarios ni accede al panel de la plataforma.                                                                        |
+| Rol   | En `profiles`                      | Alcance                                                                                                                                                                                    |
+| ----- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ADMIN | `role = ADMIN`, `business_id` NULL | Administrador global. Alta y estado de negocios, invitación y gestión de propietarios. No pertenece a un negocio y no opera clientes, servicios, agenda, turnos, riesgo ni notificaciones. |
+| OWNER | `role = OWNER`, `business_id` fijo | Operación diaria de su negocio. No crea otros OWNER, no desactiva propietarios ni accede al panel de la plataforma.                                                                        |
+| STAFF | Legado                             | Sin permisos. La migración `20261126000200_profile_access_rules` lo deja desactivado.                                                                                                      |
 
-- `ProfileRole` sólo admite `OWNER`. STAFF y el ADMIN por negocio ya no existen.
-- `profiles.active` y `platform_admins.active` permiten desactivar sin borrar historial. Un CHECK exige `deactivated_at` cuando la cuenta está inactiva.
-- La migración `20261126000200_platform_admin_owner_roles` convierte los perfiles ADMIN/STAFF existentes en OWNER **desactivados**: conservan historial y lecturas de notificaciones, sin acceso hasta que un ADMIN los reactive.
-- Si por error una cuenta es ADMIN y OWNER, se resuelve como ADMIN y no puede operar el negocio.
+- `20261126000100` (Sofi) hace `business_id` opcional y desliga del negocio a los ADMIN existentes: pasan a ser ADMIN globales.
+- `20261126000200` (Yae) agrega `active`/`deactivated_at` (un CHECK exige la fecha cuando el perfil está inactivo), desactiva los STAFF y fija en la base la regla `(role = 'ADMIN') = (business_id IS NULL)`.
+- Cuentas demo: `admin@turnosmart.test` es el ADMIN global y `owner@turnosmart.test` el OWNER del negocio 1; ambas usan la contraseña local del seed. `owner2@turnosmart.test` es OWNER del negocio 2.
 
 ### Matriz de permisos
 
@@ -35,20 +35,22 @@ Fuente única: `PERMISSIONS` en `packages/shared/src/identity.ts`.
 
 El negocio siempre sale de `profiles`; `role` o `businessId` enviados en el body se ignoran.
 
-`GET /api/me` responde `access: 'OWNER' | 'ADMIN' | 'NONE'` (con `reason: 'NO_PROFILE' | 'DISABLED'`). `onboarded` sigue siendo `true` sólo para un OWNER activo, para no cambiar las pantallas del negocio.
+`GET /api/me` responde `access: 'OWNER' | 'ADMIN' | 'NONE'` (con `reason: 'NO_PROFILE' | 'DISABLED'`) y conserva los campos de Sofi: `platformAdmin` y `business: null` para el ADMIN. `onboarded` sigue siendo `true` sólo para un OWNER activo.
 
-## Acceso, invitación y recuperación (FINAL-10)
+## Registro, invitación y recuperación (FINAL-10)
 
-No hay registro público: `POST /api/onboarding` y `/onboarding` se eliminaron, y GoTrue local tiene `DISABLE_SIGNUP`. Un OWNER entra sólo por invitación de un ADMIN.
+Como pide el backlog, hay dos formas de que un OWNER llegue a su negocio: el registro público (cuenta nueva, verificación de correo y onboarding) y la invitación de un ADMIN (FINAL-11).
 
-| Ruta               | Uso                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------ |
-| `/login`           | Ingreso. Redirige por rol: OWNER → `/customers`, ADMIN → `/admin`, sin acceso → `/sin-acceso`.         |
-| `/forgot-password` | Pide el correo de recuperación. Siempre muestra el mismo mensaje para no revelar si la cuenta existe.  |
-| `/auth/callback`   | Destino de los enlaces de correo. Lee `?flow=` y errores de Supabase (`otp_expired`, `access_denied`). |
-| `/reset-password`  | Nueva contraseña (≥ 10 caracteres, letras y números). `?flow=invite` muestra "Creá tu contraseña".     |
-| `/sin-acceso`      | Cuenta sin perfil o desactivada.                                                                       |
-| `/admin`           | Entrada del ADMIN. El panel completo es FINAL-11.                                                      |
+| Ruta               | Uso                                                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `/login`           | Ingreso. Redirige por rol: OWNER → `/customers`, ADMIN → `/admin`, sin perfil → `/onboarding`, desactivado → `/sin-acceso`. |
+| `/register`        | Registro público con contraseña (≥ 10, letras y números) y correo de verificación a `/auth/callback?flow=verify`.           |
+| `/onboarding`      | Alta del negocio por una cuenta verificada sin perfil; ADMIN y cuentas desactivadas son redirigidas.                        |
+| `/forgot-password` | Pide el correo de recuperación. Siempre muestra el mismo mensaje para no revelar si la cuenta existe.                       |
+| `/auth/callback`   | Destino de los enlaces de correo. Lee `?flow=` y errores de Supabase (`otp_expired`, `access_denied`).                      |
+| `/reset-password`  | Nueva contraseña (≥ 10 caracteres, letras y números). `?flow=invite` muestra "Creá tu contraseña".                          |
+| `/sin-acceso`      | Cuenta desactivada o STAFF legado.                                                                                          |
+| `/admin`           | Entrada del ADMIN. El panel completo es FINAL-11.                                                                           |
 
 Enlace vencido o ya usado: `/auth/callback` muestra "El enlace venció" o "no es válido". En recuperación ofrece pedir otro; en invitación indica pedir el reenvío al ADMIN. Sin sesión válida, `/reset-password` no permite cambiar la contraseña.
 
@@ -66,17 +68,34 @@ En cada proyecto de Supabase (Dev y Production):
 
 - Site URL: el origen HTTPS del frontend de ese entorno.
 - Redirect URLs: `<origen>/auth/callback` (y el patrón de Preview de Vercel en Dev).
-- Email signups deshabilitados; confirmación de correo habilitada; vencimiento OTP de 3600 s; contraseña mínima de 10.
+- Email signups habilitados con confirmación de correo obligatoria; vencimiento OTP de 3600 s; contraseña mínima de 10.
 - SMTP propio (Resend) para que invitaciones y recuperación no dependan del límite del SMTP de prueba de Supabase.
 
 En local, `npm run docker:dev` levanta Mailpit: los correos de Auth se ven en `http://localhost:54327` y nunca salen de la máquina.
+
+### Plantillas de correo de Auth
+
+Los correos de verificación, recuperación, invitación y cambio de correo usan el mismo diseño que los correos de turnos (barra azul, marca TurnoSmart y botón principal), en español.
+
+- Fuente: `infra/supabase/email-templates/build.mjs`. Después de editarla, regenerar con `node infra/supabase/email-templates/build.mjs`.
+- **Local:** `docker:dev` ya las usa; el gateway las sirve en `/email-templates/` y GoTrue las descarga al enviar, con los asuntos en español.
+- **Supabase en la nube (Dev y Production):** en _Authentication → Emails → Templates_, pegar el HTML de cada archivo y el asunto correspondiente:
+
+| Plantilla en Supabase | Archivo             | Asunto                                              |
+| --------------------- | ------------------- | --------------------------------------------------- |
+| Confirm signup        | `confirmation.html` | Confirmá tu correo en TurnoSmart                    |
+| Reset password        | `recovery.html`     | Restablecé tu contraseña de TurnoSmart              |
+| Invite user           | `invite.html`       | Te invitaron a administrar un negocio en TurnoSmart |
+| Change email address  | `email_change.html` | Confirmá tu nuevo correo en TurnoSmart              |
+
+Los correos de turnos (reserva, confirmación, recordatorios) no cambian: los genera el backend con `packages/shared/src/email-templates.ts`.
 
 ## Data API y RLS (FINAL-02)
 
 El frontend usa Supabase sólo para Auth; los datos pasan por Express, que conecta con el rol dueño de las tablas. La migración `20261126000300_close_data_api_access`:
 
 - Revoca todos los privilegios de `anon`, `authenticated` y `PUBLIC` sobre tablas, secuencias y funciones de `public`, y los privilegios por defecto para objetos futuros.
-- Habilita RLS en todas las tablas (incluida `platform_admins`) como segunda barrera.
+- Habilita RLS en todas las tablas como segunda barrera.
 - Elimina las políticas "business members ..." que suponían acceso directo por PostgREST.
 
 `test/integration/data-api-access.test.ts` verifica que no queda ningún privilegio, que RLS está activo en todas las tablas, que una tabla nueva nace cerrada y que un JWT de OWNER (como `anon` o `authenticated`) no lee ni escribe. El aislamiento entre dos negocios por la API se prueba en `tenant-isolation.test.ts`.
@@ -93,7 +112,9 @@ El frontend usa Supabase sólo para Auth; los datos pasan por Express, que conec
 | Timeout             | `GEMINI_TIMEOUT_MS` (8 s) → 504 `AI_TIMEOUT`.                                                                                                                                |
 | Degradación         | Circuito: `AI_CIRCUIT_FAILURES` fallas seguidas → 503 sin llamar durante `AI_CIRCUIT_COOLDOWN_MS`. La cuota no lo abre.                                                      |
 
-**Personalización.** El prompt pide citar cada factor con su valor y su aporte al score, ordenar las recomendaciones por impacto y no pedir otra confirmación si el cliente ya confirmó. Confirmar un turno (desde el negocio o por el enlace del correo) agrega el factor `CUSTOMER_CONFIRMED` (-25) en la misma transacción, sin recalcular la anticipación medida al reservar. El seed calcula los scores con el mismo calculador, así la demo muestra factores reales.
+**Personalización.** El prompt está escrito para un dueño de comercio sin conocimientos técnicos: máximo 2 oraciones con voseo, sin palabras como score, puntos o proporción (el detalle numérico ya se ve en pantalla), cada motivo traducido a la vida diaria ("faltó a todos sus turnos anteriores") y hasta 3 recomendaciones cortas que empiezan con un verbo. No pide otra confirmación si el cliente ya confirmó.
+
+**Explicación automática.** El detalle del turno muestra la explicación al abrirse, sin botón. El servidor la guarda por versión del score (negocio, turno, fecha de cálculo y modelo; hasta 500 entradas por 24 h), así que volver a entrar no llama a Gemini ni consume el límite. Al confirmar, reprogramar o cerrar el turno el panel la vuelve a pedir y, si el score cambió, se genera una nueva. "Generar de nuevo" fuerza otra (`refresh=true`) y sí consume el límite. Confirmar un turno (desde el negocio o por el enlace del correo) agrega el factor `CUSTOMER_CONFIRMED` (-25) en la misma transacción, sin recalcular la anticipación medida al reservar. El seed calcula los scores con el mismo calculador, así la demo muestra factores reales.
 
 Si Gemini falla, sólo la explicación responde error: el score persistido, la agenda y los turnos siguen funcionando. Los logs de IA registran modelo, intento, duración y tipo de falla, nunca el prompt ni la respuesta.
 

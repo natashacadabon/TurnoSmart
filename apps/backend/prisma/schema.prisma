@@ -8,9 +8,11 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// Los perfiles de negocio sólo pueden ser OWNER. El ADMIN global vive en platform_admins.
+// ADMIN es global (business_id NULL); OWNER pertenece a un negocio; STAFF es sólo legado.
 enum ProfileRole {
   OWNER
+  ADMIN
+  STAFF
 }
 
 enum AppointmentStatus {
@@ -115,35 +117,22 @@ model Business {
 model Profile {
   // Same UUID as auth.users.id. Creation is handled by trusted backend code.
   id                String             @id @db.Uuid
-  businessId        String             @map("business_id") @db.Uuid
+  businessId        String?            @map("business_id") @db.Uuid
   email             String
   fullName          String?            @map("full_name")
   role              ProfileRole        @default(OWNER)
-  // Un ADMIN puede desactivar un OWNER sin borrar su historial; sin acceso mientras esté inactivo.
+  // Un perfil inactivo no tiene acceso; se conserva su historial (STAFF legado, OWNER desactivado).
   active            Boolean            @default(true)
   deactivatedAt     DateTime?          @map("deactivated_at") @db.Timestamptz(3)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
-  business          Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business          Business?          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   notificationReads NotificationRead[]
 
   @@unique([id, businessId])
   @@unique([businessId, email])
   @@index([businessId])
   @@map("profiles")
-}
-
-/// Administrador global de la plataforma. Mismo UUID que auth.users.id; no pertenece a ningún negocio.
-model PlatformAdmin {
-  id            String    @id @db.Uuid
-  email         String    @unique
-  fullName      String?   @map("full_name")
-  active        Boolean   @default(true)
-  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz(3)
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
-
-  @@map("platform_admins")
 }
 
 model Customer {
@@ -331,7 +320,7 @@ model NotificationRead {
   profileId      String       @map("profile_id") @db.Uuid
   readAt         DateTime     @default(now()) @map("read_at") @db.Timestamptz(3)
   notification   Notification @relation(fields: [notificationId, businessId], references: [id, businessId], onDelete: Cascade)
-  profile        Profile      @relation(fields: [profileId, businessId], references: [id, businessId], onDelete: Cascade)
+  profile        Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@id([notificationId, profileId])
   @@index([businessId, profileId, notificationId], map: "notification_reads_profile_idx")

@@ -340,6 +340,7 @@ export function AgendaInsights({
             <RiskExplanationPanel
               key={analysisKey(selected)}
               appointmentId={selected.id}
+              autoLoad
               initialResult={analyses[analysisKey(selected)]}
               onExplained={(result) =>
                 setAnalyses((previous) => ({ ...previous, [analysisKey(selected)]: result }))

@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
 /**
- * Roles de la plataforma.
- * - ADMIN: administrador global (tabla platform_admins). No pertenece a ningún negocio y no opera
- *   clientes, servicios, disponibilidad, agenda, turnos, riesgo ni notificaciones.
- * - OWNER: administrador operativo de un negocio (tabla profiles). Lo invita un ADMIN.
+ * Roles guardados en profiles.
+ * - ADMIN: administrador global (business_id NULL). No opera clientes, servicios, disponibilidad,
+ *   agenda, turnos, riesgo ni notificaciones del negocio.
+ * - OWNER: administrador operativo de un negocio. Se registra con onboarding o lo invita un ADMIN.
+ * - STAFF: sólo legado; los perfiles STAFF quedan desactivados y sin permisos.
  */
-export const ROLES = ['ADMIN', 'OWNER'] as const;
+export const ROLES = ['OWNER', 'ADMIN', 'STAFF'] as const;
 export type Role = (typeof ROLES)[number];
 
 /**
@@ -44,6 +45,7 @@ export interface AuthContext {
   businessId: string;
   timezone: string;
   role: 'OWNER';
+  platformAdmin: false;
 }
 
 /** Contexto de un ADMIN global activo. No tiene negocio asociado. */
@@ -110,17 +112,21 @@ export interface PlatformAdminDto {
   role: 'ADMIN';
 }
 
-/** Por qué una cuenta autenticada no tiene acceso: sin perfil asignado o desactivada por un ADMIN. */
+/**
+ * Por qué una cuenta autenticada no opera un negocio: todavía no hizo onboarding (NO_PROFILE) o
+ * su perfil está desactivado o es STAFF legado (DISABLED).
+ */
 export type NoAccessReason = 'NO_PROFILE' | 'DISABLED';
 
 /**
  * GET /api/me. `onboarded` es true sólo para un OWNER activo con negocio (las pantallas del negocio
- * dependen de eso); `access` distingue OWNER, ADMIN global y cuentas sin acceso.
+ * dependen de eso); `platformAdmin` marca al ADMIN global y `access` distingue los tres casos.
  */
 export type MeResponse =
   | {
       access: 'OWNER';
       onboarded: true;
+      platformAdmin: false;
       user: { id: string; email: string | null };
       profile: ProfileDto;
       business: BusinessDto;
@@ -128,12 +134,15 @@ export type MeResponse =
   | {
       access: 'ADMIN';
       onboarded: false;
+      platformAdmin: true;
       user: { id: string; email: string | null };
-      admin: PlatformAdminDto;
+      profile: PlatformAdminDto;
+      business: null;
     }
   | {
       access: 'NONE';
       onboarded: false;
+      platformAdmin: false;
       user: { id: string; email: string | null };
       reason: NoAccessReason;
     };
@@ -152,6 +161,14 @@ const timezone = z
     },
     { message: 'Zona horaria IANA inválida' },
   );
+
+/** POST /api/onboarding: alta pública del negocio por una cuenta verificada sin perfil. */
+export const onboardingSchema = z.object({
+  businessName: z.string().trim().min(2).max(120),
+  timezone: timezone.default('America/Argentina/Buenos_Aires'),
+  fullName: z.string().trim().min(1).max(120).optional(),
+});
+export type OnboardingRequest = z.input<typeof onboardingSchema>;
 
 /** PATCH /api/business */
 export const updateBusinessSchema = z

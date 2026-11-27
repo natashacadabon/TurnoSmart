@@ -14,6 +14,7 @@ import type { RiskRepository } from './modules/ai/risk-repository.js';
 import type { RiskExplainer } from './modules/ai/risk-explainer.js';
 import { FixedWindowRateLimiter } from './modules/ai/rate-limiter.js';
 import { aiRouter } from './modules/ai/routes.js';
+import { ExplanationCache } from './modules/ai/explanation-cache.js';
 import type { ServiceRepository } from './modules/services/repository.js';
 import { servicesRouter } from './modules/services/routes.js';
 import type { AvailabilityRepository } from './modules/availability/repository.js';
@@ -169,6 +170,7 @@ export function createApp(deps: AppDeps): Express {
 
   const authed = [authenticate(deps.verifier), requireProfile(deps.identity)];
   const limiter = new FixedWindowRateLimiter(deps.aiRateLimit.limit, deps.aiRateLimit.windowMs);
+  const explanations = new ExplanationCache();
 
   app.use('/api', identityRouter(deps));
   if (deps.appointmentActionLinks) {
@@ -196,7 +198,7 @@ export function createApp(deps: AppDeps): Express {
   app.use(
     '/api/appointments',
     ...authed,
-    aiRouter({ risk: deps.risk, explainer: deps.explainer, limiter }),
+    aiRouter({ risk: deps.risk, explainer: deps.explainer, limiter, cache: explanations }),
   );
 
   app.use(notFoundHandler);

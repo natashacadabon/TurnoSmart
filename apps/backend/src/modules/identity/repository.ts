@@ -24,15 +24,27 @@ export interface ProfileWithBusiness {
   business: BusinessRecord;
 }
 
+/** Perfil ADMIN global: role ADMIN y business_id NULL en profiles. */
 export interface PlatformAdminRecord {
   id: string;
+  businessId: null;
   fullName: string | null;
+  role: 'ADMIN';
   active: boolean;
 }
 
+export interface OnboardingInput {
+  userId: string;
+  /** Email de Supabase Auth; Profile.email es obligatorio en el schema. */
+  email: string;
+  businessName: string;
+  timezone: string;
+  fullName: string | null;
+}
+
 /**
- * Acceso resuelto para un usuario de Auth. Un ADMIN global tiene prioridad: no puede operar
- * un negocio aunque, por error de datos, también tuviera un perfil OWNER.
+ * Acceso resuelto para un usuario de Auth. Un perfil sólo tiene un rol: ADMIN global, OWNER de un
+ * negocio o STAFF legado (sin acceso).
  */
 export type AccountAccess =
   | { kind: 'ADMIN'; admin: PlatformAdminRecord }
@@ -40,9 +52,18 @@ export type AccountAccess =
   | { kind: 'NONE'; reason: 'NO_PROFILE' | 'DISABLED' };
 
 export interface IdentityRepository {
-  /** Perfil OWNER con su negocio, activo o no. */
+  /** Perfil OWNER con su negocio, activo o no. Null para ADMIN, STAFF o sin perfil. */
   findProfileWithBusiness(userId: string): Promise<ProfileWithBusiness | null>;
+  /** Perfil ADMIN global, activo o no. */
   findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null>;
+  /** Existe algún perfil (incluido STAFF legado) para la cuenta. */
+  hasProfile(userId: string): Promise<boolean>;
+  /**
+   * Alta pública: crea negocio y perfil OWNER en una transacción.
+   * Devuelve `created: false` con el negocio existente si la cuenta ya era OWNER,
+   * incluso si dos requests compiten (Profile.id = userId es la clave).
+   */
+  onboard(input: OnboardingInput): Promise<ProfileWithBusiness & { created: boolean }>;
   updateBusiness(
     businessId: string,
     data: Partial<Pick<BusinessRecord, 'name' | 'timezone'> & BusinessNotificationPreferences>,
@@ -69,7 +90,7 @@ const businessSelect = {
   rescheduleMinimumHours: true,
 } as const;
 
-/** Resuelve el acceso de una cuenta de Auth. Un ADMIN desactivado no cae a su perfil OWNER. */
+/** Resuelve el acceso de una cuenta de Auth. */
 export async function resolveAccess(
   identity: IdentityRepository,
   userId: string,
@@ -79,7 +100,11 @@ export async function resolveAccess(
     identity.findProfileWithBusiness(userId),
   ]);
   if (admin) return admin.active ? { kind: 'ADMIN', admin } : { kind: 'NONE', reason: 'DISABLED' };
-  if (!found) return { kind: 'NONE', reason: 'NO_PROFILE' };
+  if (!found) {
+    // Un perfil STAFF legado existe pero no tiene permisos: no puede hacer onboarding de nuevo.
+    const legacy = await identity.hasProfile(userId);
+    return { kind: 'NONE', reason: legacy ? 'DISABLED' : 'NO_PROFILE' };
+  }
   if (!found.profile.active) return { kind: 'NONE', reason: 'DISABLED' };
   return { kind: 'OWNER', found };
 }
@@ -92,25 +117,78 @@ export class PrismaIdentityRepository implements IdentityRepository {
       where: { id: userId },
       include: { business: { select: businessSelect } },
     });
-    if (!profile) return null;
-    const { business, ...rest } = profile;
+    if (!profile || profile.role !== 'OWNER' || !profile.businessId || !profile.business)
+      return null;
     return {
       profile: {
-        id: rest.id,
-        businessId: rest.businessId,
-        fullName: rest.fullName,
-        role: rest.role,
-        active: rest.active,
+        id: profile.id,
+        businessId: profile.businessId,
+        fullName: profile.fullName,
+        role: 'OWNER',
+        active: profile.active,
       },
-      business,
+      business: profile.business,
     };
   }
 
-  findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null> {
-    return this.prisma.platformAdmin.findUnique({
-      where: { id: userId },
+  async findPlatformAdmin(userId: string): Promise<PlatformAdminRecord | null> {
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: userId, role: 'ADMIN', businessId: null },
       select: { id: true, fullName: true, active: true },
     });
+    return profile ? { ...profile, businessId: null, role: 'ADMIN' } : null;
+  }
+
+  async hasProfile(userId: string): Promise<boolean> {
+    return (await this.prisma.profile.count({ where: { id: userId } })) > 0;
+  }
+
+  async onboard(input: OnboardingInput): Promise<ProfileWithBusiness & { created: boolean }> {
+    if (await this.findPlatformAdmin(input.userId)) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Las cuentas ADMIN no pueden crear un negocio desde onboarding',
+      );
+    }
+    const existing = await this.findProfileWithBusiness(input.userId);
+    if (existing) {
+      if (!existing.profile.active)
+        throw new AppError('ACCOUNT_DISABLED', 'La cuenta está desactivada');
+      return { ...existing, created: false };
+    }
+    if (await this.hasProfile(input.userId))
+      throw new AppError('ACCOUNT_DISABLED', 'La cuenta está desactivada');
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const business = await tx.business.create({
+          data: { name: input.businessName, timezone: input.timezone },
+          select: businessSelect,
+        });
+        const profile = await tx.profile.create({
+          data: {
+            id: input.userId,
+            businessId: business.id,
+            email: input.email,
+            fullName: input.fullName,
+            role: 'OWNER',
+          },
+          select: { id: true, fullName: true, active: true },
+        });
+        return {
+          business,
+          profile: { ...profile, businessId: business.id, role: 'OWNER' as const },
+        };
+      });
+      return { ...result, created: true };
+    } catch (err) {
+      // Onboarding concurrente: otra transacción creó el perfil; ésta hizo rollback de su negocio.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const winner = await this.findProfileWithBusiness(input.userId);
+        if (winner) return { ...winner, created: false };
+      }
+      throw err;
+    }
   }
 
   updateBusiness(

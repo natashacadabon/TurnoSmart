@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { AuthLayout } from '@/components/AuthLayout';
 import { useAuth } from '@/components/AuthProvider';
+import { softDangerButtonSx } from '@/components/ui';
 import { accountHome } from '@/lib/account-home';
 
 /**
@@ -37,13 +38,18 @@ export default function PlatformAdminPage() {
           <Typography variant="overline" color="primary">
             Administración de la plataforma
           </Typography>
-          <Typography variant="h1">Hola, {me.admin.fullName ?? me.user.email}</Typography>
+          <Typography variant="h1">Hola, {me.profile.fullName ?? me.user.email}</Typography>
         </div>
         <Alert severity="info">
           Desde acá vas a gestionar negocios y propietarios. Los administradores de la plataforma no
           operan agendas, clientes ni turnos.
         </Alert>
-        <Button variant="outlined" startIcon={<LogoutRoundedIcon />} onClick={signOut}>
+        <Button
+          variant="outlined"
+          startIcon={<LogoutRoundedIcon />}
+          onClick={signOut}
+          sx={softDangerButtonSx}
+        >
           Cerrar sesión
         </Button>
       </Stack>

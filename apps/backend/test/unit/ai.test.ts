@@ -127,12 +127,52 @@ describe('explicación de riesgo con Gemini', () => {
     expect(llm.calls).toHaveLength(0);
   });
 
-  it('límite por usuario → 429 RATE_LIMITED', async () => {
+  it('límite por usuario → 429 RATE_LIMITED al regenerar', async () => {
     const ctx = setup(new FakeLlm(async () => validJson), { limit: 1 });
     expect((await explain(ctx)).status).toBe(200);
-    const res = await explain(ctx);
+    const res = await request(ctx.app)
+      .post(`/api/appointments/${ctx.appointmentId}/risk/explanation?refresh=true`)
+      .set(ctx.auth);
     expect(res.status).toBe(429);
     expect(res.body.error.code).toBe('RATE_LIMITED');
+  });
+
+  it('reutiliza la explicación de la misma versión del score sin llamar a Gemini', async () => {
+    const llm = new FakeLlm(async () => validJson);
+    const ctx = setup(llm, { limit: 1 });
+    const first = await explain(ctx);
+    expect(first.body.cached).toBe(false);
+    const again = await explain(ctx);
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ cached: true, explanation: first.body.explanation });
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it('genera una nueva explicación cuando cambia el score', async () => {
+    const llm = new FakeLlm(async () => validJson);
+    const ctx = setup(llm);
+    await explain(ctx);
+    // Confirmar o reprogramar recalcula el score y cambia su fecha de cálculo.
+    const current = ctx.appointments.risks.get(ctx.appointmentId)!;
+    ctx.appointments.risks.set(ctx.appointmentId, {
+      ...current,
+      score: current.score - 25,
+      calculatedAt: new Date(current.calculatedAt.getTime() + 60_000),
+    });
+    const res = await explain(ctx);
+    expect(res.body.cached).toBe(false);
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it('refresh=true fuerza una explicación nueva', async () => {
+    const llm = new FakeLlm(async () => validJson);
+    const ctx = setup(llm);
+    await explain(ctx);
+    const res = await request(ctx.app)
+      .post(`/api/appointments/${ctx.appointmentId}/risk/explanation?refresh=true`)
+      .set(ctx.auth);
+    expect(res.body.cached).toBe(false);
+    expect(llm.calls).toHaveLength(2);
   });
 });
 

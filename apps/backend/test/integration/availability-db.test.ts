@@ -46,8 +46,9 @@ async function member(id: string, role: 'OWNER', active = true) {
 }
 async function createPlatformAdmin() {
   const user = ctx.verifier.addUser();
-  await prisma.platformAdmin.create({
-    data: { id: user.id, email: `${user.id}@admin.test.local` },
+  // ADMIN global: perfil con role ADMIN y sin negocio.
+  await prisma.profile.create({
+    data: { id: user.id, businessId: null, email: `${user.id}@admin.test.local`, role: 'ADMIN' },
   });
   createdAdmins.push(user.id);
   return { Authorization: `Bearer ${user.token}` };
@@ -90,7 +91,8 @@ beforeEach(async () => {
 });
 afterAll(async () => {
   await prisma.business.deleteMany({ where: { id: { in: createdBusinesses } } });
-  await prisma.platformAdmin.deleteMany({ where: { id: { in: createdAdmins } } });
+  // Los perfiles ADMIN no tienen negocio: no se borran en cascada con los negocios.
+  await prisma.profile.deleteMany({ where: { id: { in: createdAdmins } } });
   await prisma.$disconnect();
 });
 
@@ -103,6 +105,7 @@ describe('B04 API + PostgreSQL', () => {
     }));
     const [edited, closed] = fixtures.businesses;
     createdBusinesses.push(edited!.id, closed!.id);
+    createdAdmins.push(...profiles.filter((p) => p.role === 'ADMIN').map((p) => p.id));
     // Solo los horarios iniciales. Los turnos de prueba no deben impedir editar la semana.
     const data = { ...fixtures, appointments: [] };
     await seedDomain(prisma, data, profiles);

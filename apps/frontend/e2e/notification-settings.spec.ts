@@ -79,6 +79,7 @@ async function setup(page: Page) {
       return respond(route, {
         access: 'OWNER',
         onboarded: true,
+        platformAdmin: false,
         user,
         profile: { id: user.id, role, fullName: 'Operadora' },
         business: {
