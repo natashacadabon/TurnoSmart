@@ -43,8 +43,107 @@ const diagnosticVariables = new Set([
   'SUPABASE_ANON_KEY',
 ]);
 
+const prismaErrors = {
+  PRISMA_AUTHENTICATION_ERROR: 'Prisma rechazó la autenticación.',
+  PRISMA_CONNECTION_ERROR: 'Prisma no pudo establecer o mantener la conexión.',
+  PRISMA_TLS_ERROR: 'Prisma rechazó la conexión TLS.',
+  PRISMA_PERMISSION_ERROR: 'Prisma informó permisos insuficientes.',
+  PRISMA_FAILED_MIGRATION: 'El historial contiene una migración fallida.',
+  PRISMA_HISTORY_DIVERGED: 'El historial local y el de la base divergen.',
+  PRISMA_BASELINE_REQUIRED:
+    'La base no tiene un historial Prisma compatible; requiere revisión de baseline.',
+  PRISMA_ENGINE_ERROR: 'El schema engine falló sin un código Prisma identificable.',
+  PRISMA_ERROR: 'Prisma informó un error; consultar los códigos preservados.',
+  PRISMA_EXECUTION_ERROR: 'No se pudo completar la ejecución del subproceso.',
+  PRISMA_STATUS_UNRECOGNIZED: 'Salida de status no reconocida; no se autoriza deploy.',
+  PRISMA_COMMAND_FAILED: 'El comando Prisma terminó con error.',
+  PRISMA_PENDING_AFTER_DEPLOY:
+    'Deploy terminó pero quedan migraciones pendientes; revisar antes de reintentar.',
+};
+class PrismaCommandError extends Error {
+  constructor(type) {
+    super(prismaErrors[type]);
+    this.diagnostic = { variable: 'no identificada', type, description: prismaErrors[type] };
+  }
+}
+
+export function prismaCommandInfo(result) {
+  const output = stripVTControlCharacters(
+    `${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+  ).replaceAll('\r\n', '\n');
+  // Sólo códigos en marcadores de error del CLI/engine, nunca palabras extraídas de un DSN.
+  const prismaCodes = [
+    ...new Set(
+      [
+        ...output.matchAll(
+          /(?:(?:^|\n)\s*(?:Error(?: code)?:\s*|(?=P\d{4}(?:\s|:|$)))|"error_code"\s*:\s*")(P\d{4})\b/gim,
+        ),
+      ].map((match) => match[1]),
+    ),
+  ].slice(0, 10);
+  const executionCodes = [
+    'ENOENT',
+    'EACCES',
+    'EPERM',
+    'ETIMEDOUT',
+    'ENOBUFS',
+    'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+  ];
+  const signals = ['SIGTERM', 'SIGINT', 'SIGKILL', 'SIGABRT', 'SIGSEGV', 'SIGHUP'];
+  return {
+    exitCode:
+      Number.isSafeInteger(result.status) && result.status >= 0 ? result.status : 'no disponible',
+    prismaCodes,
+    executionCode: result.error
+      ? executionCodes.includes(result.error.code)
+        ? result.error.code
+        : 'EXECUTION_FAILED'
+      : 'ninguno',
+    signal: result.signal
+      ? signals.includes(result.signal)
+        ? result.signal
+        : 'SIGNAL_RECEIVED'
+      : 'ninguna',
+    stdoutBytes: Buffer.byteLength(result.stdout ?? ''),
+    stderrBytes: Buffer.byteLength(result.stderr ?? ''),
+  };
+}
+
+function assertPrismaResult(result) {
+  if (result.error || result.signal || result.status === null || result.status === undefined)
+    throw new PrismaCommandError('PRISMA_EXECUTION_ERROR');
+  const output = stripVTControlCharacters(`${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+  const { prismaCodes } = prismaCommandInfo(result);
+  const types = {
+    P1000: 'PRISMA_AUTHENTICATION_ERROR',
+    P1001: 'PRISMA_CONNECTION_ERROR',
+    P1002: 'PRISMA_CONNECTION_ERROR',
+    P1008: 'PRISMA_CONNECTION_ERROR',
+    P1017: 'PRISMA_CONNECTION_ERROR',
+    P1010: 'PRISMA_PERMISSION_ERROR',
+    P1011: 'PRISMA_TLS_ERROR',
+    P3005: 'PRISMA_BASELINE_REQUIRED',
+    P3009: 'PRISMA_FAILED_MIGRATION',
+    P3018: 'PRISMA_FAILED_MIGRATION',
+  };
+  if (prismaCodes.length) throw new PrismaCommandError(types[prismaCodes[0]] ?? 'PRISMA_ERROR');
+  if (
+    /Your local migration history and the migrations table from your database are different/.test(
+      output,
+    )
+  )
+    throw new PrismaCommandError('PRISMA_HISTORY_DIVERGED');
+  if (/Following migrations? have failed:/.test(output))
+    throw new PrismaCommandError('PRISMA_FAILED_MIGRATION');
+  if (/not managed by Prisma Migrate/.test(output))
+    throw new PrismaCommandError('PRISMA_BASELINE_REQUIRED');
+  if (/Schema engine error:/i.test(output)) throw new PrismaCommandError('PRISMA_ENGINE_ERROR');
+  if (/^\s*Error:/im.test(output)) throw new PrismaCommandError('PRISMA_ERROR');
+}
+
 // No interpretar ni imprimir error.message/stack/cause: sólo metadata y textos permitidos.
 export function migrationDiagnostic(error) {
+  if (error instanceof PrismaCommandError) return error.diagnostic;
   if (
     error instanceof SupabaseTargetError &&
     typeof error.code === 'string' &&
@@ -107,16 +206,8 @@ export async function authorizeMigration(env, request = fetch) {
 
 // Contrato de salida de Prisma 6.12 fijado en el lockfile. Nunca aceptar cualquier exit 1.
 export function migrationStatus(result, migrations) {
+  assertPrismaResult(result);
   const output = stripVTControlCharacters(result.stdout ?? '').replaceAll('\r\n', '\n');
-  const errors = stripVTControlCharacters(result.stderr ?? '');
-  if (
-    result.error ||
-    result.signal ||
-    /\bP\d{4}\b|Error:|have failed|not managed/.test(output + errors)
-  )
-    throw new Error(
-      'Prisma status falló; revisar conexión, permisos o historial (salida privada omitida)',
-    );
   if (result.status === 0 && /Database schema is up to date!\s*$/.test(output))
     return { state: 'al día', pending: [] };
   const block =
@@ -126,7 +217,7 @@ export function migrationStatus(result, migrations) {
   const pending = block?.[1].split('\n');
   if (result.status === 1 && pending?.length && pending.every((name) => migrations.includes(name)))
     return { state: 'pendientes', pending };
-  throw new Error('Prisma status no reconocible o historial incompatible; operación bloqueada');
+  throw new PrismaCommandError('PRISMA_STATUS_UNRECOGNIZED');
 }
 
 export function runPrisma(operation, env, spawn = spawnSync) {
@@ -173,6 +264,17 @@ export async function migrate(
   let phase = 'validación del contexto';
   let pending = [];
   let diagnostic;
+  const commands = [];
+  const execute = (operation) => {
+    let value;
+    try {
+      value = run(operation, env);
+    } catch (error) {
+      value = { status: null, error };
+    }
+    commands.push({ phase, operation, ...prismaCommandInfo(value) });
+    return value;
+  };
   try {
     validateMigrationContext(env);
     assert(
@@ -189,7 +291,7 @@ export async function migrate(
     phase = 'autorización GitHub';
     await authorize(env);
     phase = 'status inicial';
-    const initial = migrationStatus(run('status', env), migrations);
+    const initial = migrationStatus(execute('status'), migrations);
     pending = initial.pending;
     if (env.MIGRATION_OPERATION === 'status') {
       result = initial.state;
@@ -199,14 +301,12 @@ export async function migrate(
     phase = 'autorización previa a escritura';
     await authorize(env);
     phase = 'deploy';
-    const deployed = run('deploy', env);
-    assert(
-      !deployed.error && !deployed.signal && deployed.status === 0,
-      'Prisma deploy falló; no se reintenta ni se resuelve/reset automáticamente',
-    );
+    const deployed = execute('deploy');
+    assertPrismaResult(deployed);
+    if (deployed.status !== 0) throw new PrismaCommandError('PRISMA_COMMAND_FAILED');
     phase = 'status final';
-    const final = migrationStatus(run('status', env), migrations);
-    assert(final.pending.length === 0, 'Quedan migraciones pendientes después de deploy');
+    const final = migrationStatus(execute('status'), migrations);
+    if (final.pending.length !== 0) throw new PrismaCommandError('PRISMA_PENDING_AFTER_DEPLOY');
     result = 'aplicado y verificado';
   } catch (error) {
     diagnostic = migrationDiagnostic(error);
@@ -220,6 +320,10 @@ export async function migrate(
     report(
       `### Migraciones\n${safeContext ? `Entorno: ${env.MIGRATION_ENVIRONMENT}\nSHA: ${env.GITHUB_SHA}\nOperación: ${env.MIGRATION_OPERATION}` : 'Contexto inválido'}\nResultado: ${result}\nFase: ${phase}${diagnostic ? `\nVariable: ${diagnostic.variable}\nTipo de error: ${diagnostic.type}\nDiagnóstico: ${diagnostic.description}` : ''}\nMigraciones locales: ${migrations.length}\nPendientes antes de operar: ${pending.length ? pending.join(', ') : 'ninguna identificada'}`,
     );
+    for (const command of commands)
+      report(
+        `Subproceso: prisma migrate ${command.operation} (${command.phase})\nExit code: ${command.exitCode}\nCódigos Prisma: ${command.prismaCodes.join(', ') || 'ninguno informado'}\nError de ejecución: ${command.executionCode}\nSeñal: ${command.signal}\nCaptura: stdout ${command.stdoutBytes} bytes; stderr ${command.stderrBytes} bytes (contenido privado omitido)`,
+      );
   }
 }
 
